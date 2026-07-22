@@ -850,13 +850,21 @@ async function submitLead(container) {
       <dl class="review-grid" style="text-align:left;">
         ${rows.map(([k,v]) => `<div><dt>${k}</dt><dd>${escapeHtml(String(v ?? "—"))}</dd></div>`).join("")}
       </dl>
-      <div class="nav-row" style="justify-content:center;">
+      <div class="nav-row" style="justify-content:center; gap:12px;">
+        <button class="btn secondary" id="check-status-from-success-btn">Check Status On My Existing Leads (Non-Admin)</button>
         <button class="btn primary" id="submit-another-btn">Submit Another Lead</button>
       </div>
     `;
     container.querySelector("#submit-another-btn").onclick = () => {
       Object.keys(answers).forEach(k => delete answers[k]);
       goTo(0);
+    };
+    container.querySelector("#check-status-from-success-btn").onclick = () => {
+      const justSubmittedEmail = answers.email;
+      Object.keys(answers).forEach(k => delete answers[k]);
+      answers.email = justSubmittedEmail;
+      stepIndex = 0;
+      showStatusView();
     };
   } catch (err) {
     errBox.style.display = "block";
@@ -889,6 +897,18 @@ function restoreFromUrl() {
     return false;
   }
 }
+
+function restartWizard() {
+  if (!confirm("Restart and clear all progress on this form? This can't be undone.")) return;
+  Object.keys(answers).forEach(k => delete answers[k]);
+  window.history.replaceState(null, "", window.location.pathname);
+  document.getElementById("admin-view").hidden = true;
+  document.getElementById("status-view").hidden = true;
+  document.getElementById("public-view").hidden = false;
+  goTo(0);
+}
+
+document.getElementById("restart-btn").onclick = restartWizard;
 
 document.getElementById("save-progress-btn").onclick = () => {
   const url = buildShareUrl();
