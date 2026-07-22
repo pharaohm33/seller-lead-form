@@ -60,6 +60,10 @@ const steps = [
         </div>
         <div class="error-text" id="role-error">Please select a role.</div>
 
+        <label class="field-label">Your name <span class="req">*</span></label>
+        <input type="text" id="name-input" placeholder="Full name">
+        <div class="error-text" id="name-error">Your name is required.</div>
+
         <label class="field-label">Email address <span class="req">*</span></label>
         <input type="email" id="email-input" placeholder="name@example.com">
         <div class="error-text" id="email-error">A valid email address is required.</div>
@@ -79,16 +83,19 @@ const steps = [
           answers.role = btn.dataset.value;
         };
       });
+      root.querySelector("#name-input").value = answers.name || "";
       root.querySelector("#email-input").value = answers.email || "";
       root.querySelector("#phone-input").value = answers.phone || "";
       root.querySelector("#social-input").value = answers.socialLink || "";
     },
     validate(root) {
+      answers.name = root.querySelector("#name-input").value.trim();
       answers.email = root.querySelector("#email-input").value.trim();
       answers.phone = root.querySelector("#phone-input").value.trim();
       answers.socialLink = root.querySelector("#social-input").value.trim();
       let ok = true;
       toggleError(root, "#role-error", !answers.role); if (!answers.role) ok = false;
+      toggleError(root, "#name-error", !answers.name); if (!answers.name) ok = false;
       const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(answers.email);
       toggleError(root, "#email-error", !emailOk); if (!emailOk) ok = false;
       toggleError(root, "#phone-error", answers.phone.length < 7); if (answers.phone.length < 7) ok = false;
@@ -656,7 +663,7 @@ let stepIndex = 0;
 
 function buildAnswerRows() {
   const rows = [
-    ["Role", answers.role], ["Email", answers.email], ["Phone", answers.phone],
+    ["Role", answers.role], ["Name", answers.name], ["Email", answers.email], ["Phone", answers.phone],
     ["Social Link", answers.socialLink || "—"],
   ];
   if (answers.role && answers.role !== "Seller") {
@@ -794,7 +801,7 @@ async function submitLead(container) {
   try {
     const res = await api("submitLead", {
       data: {
-        role: answers.role, email: answers.email, phone: answers.phone, socialLink: answers.socialLink,
+        role: answers.role, name: answers.name, email: answers.email, phone: answers.phone, socialLink: answers.socialLink,
         sellerContactName: answers.sellerContactName, sellerContactPhone: answers.sellerContactPhone,
         sellerContactEmail: answers.sellerContactEmail,
         street: answers.street, city: answers.city, state: answers.state, zip: answers.zip, units: answers.units,
@@ -897,7 +904,7 @@ document.getElementById("status-lookup-btn").onclick = async () => {
 function buildLeadFields(lead) {
   const fields = [
     ["Submitted", formatDate(lead["Submitted At"])],
-    ["Role", lead["Role"]], ["Email", lead["Contact Email"]], ["Phone", lead["Contact Phone"]],
+    ["Role", lead["Role"]], ["Name", lead["Contact Name"]], ["Email", lead["Contact Email"]], ["Phone", lead["Contact Phone"]],
     ["Social Link", lead["Social Link"] || "—"],
   ];
   if (lead["Role"] && lead["Role"] !== "Seller") {
@@ -1083,7 +1090,7 @@ function renderCrmTable() {
     <tr data-idx="${i}">
       <td>${formatDate(l["Submitted At"])}</td>
       <td>${escapeHtml(l["Role"] || "")}</td>
-      <td>${escapeHtml(l["Contact Email"] || "")}<br><span class="small-muted">${escapeHtml(l["Contact Phone"] || "")}</span></td>
+      <td>${escapeHtml(l["Contact Name"] || "")}<br><span class="small-muted">${escapeHtml(l["Contact Email"] || "")} · ${escapeHtml(l["Contact Phone"] || "")}</span></td>
       <td>${escapeHtml(l["City"] || "")}, ${escapeHtml(l["State"] || "")}</td>
       <td>${escapeHtml(l["Asset Type"] || "")}</td>
       <td>${escapeHtml(l["Senior Loan Willing"] || "")}</td>

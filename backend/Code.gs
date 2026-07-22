@@ -18,7 +18,7 @@ const NOTES_SHEET = 'Notes';
 const SESSION_HOURS = 12;
 
 const LEAD_COLUMNS = [
-  'Lead ID', 'Submitted At', 'Role', 'Contact Email', 'Contact Phone', 'Social Link',
+  'Lead ID', 'Submitted At', 'Role', 'Contact Name', 'Contact Email', 'Contact Phone', 'Social Link',
   'Seller Contact Name', 'Seller Contact Phone', 'Seller Contact Email',
   'Street Address', 'City', 'State', 'Zip', 'Units',
   'Asset Type', 'Asset Subtype', 'Beds', 'Baths', 'Sq Ft',
@@ -145,7 +145,7 @@ function sheetToObjects(sheet) {
 
 function submitLead(body) {
   const d = body.data || {};
-  const required = ['role', 'email', 'phone', 'street', 'city', 'state', 'zip', 'units', 'assetType', 'marketStatus'];
+  const required = ['role', 'name', 'email', 'phone', 'street', 'city', 'state', 'zip', 'units', 'assetType', 'marketStatus'];
   for (const key of required) {
     if (d[key] === undefined || d[key] === null || d[key] === '') {
       return { ok: false, error: 'Missing required field: ' + key };
@@ -157,7 +157,7 @@ function submitLead(body) {
   const submittedAt = new Date().toISOString();
 
   appendRowByHeaders(sheet, {
-    'Lead ID': leadId, 'Submitted At': submittedAt, 'Role': d.role,
+    'Lead ID': leadId, 'Submitted At': submittedAt, 'Role': d.role, 'Contact Name': d.name,
     'Contact Email': d.email, 'Contact Phone': d.phone, 'Social Link': d.socialLink || '',
     'Seller Contact Name': d.sellerContactName || '', 'Seller Contact Phone': d.sellerContactPhone || '',
     'Seller Contact Email': d.sellerContactEmail || '',
