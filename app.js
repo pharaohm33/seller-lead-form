@@ -450,7 +450,7 @@ function buildAnswerRows() {
     ["Price Sought", answers.priceSought],
     ["Price Reasoning", answers.priceReasoning],
     ["Down Payment Needed", answers.dpSkipped || !answers.downPaymentNeeded ? "Skipped" : answers.downPaymentNeeded],
-    ["Down Payment Non-Negotiable", answers.downPaymentNonNegotiable || "N/A"],
+    ["Seller Flexible on Down Payment", answers.downPaymentNonNegotiable || "N/A"],
   ];
 }
 
@@ -689,7 +689,7 @@ function openDetail(lead) {
     ["Willing: Payment Structure", lead["Payment Structure Willing"]],
     ["Price Sought", lead["Price Sought"]], ["Price Reasoning", lead["Price Reasoning"]],
     ["Down Payment Needed", lead["Down Payment Needed"]],
-    ["Down Payment Non-Negotiable", lead["Down Payment Non-Negotiable"]],
+    ["Seller Flexible on Down Payment", lead["Down Payment Non-Negotiable"]],
   ];
 
   panel.innerHTML = `
