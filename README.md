@@ -17,18 +17,33 @@ Sheet you own via a small Apps Script backend (see [`SETUP.md`](SETUP.md)).
 2. Role (seller, bird dog/connector, wholesaler, realtor, consultant,
    associate, referral source) + email + phone (required) + social link
    (optional).
-3. Full U.S. property address + number of units (required for everything).
-4. Asset type — Commercial (with subtype), Business (free text), or
+3. Seller/Realtor/Broker contact info (name + at least phone or email) —
+   skipped automatically when the submitter's own role is Seller, since it'd
+   just duplicate what was already collected.
+4. Full U.S. property address + number of units (required for everything).
+5. Asset type — Commercial (with subtype), Business (free text), or
    Residential 1-unit (beds/baths required, sqft optional) — with a standing
    disclaimer that the asset must currently be generating monthly income.
-5. Total existing debt (or "I don't know").
-6. Whether the seller would allow a new senior/1st-position mortgage.
-7. Whether the seller would accept a down payment + monthly payments +
+6. **Income, mandatory, shape depends on asset type:**
+   - Residential: if occupied, Annual NOI directly; if vacant, a rentcast.io
+     monthly rent estimate + annual property taxes + annual insurance, with
+     NOI computed live from those three.
+   - Commercial: Annual NOI directly.
+   - Business: Annual Revenue + Annual Earnings, with the earnings field
+     dynamically relabeled SDE or EBITDA based on size (EBITDA once revenue
+     exceeds $5M or earnings exceed $1M, SDE otherwise).
+   A standing disclaimer tells the submitter to keep searching for other
+   opportunities if this information isn't available for a given deal.
+7. Total existing debt (or "I don't know").
+8. Whether the seller would allow a new senior/1st-position mortgage.
+9. Whether the seller would accept a down payment + monthly payments +
    remainder-over-time structure.
-8. Price sought and how they arrived at it.
-9. Down payment needed to reach their next stage (optional / skippable), and
-   whether that number is non-negotiable.
-10. Review and submit.
+10. Price sought and how they arrived at it.
+11. Down payment needed to reach their next stage (optional / skippable), and
+    whether the seller would accept less if that full amount isn't possible.
+12. On-market or off-market, plus an optional link to where the listing was
+    found.
+13. Review and submit.
 
 **Admin side** — behind an "Admin Access" password gate (with code-word based
 password recovery by email):

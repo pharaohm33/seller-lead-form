@@ -19,10 +19,14 @@ const SESSION_HOURS = 12;
 
 const LEAD_COLUMNS = [
   'Lead ID', 'Submitted At', 'Role', 'Contact Email', 'Contact Phone', 'Social Link',
+  'Seller Contact Name', 'Seller Contact Phone', 'Seller Contact Email',
   'Street Address', 'City', 'State', 'Zip', 'Units',
   'Asset Type', 'Asset Subtype', 'Beds', 'Baths', 'Sq Ft',
+  'Occupied Status', 'Monthly Rent Estimate', 'Annual Property Taxes', 'Annual Insurance',
+  'NOI', 'Business Revenue', 'Business Earnings Type', 'Business Earnings',
   'Total Debt', 'Senior Loan Willing', 'Payment Structure Willing',
   'Price Sought', 'Price Reasoning', 'Down Payment Needed', 'Down Payment Non-Negotiable',
+  'Market Status', 'Source Link',
   'Status'
 ];
 
@@ -106,6 +110,21 @@ function ensureHeaders(sheet, columns) {
   }
 }
 
+// Builds a row from a {headerName: value} object rather than a fixed
+// positional array, since a sheet created before a later feature added new
+// columns will have those new columns appended at the end (by
+// ensureHeaders) rather than in LEAD_COLUMNS's logical order -- a plain
+// positional appendRow would silently write values into the wrong columns.
+function appendRowByHeaders(sheet, dataObj) {
+  const lastCol = sheet.getLastColumn();
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  const row = headers.map(function (h) {
+    const v = dataObj[h];
+    return (v === undefined || v === null) ? '' : v;
+  });
+  sheet.appendRow(row);
+}
+
 function sheetToObjects(sheet) {
   const values = sheet.getDataRange().getValues();
   if (values.length < 2) return [];
@@ -126,7 +145,7 @@ function sheetToObjects(sheet) {
 
 function submitLead(body) {
   const d = body.data || {};
-  const required = ['role', 'email', 'phone', 'street', 'city', 'state', 'zip', 'units', 'assetType'];
+  const required = ['role', 'email', 'phone', 'street', 'city', 'state', 'zip', 'units', 'assetType', 'marketStatus'];
   for (const key of required) {
     if (d[key] === undefined || d[key] === null || d[key] === '') {
       return { ok: false, error: 'Missing required field: ' + key };
@@ -137,17 +156,26 @@ function submitLead(body) {
   const leadId = Utilities.getUuid();
   const submittedAt = new Date().toISOString();
 
-  sheet.appendRow([
-    leadId, submittedAt, d.role, d.email, d.phone, d.socialLink || '',
-    d.street, d.city, d.state, d.zip, d.units,
-    d.assetType, d.assetSubtype || '', d.beds || '', d.baths || '', d.sqft || '',
-    (d.totalDebt === undefined || d.totalDebt === null || d.totalDebt === '') ? 'Unknown' : d.totalDebt,
-    d.seniorLoanWilling, d.paymentStructureWilling,
-    d.priceSought, d.priceReasoning,
-    (d.downPaymentNeeded === undefined || d.downPaymentNeeded === '') ? 'Skipped' : d.downPaymentNeeded,
-    d.downPaymentNonNegotiable || 'N/A',
-    'New'
-  ]);
+  appendRowByHeaders(sheet, {
+    'Lead ID': leadId, 'Submitted At': submittedAt, 'Role': d.role,
+    'Contact Email': d.email, 'Contact Phone': d.phone, 'Social Link': d.socialLink || '',
+    'Seller Contact Name': d.sellerContactName || '', 'Seller Contact Phone': d.sellerContactPhone || '',
+    'Seller Contact Email': d.sellerContactEmail || '',
+    'Street Address': d.street, 'City': d.city, 'State': d.state, 'Zip': d.zip, 'Units': d.units,
+    'Asset Type': d.assetType, 'Asset Subtype': d.assetSubtype || '',
+    'Beds': d.beds || '', 'Baths': d.baths || '', 'Sq Ft': d.sqft || '',
+    'Occupied Status': d.occupiedStatus || '', 'Monthly Rent Estimate': d.monthlyRentEstimate || '',
+    'Annual Property Taxes': d.annualPropertyTaxes || '', 'Annual Insurance': d.annualInsurance || '',
+    'NOI': d.noi || '', 'Business Revenue': d.businessRevenue || '',
+    'Business Earnings Type': d.businessEarningsType || '', 'Business Earnings': d.businessEarnings || '',
+    'Total Debt': (d.totalDebt === undefined || d.totalDebt === null || d.totalDebt === '') ? 'Unknown' : d.totalDebt,
+    'Senior Loan Willing': d.seniorLoanWilling, 'Payment Structure Willing': d.paymentStructureWilling,
+    'Price Sought': d.priceSought, 'Price Reasoning': d.priceReasoning,
+    'Down Payment Needed': (d.downPaymentNeeded === undefined || d.downPaymentNeeded === '') ? 'Skipped' : d.downPaymentNeeded,
+    'Down Payment Non-Negotiable': d.downPaymentNonNegotiable || 'N/A',
+    'Market Status': d.marketStatus, 'Source Link': d.sourceLink || '',
+    'Status': 'New'
+  });
 
   return { ok: true, leadId: leadId };
 }

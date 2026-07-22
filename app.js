@@ -96,6 +96,41 @@ const steps = [
     }
   },
   {
+    key: "sellerContact",
+    progress: true,
+    skip() { return answers.role === "Seller"; },
+    render(root) {
+      root.innerHTML = `
+        <h2 class="step-title">Seller / Realtor / Broker Contact</h2>
+        <p class="step-sub">Since you're bringing us this deal rather than being the seller yourself, we need
+        a way to reach the actual seller, realtor, or broker directly.</p>
+        <label class="field-label">Their name <span class="req">*</span></label>
+        <input type="text" id="sc-name-input" placeholder="Full name">
+        <div class="error-text" id="sc-name-error">Required.</div>
+
+        <label class="field-label">Their phone</label>
+        <input type="tel" id="sc-phone-input" placeholder="(555) 555-5555">
+
+        <label class="field-label">Their email</label>
+        <input type="email" id="sc-email-input" placeholder="name@example.com">
+        <div class="error-text" id="sc-contact-error">Please provide at least a phone or an email for them.</div>
+      `;
+      root.querySelector("#sc-name-input").value = answers.sellerContactName || "";
+      root.querySelector("#sc-phone-input").value = answers.sellerContactPhone || "";
+      root.querySelector("#sc-email-input").value = answers.sellerContactEmail || "";
+    },
+    validate(root) {
+      answers.sellerContactName = root.querySelector("#sc-name-input").value.trim();
+      answers.sellerContactPhone = root.querySelector("#sc-phone-input").value.trim();
+      answers.sellerContactEmail = root.querySelector("#sc-email-input").value.trim();
+      let ok = true;
+      toggleError(root, "#sc-name-error", !answers.sellerContactName); if (!answers.sellerContactName) ok = false;
+      const hasContact = !!(answers.sellerContactPhone || answers.sellerContactEmail);
+      toggleError(root, "#sc-contact-error", !hasContact); if (!hasContact) ok = false;
+      return ok;
+    }
+  },
+  {
     key: "address",
     progress: true,
     render(root) {
@@ -245,6 +280,162 @@ const steps = [
         toggleError(root, "#baths-error", answers.baths === ""); if (answers.baths === "") ok = false;
       }
       return ok;
+    }
+  },
+  {
+    key: "income",
+    progress: true,
+    render(root) {
+      const disclaimer = `
+        <div class="banner warn">
+          This information is required to move forward. If you're unable to find or confirm it for a given
+          property or business, please continue searching for other opportunities that do have this
+          information readily accessible — we're not able to evaluate deals without it.
+        </div>
+      `;
+      if (answers.assetType === "Residential Property (1 unit)") {
+        root.innerHTML = `
+          <h2 class="step-title">Property Income (NOI)</h2>
+          ${disclaimer}
+          <label class="field-label">Is the property currently occupied by a paying tenant? <span class="req">*</span></label>
+          <div class="choice-group" id="occupied-group">
+            ${["Occupied (has a landlord/tenant)", "Vacant (no tenant)"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
+          </div>
+          <div class="error-text" id="occupied-error">Please choose one.</div>
+          <div id="income-sub"></div>
+        `;
+        const sub = root.querySelector("#income-sub");
+        const renderIncomeSub = () => {
+          if (answers.residentialOccupied === "Occupied (has a landlord/tenant)") {
+            sub.innerHTML = `
+              <label class="field-label">Annual NOI <span class="req">*</span></label>
+              <input type="number" id="noi-input" placeholder="$">
+              <div class="error-text" id="noi-error">Required.</div>
+            `;
+            sub.querySelector("#noi-input").value = answers.residentialNOI || "";
+          } else if (answers.residentialOccupied === "Vacant (no tenant)") {
+            sub.innerHTML = `
+              <p class="hint">Look up the estimated monthly rental value on <strong>rentcast.io</strong> for
+              this property, then look up annual property taxes and insurance for a
+              ${answers.beds || "?"} bed / ${answers.baths || "?"} bath home in
+              ${answers.city || "this city"}${answers.state ? ", " + answers.state : ""}, and enter them below.</p>
+              <a href="https://www.rentcast.io/" target="_blank" rel="noopener" class="link-btn">Open rentcast.io &rarr;</a>
+              <label class="field-label">Estimated Monthly Rent (rentcast.io) <span class="req">*</span></label>
+              <input type="number" id="rent-input" placeholder="$">
+              <div class="error-text" id="rent-error">Required.</div>
+              <label class="field-label">Annual Property Taxes <span class="req">*</span></label>
+              <input type="number" id="taxes-input" placeholder="$">
+              <div class="error-text" id="taxes-error">Required.</div>
+              <label class="field-label">Annual Insurance <span class="req">*</span></label>
+              <input type="number" id="insurance-input" placeholder="$">
+              <div class="error-text" id="insurance-error">Required.</div>
+              <div class="banner info" id="computed-noi-banner"></div>
+            `;
+            sub.querySelector("#rent-input").value = answers.rentcastMonthlyRent || "";
+            sub.querySelector("#taxes-input").value = answers.annualPropertyTaxes || "";
+            sub.querySelector("#insurance-input").value = answers.annualInsurance || "";
+            const recompute = () => {
+              const rent = Number(sub.querySelector("#rent-input").value) || 0;
+              const taxes = Number(sub.querySelector("#taxes-input").value) || 0;
+              const insurance = Number(sub.querySelector("#insurance-input").value) || 0;
+              const noi = (rent * 12) - taxes - insurance;
+              sub.querySelector("#computed-noi-banner").textContent = `Computed Annual NOI: $${noi.toLocaleString()} (monthly rent × 12, minus taxes and insurance)`;
+              answers.residentialNOI = noi;
+            };
+            ["#rent-input", "#taxes-input", "#insurance-input"].forEach(sel => {
+              sub.querySelector(sel).oninput = recompute;
+            });
+            recompute();
+          } else {
+            sub.innerHTML = "";
+          }
+        };
+        renderIncomeSub();
+        root.querySelectorAll("#occupied-group .choice-btn").forEach(btn => {
+          if (btn.dataset.value === answers.residentialOccupied) btn.classList.add("selected");
+          btn.onclick = () => {
+            root.querySelectorAll("#occupied-group .choice-btn").forEach(b => b.classList.remove("selected"));
+            btn.classList.add("selected");
+            answers.residentialOccupied = btn.dataset.value;
+            toggleError(root, "#occupied-error", false);
+            renderIncomeSub();
+          };
+        });
+      } else if (answers.assetType === "Commercial Property") {
+        root.innerHTML = `
+          <h2 class="step-title">Net Operating Income (NOI)</h2>
+          ${disclaimer}
+          <label class="field-label">Annual NOI <span class="req">*</span></label>
+          <input type="number" id="noi-input" placeholder="$">
+          <div class="error-text" id="noi-error">Required.</div>
+        `;
+        root.querySelector("#noi-input").value = answers.commercialNOI || "";
+      } else if (answers.assetType === "Business") {
+        root.innerHTML = `
+          <h2 class="step-title">Business Earnings</h2>
+          ${disclaimer}
+          <label class="field-label">Approximate Annual Revenue <span class="req">*</span></label>
+          <input type="number" id="revenue-input" placeholder="$">
+          <div class="error-text" id="revenue-error">Required.</div>
+          <label class="field-label" id="earnings-label">Approximate Annual Earnings <span class="req">*</span></label>
+          <input type="number" id="earnings-input" placeholder="$">
+          <div class="hint" id="earnings-hint"></div>
+          <div class="error-text" id="earnings-error">Required.</div>
+        `;
+        const revenueInput = root.querySelector("#revenue-input");
+        const earningsInput = root.querySelector("#earnings-input");
+        revenueInput.value = answers.businessRevenue || "";
+        earningsInput.value = answers.businessEarnings || "";
+        const updateEarningsLabel = () => {
+          const revenue = Number(revenueInput.value) || 0;
+          const earnings = Number(earningsInput.value) || 0;
+          const useEbitda = revenue > 5000000 || earnings > 1000000;
+          answers.businessEarningsType = useEbitda ? "EBITDA" : "SDE";
+          root.querySelector("#earnings-label").innerHTML = `Approximate Annual ${answers.businessEarningsType} <span class="req">*</span>`;
+          root.querySelector("#earnings-hint").textContent = useEbitda
+            ? "Based on this size, please provide EBITDA."
+            : "Based on this size, please provide SDE (Seller's Discretionary Earnings).";
+        };
+        revenueInput.oninput = updateEarningsLabel;
+        earningsInput.oninput = updateEarningsLabel;
+        updateEarningsLabel();
+      } else {
+        root.innerHTML = `<p class="step-sub">Please go back and select an asset type first.</p>`;
+      }
+    },
+    validate(root) {
+      if (answers.assetType === "Residential Property (1 unit)") {
+        const ok1 = !!answers.residentialOccupied;
+        toggleError(root, "#occupied-error", !ok1);
+        if (!ok1) return false;
+        if (answers.residentialOccupied === "Occupied (has a landlord/tenant)") {
+          answers.residentialNOI = root.querySelector("#noi-input").value;
+          const ok = !!answers.residentialNOI;
+          toggleError(root, "#noi-error", !ok);
+          return ok;
+        }
+        answers.rentcastMonthlyRent = root.querySelector("#rent-input").value;
+        answers.annualPropertyTaxes = root.querySelector("#taxes-input").value;
+        answers.annualInsurance = root.querySelector("#insurance-input").value;
+        let ok = true;
+        toggleError(root, "#rent-error", !answers.rentcastMonthlyRent); if (!answers.rentcastMonthlyRent) ok = false;
+        toggleError(root, "#taxes-error", !answers.annualPropertyTaxes); if (!answers.annualPropertyTaxes) ok = false;
+        toggleError(root, "#insurance-error", !answers.annualInsurance); if (!answers.annualInsurance) ok = false;
+        return ok;
+      } else if (answers.assetType === "Commercial Property") {
+        answers.commercialNOI = root.querySelector("#noi-input").value;
+        const ok = !!answers.commercialNOI;
+        toggleError(root, "#noi-error", !ok);
+        return ok;
+      } else if (answers.assetType === "Business") {
+        answers.businessRevenue = root.querySelector("#revenue-input").value;
+        answers.businessEarnings = root.querySelector("#earnings-input").value;
+        let ok = true;
+        toggleError(root, "#revenue-error", !answers.businessRevenue); if (!answers.businessRevenue) ok = false;
+        toggleError(root, "#earnings-error", !answers.businessEarnings); if (!answers.businessEarnings) ok = false;
+        return ok;
+      }
+      return true;
     }
   },
   {
@@ -419,6 +610,31 @@ const steps = [
     }
   },
   {
+    key: "sourcing",
+    progress: true,
+    render(root) {
+      root.innerHTML = `
+        <h2 class="step-title">Deal Sourcing</h2>
+        <label class="field-label">Is this on-market or off-market? <span class="req">*</span></label>
+        <div class="choice-group" id="market-group">
+          ${["On-Market", "Off-Market"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
+        </div>
+        <div class="error-text" id="market-error">Please choose one.</div>
+
+        <label class="field-label">Link to where you found this listing <span class="small-muted">(optional)</span></label>
+        <input type="text" id="source-link-input" placeholder="https://...">
+      `;
+      root.querySelector("#source-link-input").value = answers.sourceLink || "";
+      bindChoiceGroup(root, "#market-group", "marketStatus");
+    },
+    validate(root) {
+      answers.sourceLink = root.querySelector("#source-link-input").value.trim();
+      const ok = !!answers.marketStatus;
+      toggleError(root, "#market-error", !ok);
+      return ok;
+    }
+  },
+  {
     key: "review",
     progress: true,
     render(root) {
@@ -439,13 +655,42 @@ const steps = [
 let stepIndex = 0;
 
 function buildAnswerRows() {
-  return [
+  const rows = [
     ["Role", answers.role], ["Email", answers.email], ["Phone", answers.phone],
     ["Social Link", answers.socialLink || "—"],
+  ];
+  if (answers.role && answers.role !== "Seller") {
+    rows.push(
+      ["Seller/Realtor/Broker Name", answers.sellerContactName || "—"],
+      ["Seller/Realtor/Broker Phone", answers.sellerContactPhone || "—"],
+      ["Seller/Realtor/Broker Email", answers.sellerContactEmail || "—"]
+    );
+  }
+  rows.push(
     ["Address", `${answers.street}, ${answers.city}, ${answers.state} ${answers.zip}`],
     ["Units", answers.units],
     ["Asset Type", answers.assetType],
-    ["Subtype / Details", answers.assetSubtype || [answers.beds && `${answers.beds} bd`, answers.baths && `${answers.baths} ba`, answers.sqft && `${answers.sqft} sqft`].filter(Boolean).join(", ")],
+    ["Subtype / Details", answers.assetSubtype || [answers.beds && `${answers.beds} bd`, answers.baths && `${answers.baths} ba`, answers.sqft && `${answers.sqft} sqft`].filter(Boolean).join(", ")]
+  );
+  if (answers.assetType === "Residential Property (1 unit)") {
+    rows.push(["Occupied Status", answers.residentialOccupied || "—"]);
+    if (answers.residentialOccupied === "Vacant (no tenant)") {
+      rows.push(
+        ["Rentcast Monthly Rent", answers.rentcastMonthlyRent || "—"],
+        ["Annual Property Taxes", answers.annualPropertyTaxes || "—"],
+        ["Annual Insurance", answers.annualInsurance || "—"]
+      );
+    }
+    rows.push(["NOI", answers.residentialNOI || "—"]);
+  } else if (answers.assetType === "Commercial Property") {
+    rows.push(["NOI", answers.commercialNOI || "—"]);
+  } else if (answers.assetType === "Business") {
+    rows.push(
+      ["Annual Revenue", answers.businessRevenue || "—"],
+      [`Annual ${answers.businessEarningsType || "Earnings"}`, answers.businessEarnings || "—"]
+    );
+  }
+  rows.push(
     ["Total Debt", answers.debtUnknown ? "Unknown" : (answers.totalDebt || "—")],
     ["Willing: New Senior Loan", answers.seniorLoanWilling],
     ["Willing: Payment Structure", answers.paymentStructureWilling],
@@ -453,7 +698,10 @@ function buildAnswerRows() {
     ["Price Reasoning", answers.priceReasoning],
     ["Down Payment Needed", answers.dpSkipped || !answers.downPaymentNeeded ? "Skipped" : answers.downPaymentNeeded],
     ["Seller Flexible on Down Payment", answers.downPaymentNonNegotiable || "N/A"],
-  ];
+    ["On/Off Market", answers.marketStatus || "—"],
+    ["Listing Source Link", answers.sourceLink || "—"]
+  );
+  return rows;
 }
 
 function bindChoiceGroup(root, selector, answerKey) {
@@ -476,10 +724,26 @@ function escapeHtml(str) {
   return String(str ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
 }
 
+function shouldSkip(step) {
+  return typeof step.skip === "function" && step.skip();
+}
+
+function nextIndex(from) {
+  let i = from + 1;
+  while (i < steps.length - 1 && shouldSkip(steps[i])) i++;
+  return i;
+}
+
+function prevIndex(from) {
+  let i = from - 1;
+  while (i > 0 && shouldSkip(steps[i])) i--;
+  return i;
+}
+
 function renderProgress() {
   const bar = document.getElementById("progress-bar");
-  const trackable = steps.filter(s => s.progress);
-  const currentTrackableIdx = steps.slice(0, stepIndex + 1).filter(s => s.progress).length;
+  const trackable = steps.filter(s => s.progress && !shouldSkip(s));
+  const currentTrackableIdx = steps.slice(0, stepIndex + 1).filter(s => s.progress && !shouldSkip(s)).length;
   bar.innerHTML = trackable.map((_, i) => `<div class="${i < currentTrackableIdx ? "done" : ""}"></div>`).join("");
 }
 
@@ -508,11 +772,11 @@ function renderStep() {
   `;
   container.appendChild(nav);
 
-  if (stepIndex > 0) container.querySelector("#back-btn").onclick = () => goTo(stepIndex - 1);
+  if (stepIndex > 0) container.querySelector("#back-btn").onclick = () => goTo(prevIndex(stepIndex));
   container.querySelector("#next-btn").onclick = () => {
     if (step.validate && !step.validate(container)) return;
     if (isLast) { submitLead(container); return; }
-    goTo(stepIndex + 1);
+    goTo(nextIndex(stepIndex));
   };
 }
 
@@ -531,14 +795,22 @@ async function submitLead(container) {
     const res = await api("submitLead", {
       data: {
         role: answers.role, email: answers.email, phone: answers.phone, socialLink: answers.socialLink,
+        sellerContactName: answers.sellerContactName, sellerContactPhone: answers.sellerContactPhone,
+        sellerContactEmail: answers.sellerContactEmail,
         street: answers.street, city: answers.city, state: answers.state, zip: answers.zip, units: answers.units,
         assetType: answers.assetType, assetSubtype: answers.assetSubtype,
         beds: answers.beds, baths: answers.baths, sqft: answers.sqft,
+        occupiedStatus: answers.residentialOccupied, monthlyRentEstimate: answers.rentcastMonthlyRent,
+        annualPropertyTaxes: answers.annualPropertyTaxes, annualInsurance: answers.annualInsurance,
+        noi: answers.residentialNOI || answers.commercialNOI,
+        businessRevenue: answers.businessRevenue, businessEarningsType: answers.businessEarningsType,
+        businessEarnings: answers.businessEarnings,
         totalDebt: answers.debtUnknown ? "" : answers.totalDebt,
         seniorLoanWilling: answers.seniorLoanWilling, paymentStructureWilling: answers.paymentStructureWilling,
         priceSought: answers.priceSought, priceReasoning: answers.priceReasoning,
         downPaymentNeeded: answers.dpSkipped ? "" : answers.downPaymentNeeded,
-        downPaymentNonNegotiable: answers.downPaymentNonNegotiable
+        downPaymentNonNegotiable: answers.downPaymentNonNegotiable,
+        marketStatus: answers.marketStatus, sourceLink: answers.sourceLink
       }
     });
     if (!res.ok) throw new Error(res.error || "Something went wrong.");
@@ -622,24 +894,61 @@ document.getElementById("status-lookup-btn").onclick = async () => {
   renderStatusLeads(email, res.leads);
 };
 
+function buildLeadFields(lead) {
+  const fields = [
+    ["Submitted", formatDate(lead["Submitted At"])],
+    ["Role", lead["Role"]], ["Email", lead["Contact Email"]], ["Phone", lead["Contact Phone"]],
+    ["Social Link", lead["Social Link"] || "—"],
+  ];
+  if (lead["Role"] && lead["Role"] !== "Seller") {
+    fields.push(
+      ["Seller/Realtor/Broker Name", lead["Seller Contact Name"] || "—"],
+      ["Seller/Realtor/Broker Phone", lead["Seller Contact Phone"] || "—"],
+      ["Seller/Realtor/Broker Email", lead["Seller Contact Email"] || "—"]
+    );
+  }
+  fields.push(
+    ["Address", `${lead["Street Address"]}, ${lead["City"]}, ${lead["State"]} ${lead["Zip"]}`],
+    ["Units", lead["Units"]],
+    ["Asset Type", lead["Asset Type"]], ["Subtype", lead["Asset Subtype"] || "—"],
+    ["Beds", lead["Beds"] || "—"], ["Baths", lead["Baths"] || "—"], ["Sq Ft", lead["Sq Ft"] || "—"]
+  );
+  if (lead["Asset Type"] === "Residential Property (1 unit)") {
+    fields.push(["Occupied Status", lead["Occupied Status"] || "—"]);
+    if (lead["Occupied Status"] === "Vacant (no tenant)") {
+      fields.push(
+        ["Rentcast Monthly Rent", lead["Monthly Rent Estimate"] || "—"],
+        ["Annual Property Taxes", lead["Annual Property Taxes"] || "—"],
+        ["Annual Insurance", lead["Annual Insurance"] || "—"]
+      );
+    }
+    fields.push(["NOI", lead["NOI"] || "—"]);
+  } else if (lead["Asset Type"] === "Commercial Property") {
+    fields.push(["NOI", lead["NOI"] || "—"]);
+  } else if (lead["Asset Type"] === "Business") {
+    fields.push(
+      ["Annual Revenue", lead["Business Revenue"] || "—"],
+      [`Annual ${lead["Business Earnings Type"] || "Earnings"}`, lead["Business Earnings"] || "—"]
+    );
+  }
+  fields.push(
+    ["Total Debt", lead["Total Debt"]],
+    ["Willing: New Senior Loan", lead["Senior Loan Willing"]],
+    ["Willing: Payment Structure", lead["Payment Structure Willing"]],
+    ["Price Sought", lead["Price Sought"]], ["Price Reasoning", lead["Price Reasoning"]],
+    ["Down Payment Needed", lead["Down Payment Needed"]],
+    ["Seller Flexible on Down Payment", lead["Down Payment Non-Negotiable"]],
+    ["On/Off Market", lead["Market Status"] || "—"],
+    ["Listing Source Link", lead["Source Link"] || "—"],
+    ["Status", lead["Status"] || "New"]
+  );
+  return fields;
+}
+
 function renderStatusLeads(email, leads) {
   const container = document.getElementById("status-leads-container");
   container.innerHTML = leads.map(lead => {
-    const fields = [
-      ["Submitted", formatDate(lead["Submitted At"])],
-      ["Role", lead["Role"]],
-      ["Address", `${lead["Street Address"]}, ${lead["City"]}, ${lead["State"]} ${lead["Zip"]}`],
-      ["Units", lead["Units"]],
-      ["Asset Type", lead["Asset Type"]], ["Subtype", lead["Asset Subtype"] || "—"],
-      ["Beds", lead["Beds"] || "—"], ["Baths", lead["Baths"] || "—"], ["Sq Ft", lead["Sq Ft"] || "—"],
-      ["Total Debt", lead["Total Debt"]],
-      ["Willing: New Senior Loan", lead["Senior Loan Willing"]],
-      ["Willing: Payment Structure", lead["Payment Structure Willing"]],
-      ["Price Sought", lead["Price Sought"]], ["Price Reasoning", lead["Price Reasoning"]],
-      ["Down Payment Needed", lead["Down Payment Needed"]],
-      ["Seller Flexible on Down Payment", lead["Down Payment Non-Negotiable"]],
-      ["Status", lead["Status"] || "New"],
-    ];
+    const fields = buildLeadFields(lead).filter(([k]) => k !== "Email" && k !== "Phone");
     return `
       <div class="card">
         <dl class="review-grid">
@@ -797,21 +1106,7 @@ function openDetail(lead) {
   const panel = document.getElementById("detail-panel");
   overlay.hidden = false;
 
-  const fields = [
-    ["Submitted", formatDate(lead["Submitted At"])],
-    ["Role", lead["Role"]], ["Email", lead["Contact Email"]], ["Phone", lead["Contact Phone"]],
-    ["Social Link", lead["Social Link"] || "—"],
-    ["Address", `${lead["Street Address"]}, ${lead["City"]}, ${lead["State"]} ${lead["Zip"]}`],
-    ["Units", lead["Units"]],
-    ["Asset Type", lead["Asset Type"]], ["Subtype", lead["Asset Subtype"] || "—"],
-    ["Beds", lead["Beds"] || "—"], ["Baths", lead["Baths"] || "—"], ["Sq Ft", lead["Sq Ft"] || "—"],
-    ["Total Debt", lead["Total Debt"]],
-    ["Willing: New Senior Loan", lead["Senior Loan Willing"]],
-    ["Willing: Payment Structure", lead["Payment Structure Willing"]],
-    ["Price Sought", lead["Price Sought"]], ["Price Reasoning", lead["Price Reasoning"]],
-    ["Down Payment Needed", lead["Down Payment Needed"]],
-    ["Seller Flexible on Down Payment", lead["Down Payment Non-Negotiable"]],
-  ];
+  const fields = buildLeadFields(lead).filter(([k]) => k !== "Status");
 
   panel.innerHTML = `
     <button class="link-btn" id="close-detail-btn" style="float:right;">Close ✕</button>
