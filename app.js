@@ -278,18 +278,31 @@ const steps = [
       root.innerHTML = `
         <h2 class="step-title">New Senior Financing</h2>
         <p class="step-sub">Would the seller be willing to let a buyer place a new senior (1st position)
-        mortgage on the property? If you're not sure, that's fine — just tell us it's unclear so we know to ask.</p>
+        mortgage on the property? We need a yes or a no here to accept the lead.</p>
         <div class="choice-group" id="senior-group">
-          ${["Yes","No","Not Sure"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
+          ${["Yes","No"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
         </div>
-        <div class="error-text" id="senior-error">Please choose one.</div>
+        <div class="error-text" id="senior-error">Please choose Yes or No.</div>
+        <div class="banner danger" id="senior-block-banner" ${answers.seniorLoanWilling === "No" ? "" : "hidden"}>
+          We currently do not accept leads where the seller isn't willing to allow a buyer to take out a new
+          senior (1st position) mortgage on the property.
+        </div>
       `;
-      bindChoiceGroup(root, "#senior-group", "seniorLoanWilling");
+      root.querySelectorAll("#senior-group .choice-btn").forEach(btn => {
+        if (btn.dataset.value === answers.seniorLoanWilling) btn.classList.add("selected");
+        btn.onclick = () => {
+          root.querySelectorAll("#senior-group .choice-btn").forEach(b => b.classList.remove("selected"));
+          btn.classList.add("selected");
+          answers.seniorLoanWilling = btn.dataset.value;
+          root.querySelector("#senior-block-banner").hidden = btn.dataset.value !== "No";
+          toggleError(root, "#senior-error", false);
+        };
+      });
     },
     validate(root) {
       const ok = !!answers.seniorLoanWilling;
       toggleError(root, "#senior-error", !ok);
-      return ok;
+      return ok && answers.seniorLoanWilling === "Yes";
     }
   },
   {
@@ -300,18 +313,31 @@ const steps = [
         <h2 class="step-title">Payment Structure</h2>
         <p class="step-sub">Would the seller accept: some down payment now, some paid monthly, and the
         remainder between the agreed purchase price and the down payment paid within a specific timeframe
-        agreed by both parties? If unsure, tell us that so we know to follow up.</p>
+        agreed by both parties? We need a yes or a no here to accept the lead.</p>
         <div class="choice-group" id="structure-group">
-          ${["Yes","No","Not Sure"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
+          ${["Yes","No"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
         </div>
-        <div class="error-text" id="structure-error">Please choose one.</div>
+        <div class="error-text" id="structure-error">Please choose Yes or No.</div>
+        <div class="banner danger" id="structure-block-banner" ${answers.paymentStructureWilling === "No" ? "" : "hidden"}>
+          We currently don't accept leads where the seller isn't willing to consider seller carry / seller
+          financing (a down payment now, monthly payments, and the remainder paid over an agreed timeframe).
+        </div>
       `;
-      bindChoiceGroup(root, "#structure-group", "paymentStructureWilling");
+      root.querySelectorAll("#structure-group .choice-btn").forEach(btn => {
+        if (btn.dataset.value === answers.paymentStructureWilling) btn.classList.add("selected");
+        btn.onclick = () => {
+          root.querySelectorAll("#structure-group .choice-btn").forEach(b => b.classList.remove("selected"));
+          btn.classList.add("selected");
+          answers.paymentStructureWilling = btn.dataset.value;
+          root.querySelector("#structure-block-banner").hidden = btn.dataset.value !== "No";
+          toggleError(root, "#structure-error", false);
+        };
+      });
     },
     validate(root) {
       const ok = !!answers.paymentStructureWilling;
       toggleError(root, "#structure-error", !ok);
-      return ok;
+      return ok && answers.paymentStructureWilling === "Yes";
     }
   },
   {
@@ -359,7 +385,7 @@ const steps = [
       function renderNonNeg() {
         if (!answers.dpSkipped && answers.downPaymentNeeded) {
           nonnegWrap.innerHTML = `
-            <label class="field-label">If we're unable to offer this much, is that amount non-negotiable? <span class="req">*</span></label>
+            <label class="field-label">Is the seller willing to accept less down if we're unable to give them their requested down? <span class="req">*</span></label>
             <div class="choice-group" id="nonneg-group">
               ${["Yes","No","Not Sure"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
             </div>
@@ -394,21 +420,7 @@ const steps = [
     key: "review",
     progress: true,
     render(root) {
-      const rows = [
-        ["Role", answers.role], ["Email", answers.email], ["Phone", answers.phone],
-        ["Social Link", answers.socialLink || "—"],
-        ["Address", `${answers.street}, ${answers.city}, ${answers.state} ${answers.zip}`],
-        ["Units", answers.units],
-        ["Asset Type", answers.assetType],
-        ["Subtype / Details", answers.assetSubtype || [answers.beds && `${answers.beds} bd`, answers.baths && `${answers.baths} ba`, answers.sqft && `${answers.sqft} sqft`].filter(Boolean).join(", ")],
-        ["Total Debt", answers.debtUnknown ? "Unknown" : (answers.totalDebt || "—")],
-        ["Willing: New Senior Loan", answers.seniorLoanWilling],
-        ["Willing: Payment Structure", answers.paymentStructureWilling],
-        ["Price Sought", answers.priceSought],
-        ["Price Reasoning", answers.priceReasoning],
-        ["Down Payment Needed", answers.dpSkipped || !answers.downPaymentNeeded ? "Skipped" : answers.downPaymentNeeded],
-        ["Down Payment Non-Negotiable", answers.downPaymentNonNegotiable || "N/A"],
-      ];
+      const rows = buildAnswerRows();
       root.innerHTML = `
         <h2 class="step-title">Review</h2>
         <p class="step-sub">Double check everything before submitting.</p>
@@ -423,6 +435,24 @@ const steps = [
 ];
 
 let stepIndex = 0;
+
+function buildAnswerRows() {
+  return [
+    ["Role", answers.role], ["Email", answers.email], ["Phone", answers.phone],
+    ["Social Link", answers.socialLink || "—"],
+    ["Address", `${answers.street}, ${answers.city}, ${answers.state} ${answers.zip}`],
+    ["Units", answers.units],
+    ["Asset Type", answers.assetType],
+    ["Subtype / Details", answers.assetSubtype || [answers.beds && `${answers.beds} bd`, answers.baths && `${answers.baths} ba`, answers.sqft && `${answers.sqft} sqft`].filter(Boolean).join(", ")],
+    ["Total Debt", answers.debtUnknown ? "Unknown" : (answers.totalDebt || "—")],
+    ["Willing: New Senior Loan", answers.seniorLoanWilling],
+    ["Willing: Payment Structure", answers.paymentStructureWilling],
+    ["Price Sought", answers.priceSought],
+    ["Price Reasoning", answers.priceReasoning],
+    ["Down Payment Needed", answers.dpSkipped || !answers.downPaymentNeeded ? "Skipped" : answers.downPaymentNeeded],
+    ["Down Payment Non-Negotiable", answers.downPaymentNonNegotiable || "N/A"],
+  ];
+}
 
 function bindChoiceGroup(root, selector, answerKey) {
   root.querySelectorAll(selector + " .choice-btn").forEach(btn => {
@@ -500,14 +530,25 @@ async function submitLead(container) {
       }
     });
     if (!res.ok) throw new Error(res.error || "Something went wrong.");
+    const rows = buildAnswerRows();
     container.innerHTML = `
       <div class="success-box">
         <div class="check">&#9989;</div>
         <h2>Thank you</h2>
         <p class="step-sub">Your submission was received. Any agreed terms will still be confirmed directly
-        with our admin (${ADMIN_CONTACT_PHONE}) before anything closes.</p>
+        with our admin (${ADMIN_CONTACT_PHONE}) before anything closes. Here's a copy of what was submitted:</p>
+      </div>
+      <dl class="review-grid" style="text-align:left;">
+        ${rows.map(([k,v]) => `<div><dt>${k}</dt><dd>${escapeHtml(String(v ?? "—"))}</dd></div>`).join("")}
+      </dl>
+      <div class="nav-row" style="justify-content:center;">
+        <button class="btn primary" id="submit-another-btn">Submit Another Lead</button>
       </div>
     `;
+    container.querySelector("#submit-another-btn").onclick = () => {
+      Object.keys(answers).forEach(k => delete answers[k]);
+      goTo(0);
+    };
   } catch (err) {
     errBox.style.display = "block";
     errBox.textContent = "Submission failed: " + err.message + ". Please try again.";
