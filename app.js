@@ -1188,10 +1188,13 @@ function openDetail(lead) {
       <strong>Notes</strong>
       <div id="notes-container">
         ${(lead.notes || []).map(n => `
-          <div class="note-item"><span class="ts">${formatDate(n.timestamp)} — ${escapeHtml(n.author || "Admin")}</span>${escapeHtml(n.note)}</div>
+          <div class="note-item"><span class="ts">${formatDate(n.timestamp)} — ${escapeHtml(n.author || "Admin")}${n.visibility === "Private" ? ` <strong style="color:var(--warn);">(Private — invisible to non-admins)</strong>` : ""}</span>${escapeHtml(n.note)}</div>
         `).join("") || `<p class="small-muted">No notes yet.</p>`}
       </div>
       <textarea id="new-note-input" placeholder="Add a note (raw lead data above can't be edited or deleted)"></textarea>
+      <label class="small-muted" style="display:block; margin-top:6px;">
+        <input type="checkbox" id="private-note-checkbox"> Private (invisible to non-admins)
+      </label>
       <button class="btn primary" id="add-note-btn" style="margin-top:8px;">Add Note</button>
     </div>
   `;
@@ -1209,10 +1212,11 @@ function openDetail(lead) {
     const noteInput = panel.querySelector("#new-note-input");
     const note = noteInput.value.trim();
     if (!note) return;
-    const res = await api("addNote", { token: sessionToken, leadId: lead["Lead ID"], note });
+    const isPrivate = panel.querySelector("#private-note-checkbox").checked;
+    const res = await api("addNote", { token: sessionToken, leadId: lead["Lead ID"], note, isPrivate });
     if (res.ok) {
       lead.notes = lead.notes || [];
-      lead.notes.push({ timestamp: new Date().toISOString(), note, author: "Admin" });
+      lead.notes.push({ timestamp: new Date().toISOString(), note, author: "Admin", visibility: isPrivate ? "Private" : "Shared" });
       openDetail(lead);
     }
   };

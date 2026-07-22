@@ -30,7 +30,7 @@ const LEAD_COLUMNS = [
   'Status', 'Closing Likelihood'
 ];
 
-const NOTE_COLUMNS = ['Lead ID', 'Timestamp', 'Note', 'Author', 'Note ID'];
+const NOTE_COLUMNS = ['Lead ID', 'Timestamp', 'Note', 'Author', 'Note ID', 'Visibility'];
 
 function doGet(e) {
   const action = e.parameter.action;
@@ -268,7 +268,10 @@ function getLeads(body) {
   notes.forEach(function (n) {
     const id = n['Lead ID'];
     if (!notesByLead[id]) notesByLead[id] = [];
-    notesByLead[id].push({ noteId: n['Note ID'], timestamp: n['Timestamp'], note: n['Note'], author: n['Author'] || 'Admin' });
+    notesByLead[id].push({
+      noteId: n['Note ID'], timestamp: n['Timestamp'], note: n['Note'],
+      author: n['Author'] || 'Admin', visibility: n['Visibility'] || 'Shared'
+    });
   });
 
   leads.forEach(function (l) {
@@ -283,7 +286,8 @@ function addNote(body) {
   const sheet = getSheet(NOTES_SHEET, NOTE_COLUMNS);
   appendRowByHeaders(sheet, {
     'Lead ID': body.leadId, 'Timestamp': new Date().toISOString(), 'Note': body.note,
-    'Author': 'Admin', 'Note ID': Utilities.getUuid()
+    'Author': 'Admin', 'Note ID': Utilities.getUuid(),
+    'Visibility': body.isPrivate ? 'Private' : 'Shared'
   });
   return { ok: true };
 }
@@ -308,6 +312,7 @@ function getLeadsByEmail(body) {
 
   const notesByLead = {};
   notes.forEach(function (n) {
+    if (String(n['Visibility'] || 'Shared') === 'Private') return; // admin-only, never sent here
     const id = n['Lead ID'];
     if (!notesByLead[id]) notesByLead[id] = [];
     notesByLead[id].push({ noteId: n['Note ID'], timestamp: n['Timestamp'], note: n['Note'], author: n['Author'] || 'Admin' });
@@ -335,7 +340,7 @@ function addPublicNote(body) {
   const noteId = Utilities.getUuid();
   appendRowByHeaders(notesSheet, {
     'Lead ID': body.leadId, 'Timestamp': new Date().toISOString(), 'Note': body.note,
-    'Author': body.email, 'Note ID': noteId
+    'Author': body.email, 'Note ID': noteId, 'Visibility': 'Shared'
   });
   return { ok: true, noteId: noteId };
 }
