@@ -44,12 +44,16 @@ const steps = [
         <strong>"Save My Progress"</strong> at the top of the page. That saves a link back to exactly where you
         left off (for your own use only, not for sharing with anyone else). Go get what's missing, then come
         back and pick up right where you stopped.</p>
-        <div class="nav-row">
-          <button class="btn secondary" id="check-status-btn">Check Status On My Existing Leads (Non-Admin)</button>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; margin-top:24px;">
           <button class="btn primary" id="start-btn">Start</button>
+          <button class="btn primary" id="intro-next-btn">Next</button>
+        </div>
+        <div style="margin-top:12px;">
+          <button class="btn secondary" id="check-status-btn" style="width:100%;">Check Status On My Existing Leads (Non-Admin)</button>
         </div>
       `;
       root.querySelector("#start-btn").onclick = () => goTo(1);
+      root.querySelector("#intro-next-btn").onclick = () => goTo(1);
       root.querySelector("#check-status-btn").onclick = () => showStatusView();
     }
   },
@@ -776,6 +780,8 @@ function renderStep() {
   const step = steps[stepIndex];
   step.render(container);
   renderProgress();
+
+  if (stepIndex === 0) return; // intro provides its own full navigation
 
   if (stepIndex > 1 && answers.email) {
     const emailBanner = document.createElement("div");
