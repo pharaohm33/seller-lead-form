@@ -34,7 +34,7 @@
     justify-content: space-between;
     align-items: center;
   }
-  header.top h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  header.top h1 { font-size: 18px; margin: 0; font-weight: 600; white-space: nowrap; }
   header.top button {
     background: transparent;
     border: 1px solid rgba(255,255,255,0.4);
@@ -43,6 +43,11 @@
     border-radius: 6px;
     cursor: pointer;
     font-size: 13px;
+  }
+  @media (max-width: 480px) {
+    header.top { padding: 12px 14px; gap: 8px; }
+    header.top h1 { font-size: 13px; }
+    header.top button { padding: 6px 9px; font-size: 11px; }
   }
   header.top button:hover { background: rgba(255,255,255,0.1); }
 
