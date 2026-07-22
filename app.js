@@ -471,7 +471,7 @@ function toggleError(root, selector, show) {
 }
 
 function escapeHtml(str) {
-  return str.replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+  return String(str ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
 }
 
 function renderProgress() {
@@ -658,6 +658,8 @@ function renderCrmTable() {
       <td>${escapeHtml(l["Contact Email"] || "")}<br><span class="small-muted">${escapeHtml(l["Contact Phone"] || "")}</span></td>
       <td>${escapeHtml(l["City"] || "")}, ${escapeHtml(l["State"] || "")}</td>
       <td>${escapeHtml(l["Asset Type"] || "")}</td>
+      <td>${escapeHtml(l["Senior Loan Willing"] || "")}</td>
+      <td>${escapeHtml(l["Payment Structure Willing"] || "")}</td>
       <td>${escapeHtml(String(l["Price Sought"] ?? ""))}</td>
       <td><span class="status-pill">${escapeHtml(l["Status"] || "New")}</span></td>
     </tr>
