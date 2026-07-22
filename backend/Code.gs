@@ -32,6 +32,13 @@ const LEAD_COLUMNS = [
 
 const NOTE_COLUMNS = ['Lead ID', 'Timestamp', 'Note', 'Author', 'Note ID', 'Visibility'];
 
+// Allowlist, not a blocklist: only these columns are ever sent to the
+// public getLeadsByEmail endpoint. Anything you add directly in the Leads
+// sheet -- extra columns, private calculations, doc links -- is invisible
+// to that endpoint by default, not just unrendered by the front-end. Add a
+// column here deliberately if you ever want it exposed to submitters.
+const PUBLIC_LEAD_FIELDS = LEAD_COLUMNS.filter(function (c) { return c !== 'Closing Likelihood'; });
+
 function doGet(e) {
   const action = e.parameter.action;
   if (action === 'ping') {
@@ -313,10 +320,14 @@ function deleteNote(body) {
 
 // ---------- Public: non-admin "check my leads" by email ----------
 // No password on this path by design -- knowing the email is the access
-// check. Only that email's own leads are ever returned. All notes on the
-// lead are visible here (admin's included), tagged by author, but editing
-// is still restricted server-side (see editPublicNote) to notes this same
-// email actually authored. Closing Likelihood is stripped -- admin-only.
+// check. Only that email's own leads are ever returned, and only the
+// PUBLIC_LEAD_FIELDS allowlist of columns -- any column you add directly
+// in the Leads sheet (private calculations, doc links, scratch work) is
+// never included here regardless of its name, since this builds a fresh
+// object field-by-field rather than stripping known-sensitive ones out of
+// the full row. All non-private notes are visible here (admin's
+// included), tagged by author, but editing stays restricted server-side
+// (see editPublicNote) to notes this same email actually authored.
 
 function getLeadsByEmail(body) {
   if (!body.email) return { ok: false, error: 'Email is required.' };
@@ -324,7 +335,7 @@ function getLeadsByEmail(body) {
 
   const leadsSheet = getSheet(LEADS_SHEET, LEAD_COLUMNS);
   const notesSheet = getSheet(NOTES_SHEET, NOTE_COLUMNS);
-  const leads = sheetToObjects(leadsSheet).filter(function (l) {
+  const matchingLeads = sheetToObjects(leadsSheet).filter(function (l) {
     return String(l['Contact Email'] || '').trim().toLowerCase() === targetEmail;
   });
   const notes = sheetToObjects(notesSheet);
@@ -337,10 +348,11 @@ function getLeadsByEmail(body) {
     notesByLead[id].push({ noteId: n['Note ID'], timestamp: n['Timestamp'], note: n['Note'], author: n['Author'] || 'Admin' });
   });
 
-  leads.forEach(function (l) {
-    l.notes = notesByLead[l['Lead ID']] || [];
-    delete l['Closing Likelihood'];
-    delete l._row;
+  const leads = matchingLeads.map(function (l) {
+    const safe = {};
+    PUBLIC_LEAD_FIELDS.forEach(function (f) { safe[f] = l[f]; });
+    safe.notes = notesByLead[l['Lead ID']] || [];
+    return safe;
   });
 
   return { ok: true, leads: leads };
