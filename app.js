@@ -338,20 +338,27 @@ const steps = [
               <label class="field-label">Annual Insurance <span class="req">*</span></label>
               <input type="number" id="insurance-input" placeholder="$">
               <div class="error-text" id="insurance-error">Required.</div>
+              <label class="field-label">Expense Ratio % <span class="small-muted">(other operating expenses — maintenance, vacancy, management, capex — as a % of gross rent)</span> <span class="req">*</span></label>
+              <input type="number" id="expense-ratio-input" placeholder="e.g. 35" min="0" max="100">
+              <div class="error-text" id="expense-ratio-error">Required.</div>
               <div class="banner info" id="computed-noi-banner"></div>
             `;
             sub.querySelector("#rent-input").value = answers.rentcastMonthlyRent || "";
             sub.querySelector("#taxes-input").value = answers.annualPropertyTaxes || "";
             sub.querySelector("#insurance-input").value = answers.annualInsurance || "";
+            sub.querySelector("#expense-ratio-input").value = answers.expenseRatio || "";
             const recompute = () => {
               const rent = Number(sub.querySelector("#rent-input").value) || 0;
               const taxes = Number(sub.querySelector("#taxes-input").value) || 0;
               const insurance = Number(sub.querySelector("#insurance-input").value) || 0;
-              const noi = (rent * 12) - taxes - insurance;
-              sub.querySelector("#computed-noi-banner").textContent = `Computed Annual NOI: $${noi.toLocaleString()} (monthly rent × 12, minus taxes and insurance)`;
+              const expenseRatio = Number(sub.querySelector("#expense-ratio-input").value) || 0;
+              const grossAnnualRent = rent * 12;
+              const otherExpenses = grossAnnualRent * (expenseRatio / 100);
+              const noi = grossAnnualRent - taxes - insurance - otherExpenses;
+              sub.querySelector("#computed-noi-banner").textContent = `Computed Annual NOI: $${noi.toLocaleString(undefined, {maximumFractionDigits: 0})} (monthly rent × 12, minus taxes, insurance, and ${expenseRatio}% expense ratio)`;
               answers.residentialNOI = noi;
             };
-            ["#rent-input", "#taxes-input", "#insurance-input"].forEach(sel => {
+            ["#rent-input", "#taxes-input", "#insurance-input", "#expense-ratio-input"].forEach(sel => {
               sub.querySelector(sel).oninput = recompute;
             });
             recompute();
@@ -426,10 +433,12 @@ const steps = [
         answers.rentcastMonthlyRent = root.querySelector("#rent-input").value;
         answers.annualPropertyTaxes = root.querySelector("#taxes-input").value;
         answers.annualInsurance = root.querySelector("#insurance-input").value;
+        answers.expenseRatio = root.querySelector("#expense-ratio-input").value;
         let ok = true;
         toggleError(root, "#rent-error", !answers.rentcastMonthlyRent); if (!answers.rentcastMonthlyRent) ok = false;
         toggleError(root, "#taxes-error", !answers.annualPropertyTaxes); if (!answers.annualPropertyTaxes) ok = false;
         toggleError(root, "#insurance-error", !answers.annualInsurance); if (!answers.annualInsurance) ok = false;
+        toggleError(root, "#expense-ratio-error", !answers.expenseRatio); if (!answers.expenseRatio) ok = false;
         return ok;
       } else if (answers.assetType === "Commercial Property") {
         answers.commercialNOI = root.querySelector("#noi-input").value;
@@ -687,7 +696,8 @@ function buildAnswerRows() {
       rows.push(
         ["Rentcast Monthly Rent", answers.rentcastMonthlyRent || "—"],
         ["Annual Property Taxes", answers.annualPropertyTaxes || "—"],
-        ["Annual Insurance", answers.annualInsurance || "—"]
+        ["Annual Insurance", answers.annualInsurance || "—"],
+        ["Expense Ratio %", answers.expenseRatio || "—"]
       );
     }
     rows.push(["NOI", answers.residentialNOI || "—"]);
@@ -811,6 +821,7 @@ async function submitLead(container) {
         beds: answers.beds, baths: answers.baths, sqft: answers.sqft,
         occupiedStatus: answers.residentialOccupied, monthlyRentEstimate: answers.rentcastMonthlyRent,
         annualPropertyTaxes: answers.annualPropertyTaxes, annualInsurance: answers.annualInsurance,
+        expenseRatio: answers.expenseRatio,
         noi: answers.residentialNOI || answers.commercialNOI,
         businessRevenue: answers.businessRevenue, businessEarningsType: answers.businessEarningsType,
         businessEarnings: answers.businessEarnings,
@@ -928,7 +939,8 @@ function buildLeadFields(lead) {
       fields.push(
         ["Rentcast Monthly Rent", lead["Monthly Rent Estimate"] || "—"],
         ["Annual Property Taxes", lead["Annual Property Taxes"] || "—"],
-        ["Annual Insurance", lead["Annual Insurance"] || "—"]
+        ["Annual Insurance", lead["Annual Insurance"] || "—"],
+        ["Expense Ratio %", lead["Expense Ratio %"] || "—"]
       );
     }
     fields.push(["NOI", lead["NOI"] || "—"]);
@@ -1000,11 +1012,20 @@ function renderStatusLeads(email, leads) {
 function renderStatusNoteItem(n, email) {
   const isMine = !!(n.author && email && n.author.toLowerCase() === email.toLowerCase());
   const authorLabel = isMine ? "You" : (n.author || "Admin");
+  const badgeStyle = isMine
+    ? "background:var(--accent-light); color:var(--accent);"
+    : "background:var(--navy); color:#fff;";
   return `
     <div class="note-item" data-note-id="${n.noteId || ""}">
-      <span class="ts">${formatDate(n.timestamp)} — ${escapeHtml(authorLabel)}</span>
+      <span class="ts">
+        ${formatDate(n.timestamp)}
+        <span style="${badgeStyle} padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600; margin-left:4px;">${escapeHtml(authorLabel)}</span>
+      </span>
       <span class="note-text">${escapeHtml(n.note)}</span>
-      ${isMine && n.noteId ? `<button type="button" class="link-btn status-edit-note-btn" style="margin-left:8px;">Edit</button>` : ""}
+      ${isMine && n.noteId ? `
+        <button type="button" class="link-btn status-edit-note-btn" style="margin-left:8px;">Edit</button>
+        <button type="button" class="link-btn status-delete-note-btn" style="margin-left:8px; color:var(--danger);">Delete</button>
+      ` : ""}
     </div>
   `;
 }
@@ -1041,6 +1062,21 @@ function bindStatusNoteEdits(container, email, leads) {
           saveBtn.disabled = false;
         }
       };
+    };
+  });
+
+  container.querySelectorAll(".status-delete-note-btn").forEach(btn => {
+    btn.onclick = async () => {
+      const item = btn.closest(".note-item");
+      const noteId = item.dataset.noteId;
+      if (!confirm("Delete this note? This cannot be undone.")) return;
+      const res = await api("deletePublicNote", { email, noteId });
+      if (res.ok) {
+        leads.forEach(l => {
+          l.notes = (l.notes || []).filter(n => n.noteId !== noteId);
+        });
+        renderStatusLeads(email, leads);
+      }
     };
   });
 }
@@ -1187,9 +1223,7 @@ function openDetail(lead) {
     <div class="notes-list">
       <strong>Notes</strong>
       <div id="notes-container">
-        ${(lead.notes || []).map(n => `
-          <div class="note-item"><span class="ts">${formatDate(n.timestamp)} — ${escapeHtml(n.author || "Admin")}${n.visibility === "Private" ? ` <strong style="color:var(--warn);">(Private — invisible to non-admins)</strong>` : ""}</span>${escapeHtml(n.note)}</div>
-        `).join("") || `<p class="small-muted">No notes yet.</p>`}
+        ${(lead.notes || []).map(n => renderAdminNoteItem(n)).join("") || `<p class="small-muted">No notes yet.</p>`}
       </div>
       <textarea id="new-note-input" placeholder="Add a note (raw lead data above can't be edited or deleted)"></textarea>
       <label class="small-muted" style="display:block; margin-top:6px;">
@@ -1216,10 +1250,41 @@ function openDetail(lead) {
     const res = await api("addNote", { token: sessionToken, leadId: lead["Lead ID"], note, isPrivate });
     if (res.ok) {
       lead.notes = lead.notes || [];
-      lead.notes.push({ timestamp: new Date().toISOString(), note, author: "Admin", visibility: isPrivate ? "Private" : "Shared" });
+      lead.notes.push({ noteId: res.noteId, timestamp: new Date().toISOString(), note, author: "Admin", visibility: isPrivate ? "Private" : "Shared" });
       openDetail(lead);
     }
   };
+  panel.querySelectorAll(".admin-delete-note-btn").forEach(btn => {
+    btn.onclick = async () => {
+      const item = btn.closest(".note-item");
+      const noteId = item.dataset.noteId;
+      if (!confirm("Delete this note? This cannot be undone.")) return;
+      const res = await api("deleteNote", { token: sessionToken, noteId });
+      if (res.ok) {
+        lead.notes = (lead.notes || []).filter(n => n.noteId !== noteId);
+        openDetail(lead);
+      }
+    };
+  });
+}
+
+function renderAdminNoteItem(n) {
+  const author = n.author || "Admin";
+  const isAdminAuthor = author === "Admin";
+  const badgeStyle = isAdminAuthor
+    ? "background:var(--navy); color:#fff;"
+    : "background:var(--accent-light); color:var(--accent);";
+  return `
+    <div class="note-item" data-note-id="${n.noteId || ""}">
+      <span class="ts">
+        ${formatDate(n.timestamp)}
+        <span style="${badgeStyle} padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600; margin-left:4px;">${escapeHtml(author)}</span>
+        ${n.visibility === "Private" ? `<strong style="color:var(--warn);"> (Private — invisible to non-admins)</strong>` : ""}
+      </span>
+      <div>${escapeHtml(n.note)}</div>
+      ${n.noteId ? `<button type="button" class="link-btn admin-delete-note-btn" style="color:var(--danger); margin-top:4px;">Delete</button>` : ""}
+    </div>
+  `;
 }
 
 /* ---------- Export + gated delete ---------- */

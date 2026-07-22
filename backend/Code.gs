@@ -22,7 +22,7 @@ const LEAD_COLUMNS = [
   'Seller Contact Name', 'Seller Contact Phone', 'Seller Contact Email',
   'Street Address', 'City', 'State', 'Zip', 'Units',
   'Asset Type', 'Asset Subtype', 'Beds', 'Baths', 'Sq Ft',
-  'Occupied Status', 'Monthly Rent Estimate', 'Annual Property Taxes', 'Annual Insurance',
+  'Occupied Status', 'Monthly Rent Estimate', 'Annual Property Taxes', 'Annual Insurance', 'Expense Ratio %',
   'NOI', 'Business Revenue', 'Business Earnings Type', 'Business Earnings',
   'Total Debt', 'Senior Loan Willing', 'Payment Structure Willing',
   'Price Sought', 'Price Reasoning', 'Down Payment Needed', 'Down Payment Non-Negotiable',
@@ -61,6 +61,8 @@ function doPost(e) {
         return jsonOut(withSession(body, getLeads));
       case 'addNote':
         return jsonOut(withSession(body, addNote));
+      case 'deleteNote':
+        return jsonOut(withSession(body, deleteNote));
       case 'updateStatus':
         return jsonOut(withSession(body, updateStatus));
       case 'updateClosingLikelihood':
@@ -75,6 +77,8 @@ function doPost(e) {
         return jsonOut(addPublicNote(body));
       case 'editPublicNote':
         return jsonOut(editPublicNote(body));
+      case 'deletePublicNote':
+        return jsonOut(deletePublicNote(body));
       default:
         return jsonOut({ ok: false, error: 'Unknown action.' });
     }
@@ -181,6 +185,7 @@ function submitLead(body) {
     'Beds': d.beds || '', 'Baths': d.baths || '', 'Sq Ft': d.sqft || '',
     'Occupied Status': d.occupiedStatus || '', 'Monthly Rent Estimate': d.monthlyRentEstimate || '',
     'Annual Property Taxes': d.annualPropertyTaxes || '', 'Annual Insurance': d.annualInsurance || '',
+    'Expense Ratio %': d.expenseRatio || '',
     'NOI': d.noi || '', 'Business Revenue': d.businessRevenue || '',
     'Business Earnings Type': d.businessEarningsType || '', 'Business Earnings': d.businessEarnings || '',
     'Total Debt': (d.totalDebt === undefined || d.totalDebt === null || d.totalDebt === '') ? 'Unknown' : d.totalDebt,
@@ -284,11 +289,25 @@ function getLeads(body) {
 function addNote(body) {
   if (!body.leadId || !body.note) return { ok: false, error: 'Missing leadId or note.' };
   const sheet = getSheet(NOTES_SHEET, NOTE_COLUMNS);
+  const noteId = Utilities.getUuid();
   appendRowByHeaders(sheet, {
     'Lead ID': body.leadId, 'Timestamp': new Date().toISOString(), 'Note': body.note,
-    'Author': 'Admin', 'Note ID': Utilities.getUuid(),
+    'Author': 'Admin', 'Note ID': noteId,
     'Visibility': body.isPrivate ? 'Private' : 'Shared'
   });
+  return { ok: true, noteId: noteId };
+}
+
+// Admin can delete any note (their own or a submitter's) -- this is the one
+// deliberate exception to "raw data is never deleted": notes are a working
+// log, not the original lead submission, which stays immutable regardless.
+function deleteNote(body) {
+  if (!body.noteId) return { ok: false, error: 'Missing noteId.' };
+  const sheet = getSheet(NOTES_SHEET, NOTE_COLUMNS);
+  const notes = sheetToObjects(sheet);
+  const match = notes.find(function (n) { return n['Note ID'] === body.noteId; });
+  if (!match) return { ok: false, error: 'Note not found.' };
+  sheet.deleteRow(match._row);
   return { ok: true };
 }
 
@@ -360,6 +379,21 @@ function editPublicNote(body) {
   }
   const noteCol = getColumnIndex(sheet, 'Note');
   sheet.getRange(match._row, noteCol).setValue(body.newText);
+  return { ok: true };
+}
+
+// Same author check as editPublicNote, but deletes the row instead.
+function deletePublicNote(body) {
+  if (!body.noteId || !body.email) return { ok: false, error: 'Missing information.' };
+  const targetEmail = String(body.email).trim().toLowerCase();
+  const sheet = getSheet(NOTES_SHEET, NOTE_COLUMNS);
+  const notes = sheetToObjects(sheet);
+  const match = notes.find(function (n) { return n['Note ID'] === body.noteId; });
+  if (!match) return { ok: false, error: 'Note not found.' };
+  if (String(match['Author'] || '').trim().toLowerCase() !== targetEmail) {
+    return { ok: false, error: 'You can only delete your own notes.' };
+  }
+  sheet.deleteRow(match._row);
   return { ok: true };
 }
 
