@@ -1,11 +1,11 @@
-# Seller Lead Form
+# SendMySeller
 
 A guided intake form for sellers, wholesalers, bird dogs, realtors, consultants,
 and referral sources to submit deal leads — feeding an admin-only CRM to
 review, note, and export them. Hosted on GitHub Pages; data lives in a Google
 Sheet you own via a small Apps Script backend (see [`SETUP.md`](SETUP.md)).
 
-**Live tool:** https://pharaohm33.github.io/seller-lead-form/
+**Live tool:** https://sendmyseller.com/
 
 ---
 
