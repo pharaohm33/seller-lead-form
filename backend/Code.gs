@@ -30,7 +30,7 @@ const LEAD_COLUMNS = [
   'Status'
 ];
 
-const NOTE_COLUMNS = ['Lead ID', 'Timestamp', 'Note', 'Author'];
+const NOTE_COLUMNS = ['Lead ID', 'Timestamp', 'Note', 'Author', 'Note ID'];
 
 function doGet(e) {
   const action = e.parameter.action;
@@ -71,6 +71,8 @@ function doPost(e) {
         return jsonOut(getLeadsByEmail(body));
       case 'addPublicNote':
         return jsonOut(addPublicNote(body));
+      case 'editPublicNote':
+        return jsonOut(editPublicNote(body));
       default:
         return jsonOut({ ok: false, error: 'Unknown action.' });
     }
@@ -108,6 +110,17 @@ function ensureHeaders(sheet, columns) {
   if (missing.length > 0) {
     sheet.getRange(1, existing.length + 1, 1, missing.length).setValues([missing]);
   }
+}
+
+// 1-indexed column number for a header name, read from the sheet's actual
+// current header row -- never assume a column's position matches its index
+// in LEAD_COLUMNS/NOTE_COLUMNS, since ensureHeaders appends new columns at
+// the end rather than reordering, so an already-migrated sheet's physical
+// layout can differ from those arrays' declared order.
+function getColumnIndex(sheet, headerName) {
+  const lastCol = sheet.getLastColumn();
+  const headers = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0] : [];
+  return headers.indexOf(headerName) + 1;
 }
 
 // Builds a row from a {headerName: value} object rather than a fixed
@@ -253,7 +266,7 @@ function getLeads(body) {
   notes.forEach(function (n) {
     const id = n['Lead ID'];
     if (!notesByLead[id]) notesByLead[id] = [];
-    notesByLead[id].push({ timestamp: n['Timestamp'], note: n['Note'], author: n['Author'] || 'Admin' });
+    notesByLead[id].push({ noteId: n['Note ID'], timestamp: n['Timestamp'], note: n['Note'], author: n['Author'] || 'Admin' });
   });
 
   leads.forEach(function (l) {
@@ -266,7 +279,10 @@ function getLeads(body) {
 function addNote(body) {
   if (!body.leadId || !body.note) return { ok: false, error: 'Missing leadId or note.' };
   const sheet = getSheet(NOTES_SHEET, NOTE_COLUMNS);
-  sheet.appendRow([body.leadId, new Date().toISOString(), body.note, 'Admin']);
+  appendRowByHeaders(sheet, {
+    'Lead ID': body.leadId, 'Timestamp': new Date().toISOString(), 'Note': body.note,
+    'Author': 'Admin', 'Note ID': Utilities.getUuid()
+  });
   return { ok: true };
 }
 
@@ -292,7 +308,7 @@ function getLeadsByEmail(body) {
     if (author !== targetEmail) return; // never expose admin's or anyone else's notes
     const id = n['Lead ID'];
     if (!notesByLead[id]) notesByLead[id] = [];
-    notesByLead[id].push({ timestamp: n['Timestamp'], note: n['Note'] });
+    notesByLead[id].push({ noteId: n['Note ID'], timestamp: n['Timestamp'], note: n['Note'] });
   });
 
   leads.forEach(function (l) {
@@ -313,7 +329,29 @@ function addPublicNote(body) {
     return { ok: false, error: 'That lead does not belong to this email address.' };
   }
   const notesSheet = getSheet(NOTES_SHEET, NOTE_COLUMNS);
-  notesSheet.appendRow([body.leadId, new Date().toISOString(), body.note, body.email]);
+  const noteId = Utilities.getUuid();
+  appendRowByHeaders(notesSheet, {
+    'Lead ID': body.leadId, 'Timestamp': new Date().toISOString(), 'Note': body.note,
+    'Author': body.email, 'Note ID': noteId
+  });
+  return { ok: true, noteId: noteId };
+}
+
+// Lets a submitter edit only a note they themselves added (matched by
+// Note ID + Author == their email) -- never the original lead fields, and
+// never anyone else's notes, including admin's.
+function editPublicNote(body) {
+  if (!body.noteId || !body.newText || !body.email) return { ok: false, error: 'Missing information.' };
+  const targetEmail = String(body.email).trim().toLowerCase();
+  const sheet = getSheet(NOTES_SHEET, NOTE_COLUMNS);
+  const notes = sheetToObjects(sheet);
+  const match = notes.find(function (n) { return n['Note ID'] === body.noteId; });
+  if (!match) return { ok: false, error: 'Note not found.' };
+  if (String(match['Author'] || '').trim().toLowerCase() !== targetEmail) {
+    return { ok: false, error: 'You can only edit your own notes.' };
+  }
+  const noteCol = getColumnIndex(sheet, 'Note');
+  sheet.getRange(match._row, noteCol).setValue(body.newText);
   return { ok: true };
 }
 
@@ -323,7 +361,7 @@ function updateStatus(body) {
   const leads = sheetToObjects(sheet);
   const match = leads.find(function (l) { return l['Lead ID'] === body.leadId; });
   if (!match) return { ok: false, error: 'Lead not found.' };
-  const statusCol = LEAD_COLUMNS.indexOf('Status') + 1;
+  const statusCol = getColumnIndex(sheet, 'Status');
   sheet.getRange(match._row, statusCol).setValue(body.status);
   return { ok: true };
 }

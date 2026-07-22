@@ -7,6 +7,8 @@ const COMMERCIAL_SUBTYPES = ["Multifamily","Office","Hotel/Motel","Mixed Use","I
 
 const ADMIN_CONTACT_PHONE = "+1 520 633 6437";
 
+const LEAD_STATUSES = ["New", "Contacted", "Under Review", "Offer Sent", "Offer Signed By Seller", "Closed", "Dead"];
+
 async function api(action, payload) {
   const res = await fetch(window.APP_CONFIG.APPS_SCRIPT_URL, {
     method: "POST",
@@ -962,13 +964,11 @@ function renderStatusLeads(email, leads) {
           ${fields.map(([k,v]) => `<div><dt>${k}</dt><dd>${escapeHtml(String(v ?? "—"))}</dd></div>`).join("")}
         </dl>
         <div class="notes-list">
-          <strong>Your Notes</strong>
-          <div>
-            ${(lead.notes || []).map(n => `
-              <div class="note-item"><span class="ts">${formatDate(n.timestamp)}</span>${escapeHtml(n.note)}</div>
-            `).join("") || `<p class="small-muted">No notes yet.</p>`}
+          <strong>Your Notes (you can edit these)</strong>
+          <div class="status-notes-container" data-lead-id="${lead["Lead ID"]}">
+            ${(lead.notes || []).map(n => renderStatusNoteItem(n)).join("") || `<p class="small-muted">No notes yet.</p>`}
           </div>
-          <textarea class="status-note-input" placeholder="Add a note (this can't edit or delete the info above — only admin can do that)"></textarea>
+          <textarea class="status-note-input" placeholder="Add a note (this can't edit or delete the property/business info above — only admin can do that)"></textarea>
           <button class="btn primary status-add-note-btn" style="margin-top:8px;" data-lead-id="${lead["Lead ID"]}">Add Note</button>
         </div>
       </div>
@@ -987,9 +987,57 @@ function renderStatusLeads(email, leads) {
       if (res.ok) {
         const lead = leads.find(l => l["Lead ID"] === btn.dataset.leadId);
         lead.notes = lead.notes || [];
-        lead.notes.push({ timestamp: new Date().toISOString(), note });
+        lead.notes.push({ noteId: res.noteId, timestamp: new Date().toISOString(), note });
         renderStatusLeads(email, leads);
       }
+    };
+  });
+
+  bindStatusNoteEdits(container, email, leads);
+}
+
+function renderStatusNoteItem(n) {
+  return `
+    <div class="note-item" data-note-id="${n.noteId || ""}">
+      <span class="ts">${formatDate(n.timestamp)}</span>
+      <span class="note-text">${escapeHtml(n.note)}</span>
+      ${n.noteId ? `<button type="button" class="link-btn status-edit-note-btn" style="margin-left:8px;">Edit</button>` : ""}
+    </div>
+  `;
+}
+
+function bindStatusNoteEdits(container, email, leads) {
+  container.querySelectorAll(".status-edit-note-btn").forEach(btn => {
+    btn.onclick = () => {
+      const item = btn.closest(".note-item");
+      const noteId = item.dataset.noteId;
+      const noteTextEl = item.querySelector(".note-text");
+      const currentText = noteTextEl.textContent;
+      item.innerHTML = `
+        <textarea class="status-edit-note-input">${escapeHtml(currentText)}</textarea>
+        <div class="nav-row" style="margin-top:6px;">
+          <button type="button" class="btn secondary status-cancel-edit-btn">Cancel</button>
+          <button type="button" class="btn primary status-save-edit-btn">Save</button>
+        </div>
+      `;
+      item.querySelector(".status-cancel-edit-btn").onclick = () => renderStatusLeads(email, leads);
+      item.querySelector(".status-save-edit-btn").onclick = async () => {
+        const newText = item.querySelector(".status-edit-note-input").value.trim();
+        if (!newText) return;
+        const saveBtn = item.querySelector(".status-save-edit-btn");
+        saveBtn.disabled = true;
+        const res = await api("editPublicNote", { email, noteId, newText });
+        if (res.ok) {
+          leads.forEach(l => {
+            (l.notes || []).forEach(n => {
+              if (n.noteId === noteId) n.note = newText;
+            });
+          });
+          renderStatusLeads(email, leads);
+        } else {
+          saveBtn.disabled = false;
+        }
+      };
     };
   });
 }
@@ -1120,7 +1168,7 @@ function openDetail(lead) {
     <h2>Lead Detail</h2>
     <label class="field-label">Status</label>
     <select id="status-select">
-      ${["New","Contacted","Under Review","Offer Sent","Closed","Dead"].map(s =>
+      ${LEAD_STATUSES.map(s =>
         `<option value="${s}" ${lead["Status"] === s ? "selected" : ""}>${s}</option>`).join("")}
     </select>
     <dl class="review-grid" style="margin-top:16px;">
