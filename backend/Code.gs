@@ -1,0 +1,322 @@
+/**
+ * Seller Lead Form — Apps Script backend.
+ *
+ * Deploy this bound to a Google Sheet (see SETUP.md). It is the entire
+ * "server": public lead submissions, admin login, notes, export-to-sheet,
+ * and gated delete-all all live here. No other backend exists.
+ *
+ * Required Script Properties (Project Settings -> Script Properties):
+ *   ADMIN_PASSWORD      - the password the admin logs in with
+ *   RECOVERY_CODE_WORD  - the word that unlocks emailing the password
+ *   ADMIN_EMAIL         - where recovery emails are sent (fixed, not caller-supplied)
+ *   SESSION_SECRET      - random long string, used to sign session tokens
+ *   SHARED_SECRET       - (optional) simple app key the frontend also sends
+ */
+
+const LEADS_SHEET = 'Leads';
+const NOTES_SHEET = 'Notes';
+const SESSION_HOURS = 12;
+
+const LEAD_COLUMNS = [
+  'Lead ID', 'Submitted At', 'Role', 'Contact Email', 'Contact Phone', 'Social Link',
+  'Street Address', 'City', 'State', 'Zip', 'Units',
+  'Asset Type', 'Asset Subtype', 'Beds', 'Baths', 'Sq Ft',
+  'Total Debt', 'Senior Loan Willing', 'Payment Structure Willing',
+  'Price Sought', 'Price Reasoning', 'Down Payment Needed', 'Down Payment Non-Negotiable',
+  'Status'
+];
+
+const NOTE_COLUMNS = ['Lead ID', 'Timestamp', 'Note'];
+
+function doGet(e) {
+  const action = e.parameter.action;
+  if (action === 'ping') {
+    return jsonOut({ ok: true, message: 'Seller Lead Form backend is alive.' });
+  }
+  return jsonOut({ ok: false, error: 'Use POST for this API.' });
+}
+
+function doPost(e) {
+  let body;
+  try {
+    body = JSON.parse(e.postData.contents);
+  } catch (err) {
+    return jsonOut({ ok: false, error: 'Bad request body.' });
+  }
+
+  const action = body.action;
+  try {
+    switch (action) {
+      case 'submitLead':
+        return jsonOut(submitLead(body));
+      case 'adminLogin':
+        return jsonOut(adminLogin(body));
+      case 'forgotPassword':
+        return jsonOut(forgotPassword(body));
+      case 'getLeads':
+        return jsonOut(withSession(body, getLeads));
+      case 'addNote':
+        return jsonOut(withSession(body, addNote));
+      case 'updateStatus':
+        return jsonOut(withSession(body, updateStatus));
+      case 'exportToSheet':
+        return jsonOut(withSession(body, exportToSheet));
+      case 'deleteAllLeads':
+        return jsonOut(withSession(body, deleteAllLeads));
+      default:
+        return jsonOut({ ok: false, error: 'Unknown action.' });
+    }
+  } catch (err) {
+    return jsonOut({ ok: false, error: String(err) });
+  }
+}
+
+function jsonOut(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+// ---------- Sheets helpers ----------
+
+function getSheet(name, columns) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(name);
+  if (!sheet) {
+    sheet = ss.insertSheet(name);
+    sheet.appendRow(columns);
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+
+function sheetToObjects(sheet) {
+  const values = sheet.getDataRange().getValues();
+  if (values.length < 2) return [];
+  const headers = values[0];
+  const rows = [];
+  for (let i = 1; i < values.length; i++) {
+    const row = values[i];
+    if (row.every(function (c) { return c === '' || c === null; })) continue;
+    const obj = {};
+    headers.forEach(function (h, idx) { obj[h] = row[idx]; });
+    obj._row = i + 1; // 1-indexed sheet row, for in-place updates
+    rows.push(obj);
+  }
+  return rows;
+}
+
+// ---------- Public: submit a lead ----------
+
+function submitLead(body) {
+  const d = body.data || {};
+  const required = ['role', 'email', 'phone', 'street', 'city', 'state', 'zip', 'units', 'assetType'];
+  for (const key of required) {
+    if (d[key] === undefined || d[key] === null || d[key] === '') {
+      return { ok: false, error: 'Missing required field: ' + key };
+    }
+  }
+
+  const sheet = getSheet(LEADS_SHEET, LEAD_COLUMNS);
+  const leadId = Utilities.getUuid();
+  const submittedAt = new Date().toISOString();
+
+  sheet.appendRow([
+    leadId, submittedAt, d.role, d.email, d.phone, d.socialLink || '',
+    d.street, d.city, d.state, d.zip, d.units,
+    d.assetType, d.assetSubtype || '', d.beds || '', d.baths || '', d.sqft || '',
+    (d.totalDebt === undefined || d.totalDebt === null || d.totalDebt === '') ? 'Unknown' : d.totalDebt,
+    d.seniorLoanWilling, d.paymentStructureWilling,
+    d.priceSought, d.priceReasoning,
+    (d.downPaymentNeeded === undefined || d.downPaymentNeeded === '') ? 'Skipped' : d.downPaymentNeeded,
+    d.downPaymentNonNegotiable || 'N/A',
+    'New'
+  ]);
+
+  return { ok: true, leadId: leadId };
+}
+
+// ---------- Admin auth ----------
+
+function adminLogin(body) {
+  const props = PropertiesService.getScriptProperties();
+  const password = props.getProperty('ADMIN_PASSWORD');
+  if (!password || body.password !== password) {
+    return { ok: false, error: 'Incorrect password.' };
+  }
+  return { ok: true, token: makeSessionToken() };
+}
+
+function forgotPassword(body) {
+  // Always return the same generic message whether or not the code word
+  // matched, so a caller can't use the response to guess the code word.
+  const props = PropertiesService.getScriptProperties();
+  const codeWord = props.getProperty('RECOVERY_CODE_WORD');
+  const adminEmail = props.getProperty('ADMIN_EMAIL');
+  const password = props.getProperty('ADMIN_PASSWORD');
+
+  if (codeWord && adminEmail && password && body.codeWord === codeWord) {
+    MailApp.sendEmail({
+      to: adminEmail,
+      subject: 'Seller Lead Form — admin password recovery',
+      body: 'Your admin password is:\n\n' + password + '\n\nIf you did not request this, someone else knows your recovery code word — consider changing it in the Apps Script project\'s Script Properties.'
+    });
+  }
+  return { ok: true, message: 'If the code word was correct, a recovery email was just sent.' };
+}
+
+function makeSessionToken() {
+  const secret = PropertiesService.getScriptProperties().getProperty('SESSION_SECRET');
+  const expires = Date.now() + SESSION_HOURS * 60 * 60 * 1000;
+  const sig = hmacHex(String(expires), secret);
+  return expires + '.' + sig;
+}
+
+function verifySessionToken(token) {
+  if (!token || token.indexOf('.') === -1) return false;
+  const parts = token.split('.');
+  const expires = Number(parts[0]);
+  const sig = parts[1];
+  if (!expires || expires < Date.now()) return false;
+  const secret = PropertiesService.getScriptProperties().getProperty('SESSION_SECRET');
+  return hmacHex(String(expires), secret) === sig;
+}
+
+function hmacHex(value, secret) {
+  const raw = Utilities.computeHmacSha256Signature(value, secret);
+  return raw.map(function (b) {
+    const v = (b < 0 ? b + 256 : b).toString(16);
+    return v.length === 1 ? '0' + v : v;
+  }).join('');
+}
+
+function withSession(body, fn) {
+  if (!verifySessionToken(body.token)) {
+    return { ok: false, error: 'Session expired or invalid. Please log in again.' };
+  }
+  return fn(body);
+}
+
+// ---------- Admin: leads + notes ----------
+
+function getLeads(body) {
+  const leadsSheet = getSheet(LEADS_SHEET, LEAD_COLUMNS);
+  const notesSheet = getSheet(NOTES_SHEET, NOTE_COLUMNS);
+  const leads = sheetToObjects(leadsSheet);
+  const notes = sheetToObjects(notesSheet);
+
+  const notesByLead = {};
+  notes.forEach(function (n) {
+    const id = n['Lead ID'];
+    if (!notesByLead[id]) notesByLead[id] = [];
+    notesByLead[id].push({ timestamp: n['Timestamp'], note: n['Note'] });
+  });
+
+  leads.forEach(function (l) {
+    l.notes = notesByLead[l['Lead ID']] || [];
+  });
+
+  return { ok: true, leads: leads };
+}
+
+function addNote(body) {
+  if (!body.leadId || !body.note) return { ok: false, error: 'Missing leadId or note.' };
+  const sheet = getSheet(NOTES_SHEET, NOTE_COLUMNS);
+  sheet.appendRow([body.leadId, new Date().toISOString(), body.note]);
+  return { ok: true };
+}
+
+function updateStatus(body) {
+  if (!body.leadId || !body.status) return { ok: false, error: 'Missing leadId or status.' };
+  const sheet = getSheet(LEADS_SHEET, LEAD_COLUMNS);
+  const leads = sheetToObjects(sheet);
+  const match = leads.find(function (l) { return l['Lead ID'] === body.leadId; });
+  if (!match) return { ok: false, error: 'Lead not found.' };
+  const statusCol = LEAD_COLUMNS.indexOf('Status') + 1;
+  sheet.getRange(match._row, statusCol).setValue(body.status);
+  return { ok: true };
+}
+
+// ---------- Admin: export + gated delete ----------
+
+function exportToSheet(body) {
+  const leadsSheet = getSheet(LEADS_SHEET, LEAD_COLUMNS);
+  const notesSheet = getSheet(NOTES_SHEET, NOTE_COLUMNS);
+  const leads = sheetToObjects(leadsSheet);
+
+  if (leads.length === 0) {
+    return { ok: false, error: 'No leads to export.' };
+  }
+
+  const notes = sheetToObjects(notesSheet);
+  const notesByLead = {};
+  notes.forEach(function (n) {
+    const id = n['Lead ID'];
+    const line = '[' + n['Timestamp'] + '] ' + n['Note'];
+    notesByLead[id] = notesByLead[id] ? notesByLead[id] + ' | ' + line : line;
+  });
+
+  const now = new Date();
+  const stamp = Utilities.formatDate(now, Session.getScriptTimeZone(), 'yyyy-MM-dd HH-mm');
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let tabName = 'Export ' + stamp;
+  let suffix = 1;
+  while (ss.getSheetByName(tabName)) {
+    tabName = 'Export ' + stamp + ' (' + (++suffix) + ')';
+  }
+  const exportSheet = ss.insertSheet(tabName);
+  const headers = LEAD_COLUMNS.concat(['All Notes', 'Exported At']);
+  exportSheet.appendRow(headers);
+  exportSheet.setFrozenRows(1);
+
+  const exportedAt = now.toISOString();
+  leads.forEach(function (l) {
+    const row = LEAD_COLUMNS.map(function (c) { return l[c]; });
+    row.push(notesByLead[l['Lead ID']] || '');
+    row.push(exportedAt);
+    exportSheet.appendRow(row);
+  });
+
+  const exportToken = Utilities.getUuid();
+  const props = PropertiesService.getScriptProperties();
+  props.setProperty('EXPORT_TOKEN', exportToken);
+  props.setProperty('EXPORT_TOKEN_EXPIRES', String(Date.now() + 30 * 60 * 1000));
+
+  return {
+    ok: true,
+    exportedCount: leads.length,
+    tabName: tabName,
+    exportToken: exportToken
+  };
+}
+
+function deleteAllLeads(body) {
+  const props = PropertiesService.getScriptProperties();
+  const storedToken = props.getProperty('EXPORT_TOKEN');
+  const expires = Number(props.getProperty('EXPORT_TOKEN_EXPIRES') || 0);
+
+  if (!storedToken || !body.exportToken || body.exportToken !== storedToken) {
+    return { ok: false, error: 'You must export the current data before it can be deleted.' };
+  }
+  if (Date.now() > expires) {
+    return { ok: false, error: 'Export confirmation expired — please export again before deleting.' };
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const leadsSheet = getSheet(LEADS_SHEET, LEAD_COLUMNS);
+  const notesSheet = getSheet(NOTES_SHEET, NOTE_COLUMNS);
+
+  clearSheetBody(leadsSheet);
+  clearSheetBody(notesSheet);
+
+  props.deleteProperty('EXPORT_TOKEN');
+  props.deleteProperty('EXPORT_TOKEN_EXPIRES');
+
+  return { ok: true, message: 'CRM data cleared. Exported copy is safe in tab.' };
+}
+
+function clearSheetBody(sheet) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow > 1) {
+    sheet.deleteRows(2, lastRow - 1);
+  }
+}

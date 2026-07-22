@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Seller Lead Intake</title>
+<style>
+  :root {
+    --navy: #10233c;
+    --navy-light: #16324f;
+    --accent: #1f7a5c;
+    --accent-light: #e7f4ef;
+    --danger: #b3372c;
+    --danger-light: #fbeceb;
+    --warn: #a5680f;
+    --warn-light: #fdf3e2;
+    --border: #d8dee5;
+    --text: #1c2733;
+    --muted: #5b6b7a;
+    --bg: #f4f6f8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header.top {
+    background: var(--navy);
+    color: #fff;
+    padding: 16px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  header.top h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  header.top button {
+    background: transparent;
+    border: 1px solid rgba(255,255,255,0.4);
+    color: #fff;
+    padding: 8px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  header.top button:hover { background: rgba(255,255,255,0.1); }
+
+  .wrap { max-width: 720px; margin: 0 auto; padding: 24px 16px 80px; }
+  .card {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px;
+    margin-bottom: 16px;
+  }
+  h2.step-title { margin: 0 0 4px; font-size: 20px; }
+  p.step-sub { margin: 0 0 20px; color: var(--muted); font-size: 14px; }
+
+  .progress { display: flex; gap: 4px; margin-bottom: 20px; }
+  .progress div { height: 4px; flex: 1; background: var(--border); border-radius: 2px; }
+  .progress div.done { background: var(--accent); }
+
+  label.field-label { display: block; font-weight: 600; font-size: 14px; margin: 16px 0 6px; }
+  label.field-label .req { color: var(--danger); font-weight: 400; }
+  input[type=text], input[type=email], input[type=tel], input[type=number], input[type=password], select, textarea {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 14px;
+    font-family: inherit;
+  }
+  textarea { resize: vertical; min-height: 70px; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .row3 { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 12px; }
+
+  .choice-group { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+  .choice-btn {
+    border: 1px solid var(--border);
+    background: #fff;
+    padding: 10px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  .choice-btn.selected { border-color: var(--accent); background: var(--accent-light); color: var(--accent); font-weight: 600; }
+  .choice-btn:hover { border-color: var(--accent); }
+
+  .banner {
+    border-radius: 8px;
+    padding: 12px 14px;
+    font-size: 13px;
+    margin-bottom: 16px;
+  }
+  .banner.info { background: var(--accent-light); color: #145039; border: 1px solid #b8ddcc; }
+  .banner.warn { background: var(--warn-light); color: #7a4d0a; border: 1px solid #f0d9a6; }
+  .banner.danger { background: var(--danger-light); color: #7d2820; border: 1px solid #edc0bb; }
+
+  .error-text { color: var(--danger); font-size: 13px; margin-top: 6px; display: none; }
+  .error-text.show { display: block; }
+
+  .nav-row { display: flex; justify-content: space-between; margin-top: 24px; }
+  button.btn {
+    padding: 11px 22px;
+    border-radius: 6px;
+    border: none;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button.btn.primary { background: var(--accent); color: #fff; }
+  button.btn.primary:hover { background: #17614a; }
+  button.btn.secondary { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+  button.btn.secondary:hover { background: #eee; }
+  button.btn.ghost-small {
+    background: transparent; border: 1px solid var(--border); color: var(--muted);
+    padding: 6px 10px; font-size: 12px; border-radius: 5px; cursor: pointer;
+  }
+  button.btn.ghost-small.active { border-color: var(--warn); color: var(--warn); background: var(--warn-light); }
+
+  .review-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 20px; font-size: 14px; }
+  .review-grid dt { color: var(--muted); font-size: 12px; margin: 0; }
+  .review-grid dd { margin: 2px 0 8px; font-weight: 500; }
+
+  .success-box { text-align: center; padding: 40px 20px; }
+  .success-box .check { font-size: 48px; }
+
+  /* ---------- Admin ---------- */
+  .modal-backdrop {
+    position: fixed; inset: 0; background: rgba(10,20,30,0.55);
+    display: flex; align-items: center; justify-content: center; z-index: 50;
+    padding: 16px;
+  }
+  .modal-box {
+    background: #fff; border-radius: 10px; padding: 24px; width: 100%; max-width: 380px;
+  }
+  .modal-box h3 { margin-top: 0; }
+  .link-btn { background: none; border: none; color: var(--accent); cursor: pointer; font-size: 13px; padding: 0; }
+
+  .admin-wrap { max-width: 1100px; margin: 0 auto; padding: 20px 16px 80px; }
+  .admin-toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; gap: 12px; flex-wrap: wrap; }
+  .admin-toolbar .title { font-size: 20px; font-weight: 700; }
+  table.crm-table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  table.crm-table th, table.crm-table td { padding: 10px 12px; text-align: left; font-size: 13px; border-bottom: 1px solid var(--border); }
+  table.crm-table th { background: #eef1f4; color: var(--muted); font-weight: 600; }
+  table.crm-table tr:hover td { background: #fafbfc; cursor: pointer; }
+  .status-pill { padding: 3px 9px; border-radius: 20px; font-size: 11px; font-weight: 600; background: var(--accent-light); color: var(--accent); }
+
+  .detail-overlay {
+    position: fixed; inset: 0; background: rgba(10,20,30,0.55);
+    display: flex; justify-content: flex-end; z-index: 60;
+  }
+  .detail-panel {
+    background: #fff; width: 100%; max-width: 520px; height: 100%; overflow-y: auto; padding: 24px;
+  }
+  .notes-list { border-top: 1px solid var(--border); margin-top: 16px; padding-top: 12px; }
+  .note-item { background: #f7f8fa; border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; font-size: 13px; }
+  .note-item .ts { color: var(--muted); font-size: 11px; display: block; margin-bottom: 2px; }
+
+  .danger-zone { border: 1px solid #edc0bb; background: var(--danger-light); border-radius: 8px; padding: 16px; margin-top: 24px; }
+
+  [hidden] { display: none !important; }
+  .small-muted { font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <h1>Seller Lead Intake</h1>
+  <button id="admin-access-btn">Admin Access</button>
+</header>
+
+<!-- ================= PUBLIC WIZARD ================= -->
+<div class="wrap" id="public-view">
+  <div class="progress" id="progress-bar"></div>
+  <div class="card" id="step-container"></div>
+</div>
+
+<!-- ================= ADMIN LOGIN MODAL ================= -->
+<div class="modal-backdrop" id="admin-modal" hidden>
+  <div class="modal-box">
+    <div id="login-form">
+      <h3>Admin Access</h3>
+      <label class="field-label">Password</label>
+      <input type="password" id="admin-password-input" autocomplete="current-password">
+      <div class="error-text" id="login-error"></div>
+      <div class="nav-row">
+        <button class="btn secondary" id="admin-cancel-btn">Cancel</button>
+        <button class="btn primary" id="admin-login-btn">Log In</button>
+      </div>
+      <div style="margin-top:14px;">
+        <button class="link-btn" id="forgot-password-link">Forgot password?</button>
+      </div>
+    </div>
+    <div id="forgot-form" hidden>
+      <h3>Password Recovery</h3>
+      <p class="small-muted">Enter your recovery code word. If it matches, the current admin password will be emailed to the registered admin address.</p>
+      <label class="field-label">Code word</label>
+      <input type="text" id="code-word-input">
+      <div class="nav-row">
+        <button class="btn secondary" id="forgot-cancel-btn">Back</button>
+        <button class="btn primary" id="forgot-submit-btn">Send Recovery Email</button>
+      </div>
+      <div class="small-muted" id="forgot-result" style="margin-top:10px;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= ADMIN CRM ================= -->
+<div class="admin-wrap" id="admin-view" hidden>
+  <div class="admin-toolbar">
+    <div class="title">Lead CRM</div>
+    <div>
+      <button class="btn secondary" id="export-btn">Export to Google Sheets</button>
+      <button class="btn secondary" id="admin-logout-btn">Log Out</button>
+    </div>
+  </div>
+  <div id="admin-message" class="banner info" hidden></div>
+  <div id="crm-table-wrap">
+    <table class="crm-table">
+      <thead>
+        <tr>
+          <th>Submitted</th><th>Role</th><th>Contact</th><th>Address</th><th>Asset Type</th><th>Price Sought</th><th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="crm-tbody"></tbody>
+    </table>
+  </div>
+  <div id="crm-empty" class="small-muted" style="padding:20px;" hidden>No leads yet.</div>
+
+  <div class="danger-zone" id="delete-zone" hidden>
+    <strong>Start Fresh</strong>
+    <p class="small-muted">Your export just completed successfully. You may now clear the CRM to start fresh — the exported copy is safe in its own sheet tab regardless of what you choose here.</p>
+    <button class="btn secondary" id="delete-step-btn">Delete All CRM Data&hellip;</button>
+  </div>
+</div>
+
+<!-- Lead detail slide-over -->
+<div class="detail-overlay" id="detail-overlay" hidden>
+  <div class="detail-panel" id="detail-panel"></div>
+</div>
+
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
