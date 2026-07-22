@@ -43,6 +43,16 @@ password recovery by email):
   export (enforced server-side, not just in the UI), and requires three
   separate confirmations, the last of which requires typing `DELETE`.
 
+**Non-admin "Check Status On My Existing Leads"** — a submitter can look up
+every lead they've filed by re-entering the same email address, no password.
+That's a deliberate tradeoff: knowing the email is the only access check, so
+the intake wizard shows a persistent reminder (once an email's been entered)
+that leads and notes will be reachable under that exact address, and
+recommends using one only they control. They can add their own notes but
+never edit or delete the original submission, and they only ever see their
+own notes — any internal notes you add as admin stay admin-only (notes are
+tagged by author server-side to enforce that split).
+
 Nothing here is a build step or a framework — plain HTML/CSS/JS, same spirit
 as [`offer-wizard`](https://github.com/pharaohm33/offer-wizard), except this
 one needs real persistent storage across visitors and sessions, which is why

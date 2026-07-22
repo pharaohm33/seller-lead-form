@@ -26,7 +26,7 @@ const LEAD_COLUMNS = [
   'Status'
 ];
 
-const NOTE_COLUMNS = ['Lead ID', 'Timestamp', 'Note'];
+const NOTE_COLUMNS = ['Lead ID', 'Timestamp', 'Note', 'Author'];
 
 function doGet(e) {
   const action = e.parameter.action;
@@ -63,6 +63,10 @@ function doPost(e) {
         return jsonOut(withSession(body, exportToSheet));
       case 'deleteAllLeads':
         return jsonOut(withSession(body, deleteAllLeads));
+      case 'getLeadsByEmail':
+        return jsonOut(getLeadsByEmail(body));
+      case 'addPublicNote':
+        return jsonOut(addPublicNote(body));
       default:
         return jsonOut({ ok: false, error: 'Unknown action.' });
     }
@@ -85,8 +89,21 @@ function getSheet(name, columns) {
     sheet = ss.insertSheet(name);
     sheet.appendRow(columns);
     sheet.setFrozenRows(1);
+  } else {
+    ensureHeaders(sheet, columns);
   }
   return sheet;
+}
+
+// Adds any columns that didn't exist yet (e.g. a sheet created before a
+// later feature added a new field) without disturbing existing data.
+function ensureHeaders(sheet, columns) {
+  const lastCol = sheet.getLastColumn();
+  const existing = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0] : [];
+  const missing = columns.filter(function (c) { return existing.indexOf(c) === -1; });
+  if (missing.length > 0) {
+    sheet.getRange(1, existing.length + 1, 1, missing.length).setValues([missing]);
+  }
 }
 
 function sheetToObjects(sheet) {
@@ -208,7 +225,7 @@ function getLeads(body) {
   notes.forEach(function (n) {
     const id = n['Lead ID'];
     if (!notesByLead[id]) notesByLead[id] = [];
-    notesByLead[id].push({ timestamp: n['Timestamp'], note: n['Note'] });
+    notesByLead[id].push({ timestamp: n['Timestamp'], note: n['Note'], author: n['Author'] || 'Admin' });
   });
 
   leads.forEach(function (l) {
@@ -221,7 +238,54 @@ function getLeads(body) {
 function addNote(body) {
   if (!body.leadId || !body.note) return { ok: false, error: 'Missing leadId or note.' };
   const sheet = getSheet(NOTES_SHEET, NOTE_COLUMNS);
-  sheet.appendRow([body.leadId, new Date().toISOString(), body.note]);
+  sheet.appendRow([body.leadId, new Date().toISOString(), body.note, 'Admin']);
+  return { ok: true };
+}
+
+// ---------- Public: non-admin "check my leads" by email ----------
+// No password on this path by design -- knowing the email is the access
+// check. Only that email's own leads and only that email's own notes are
+// ever returned; admin notes are never exposed here.
+
+function getLeadsByEmail(body) {
+  if (!body.email) return { ok: false, error: 'Email is required.' };
+  const targetEmail = String(body.email).trim().toLowerCase();
+
+  const leadsSheet = getSheet(LEADS_SHEET, LEAD_COLUMNS);
+  const notesSheet = getSheet(NOTES_SHEET, NOTE_COLUMNS);
+  const leads = sheetToObjects(leadsSheet).filter(function (l) {
+    return String(l['Contact Email'] || '').trim().toLowerCase() === targetEmail;
+  });
+  const notes = sheetToObjects(notesSheet);
+
+  const notesByLead = {};
+  notes.forEach(function (n) {
+    const author = String(n['Author'] || 'Admin').trim().toLowerCase();
+    if (author !== targetEmail) return; // never expose admin's or anyone else's notes
+    const id = n['Lead ID'];
+    if (!notesByLead[id]) notesByLead[id] = [];
+    notesByLead[id].push({ timestamp: n['Timestamp'], note: n['Note'] });
+  });
+
+  leads.forEach(function (l) {
+    l.notes = notesByLead[l['Lead ID']] || [];
+    delete l._row;
+  });
+
+  return { ok: true, leads: leads };
+}
+
+function addPublicNote(body) {
+  if (!body.leadId || !body.note || !body.email) return { ok: false, error: 'Missing information.' };
+  const targetEmail = String(body.email).trim().toLowerCase();
+  const leadsSheet = getSheet(LEADS_SHEET, LEAD_COLUMNS);
+  const leads = sheetToObjects(leadsSheet);
+  const match = leads.find(function (l) { return l['Lead ID'] === body.leadId; });
+  if (!match || String(match['Contact Email'] || '').trim().toLowerCase() !== targetEmail) {
+    return { ok: false, error: 'That lead does not belong to this email address.' };
+  }
+  const notesSheet = getSheet(NOTES_SHEET, NOTE_COLUMNS);
+  notesSheet.appendRow([body.leadId, new Date().toISOString(), body.note, body.email]);
   return { ok: true };
 }
 

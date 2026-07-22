@@ -208,6 +208,24 @@
   </div>
 </div>
 
+<!-- ================= NON-ADMIN: CHECK MY LEADS ================= -->
+<div class="wrap" id="status-view" hidden>
+  <div class="card">
+    <h2 class="step-title">Check Status On My Existing Leads</h2>
+    <p class="step-sub">Enter the email address you used when submitting a lead. Anyone who knows that email
+      address can look up and add notes to what was submitted under it — no separate password is used here.</p>
+    <label class="field-label">Email address</label>
+    <input type="email" id="status-email-input" placeholder="name@example.com">
+    <div class="error-text" id="status-email-error">Please enter a valid email address.</div>
+    <div class="nav-row">
+      <button class="btn secondary" id="status-back-btn">Back to Home</button>
+      <button class="btn primary" id="status-lookup-btn">Look Up My Leads</button>
+    </div>
+  </div>
+  <div id="status-message" class="banner info" hidden></div>
+  <div id="status-leads-container"></div>
+</div>
+
 <!-- ================= ADMIN CRM ================= -->
 <div class="admin-wrap" id="admin-view" hidden>
   <div class="admin-toolbar">
@@ -242,7 +260,7 @@
   <div class="detail-panel" id="detail-panel"></div>
 </div>
 
-<script src="config.js?v=3"></script>
-<script src="app.js?v=3"></script>
+<script src="config.js?v=4"></script>
+<script src="app.js?v=4"></script>
 </body>
 </html>

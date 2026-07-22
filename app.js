@@ -37,11 +37,13 @@ const steps = [
         <p>Admin contact: <strong>${ADMIN_CONTACT_PHONE}</strong></p>
         <p class="hint">This should take about 5 minutes. You can identify yourself as the seller, or as a
         connector/bird dog, wholesaler, realtor, consultant, associate, or referral bringing us a seller.</p>
-        <div class="nav-row" style="justify-content:flex-end;">
+        <div class="nav-row">
+          <button class="btn secondary" id="check-status-btn">Check Status On My Existing Leads (Non-Admin)</button>
           <button class="btn primary" id="start-btn">Start</button>
         </div>
       `;
       root.querySelector("#start-btn").onclick = () => goTo(1);
+      root.querySelector("#check-status-btn").onclick = () => showStatusView();
     }
   },
   {
@@ -487,6 +489,16 @@ function renderStep() {
   step.render(container);
   renderProgress();
 
+  if (stepIndex > 1 && answers.email) {
+    const emailBanner = document.createElement("div");
+    emailBanner.className = "banner info";
+    emailBanner.style.marginBottom = "16px";
+    emailBanner.innerHTML = `Submitting as <strong>${escapeHtml(answers.email)}</strong> — your leads (and any
+      notes you add to them later) will be accessible using this exact email address, so please use one only
+      you have access to.`;
+    container.insertBefore(emailBanner, container.firstChild);
+  }
+
   const nav = document.createElement("div");
   nav.className = "nav-row";
   const isLast = stepIndex === steps.length - 1;
@@ -558,6 +570,113 @@ async function submitLead(container) {
 }
 
 renderStep();
+
+/* ============================================================
+   NON-ADMIN: CHECK MY LEADS BY EMAIL
+   No password on this path by design — knowing the email is the access
+   check, matching how the backend's getLeadsByEmail/addPublicNote work.
+   ============================================================ */
+
+function showStatusView() {
+  document.getElementById("public-view").hidden = true;
+  document.getElementById("status-view").hidden = false;
+  document.getElementById("status-email-input").value = answers.email || "";
+  document.getElementById("status-leads-container").innerHTML = "";
+  document.getElementById("status-message").hidden = true;
+  document.getElementById("status-email-error").classList.remove("show");
+}
+
+function hideStatusView() {
+  document.getElementById("status-view").hidden = true;
+  document.getElementById("public-view").hidden = false;
+}
+
+document.getElementById("status-back-btn").onclick = hideStatusView;
+
+document.getElementById("status-lookup-btn").onclick = async () => {
+  const emailInput = document.getElementById("status-email-input");
+  const email = emailInput.value.trim();
+  const errEl = document.getElementById("status-email-error");
+  const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  errEl.classList.toggle("show", !emailOk);
+  if (!emailOk) return;
+
+  const msgEl = document.getElementById("status-message");
+  msgEl.hidden = false;
+  msgEl.className = "banner info";
+  msgEl.textContent = "Looking up your leads...";
+  document.getElementById("status-leads-container").innerHTML = "";
+
+  const res = await api("getLeadsByEmail", { email });
+  if (!res.ok) {
+    msgEl.className = "banner danger";
+    msgEl.textContent = res.error || "Something went wrong.";
+    return;
+  }
+  if (res.leads.length === 0) {
+    msgEl.className = "banner info";
+    msgEl.textContent = "No leads found for that email address.";
+    return;
+  }
+  msgEl.hidden = true;
+  renderStatusLeads(email, res.leads);
+};
+
+function renderStatusLeads(email, leads) {
+  const container = document.getElementById("status-leads-container");
+  container.innerHTML = leads.map(lead => {
+    const fields = [
+      ["Submitted", formatDate(lead["Submitted At"])],
+      ["Role", lead["Role"]],
+      ["Address", `${lead["Street Address"]}, ${lead["City"]}, ${lead["State"]} ${lead["Zip"]}`],
+      ["Units", lead["Units"]],
+      ["Asset Type", lead["Asset Type"]], ["Subtype", lead["Asset Subtype"] || "—"],
+      ["Beds", lead["Beds"] || "—"], ["Baths", lead["Baths"] || "—"], ["Sq Ft", lead["Sq Ft"] || "—"],
+      ["Total Debt", lead["Total Debt"]],
+      ["Willing: New Senior Loan", lead["Senior Loan Willing"]],
+      ["Willing: Payment Structure", lead["Payment Structure Willing"]],
+      ["Price Sought", lead["Price Sought"]], ["Price Reasoning", lead["Price Reasoning"]],
+      ["Down Payment Needed", lead["Down Payment Needed"]],
+      ["Seller Flexible on Down Payment", lead["Down Payment Non-Negotiable"]],
+      ["Status", lead["Status"] || "New"],
+    ];
+    return `
+      <div class="card">
+        <dl class="review-grid">
+          ${fields.map(([k,v]) => `<div><dt>${k}</dt><dd>${escapeHtml(String(v ?? "—"))}</dd></div>`).join("")}
+        </dl>
+        <div class="notes-list">
+          <strong>Your Notes</strong>
+          <div>
+            ${(lead.notes || []).map(n => `
+              <div class="note-item"><span class="ts">${formatDate(n.timestamp)}</span>${escapeHtml(n.note)}</div>
+            `).join("") || `<p class="small-muted">No notes yet.</p>`}
+          </div>
+          <textarea class="status-note-input" placeholder="Add a note (this can't edit or delete the info above — only admin can do that)"></textarea>
+          <button class="btn primary status-add-note-btn" style="margin-top:8px;" data-lead-id="${lead["Lead ID"]}">Add Note</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  container.querySelectorAll(".status-add-note-btn").forEach(btn => {
+    btn.onclick = async () => {
+      const card = btn.closest(".card");
+      const textarea = card.querySelector(".status-note-input");
+      const note = textarea.value.trim();
+      if (!note) return;
+      btn.disabled = true;
+      const res = await api("addPublicNote", { email, leadId: btn.dataset.leadId, note });
+      btn.disabled = false;
+      if (res.ok) {
+        const lead = leads.find(l => l["Lead ID"] === btn.dataset.leadId);
+        lead.notes = lead.notes || [];
+        lead.notes.push({ timestamp: new Date().toISOString(), note });
+        renderStatusLeads(email, leads);
+      }
+    };
+  });
+}
 
 /* ============================================================
    ADMIN
@@ -709,7 +828,7 @@ function openDetail(lead) {
       <strong>Notes</strong>
       <div id="notes-container">
         ${(lead.notes || []).map(n => `
-          <div class="note-item"><span class="ts">${formatDate(n.timestamp)}</span>${escapeHtml(n.note)}</div>
+          <div class="note-item"><span class="ts">${formatDate(n.timestamp)} — ${escapeHtml(n.author || "Admin")}</span>${escapeHtml(n.note)}</div>
         `).join("") || `<p class="small-muted">No notes yet.</p>`}
       </div>
       <textarea id="new-note-input" placeholder="Add a note (raw lead data above can't be edited or deleted)"></textarea>
