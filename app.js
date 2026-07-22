@@ -39,6 +39,11 @@ const steps = [
         <p>Admin contact: <strong>${ADMIN_CONTACT_PHONE}</strong></p>
         <p class="hint">This should take about 5 minutes. You can identify yourself as the seller, or as a
         connector/bird dog, wholesaler, realtor, consultant, associate, or referral bringing us a seller.</p>
+        <p class="hint">If anything here is marked required and you don't have that information yet — for
+        example, you're not the seller yourself and need to check with them — stop and use
+        <strong>"Save My Progress"</strong> at the top of the page. That saves a link back to exactly where you
+        left off (for your own use only, not for sharing with anyone else). Go get what's missing, then come
+        back and pick up right where you stopped.</p>
         <div class="nav-row">
           <button class="btn secondary" id="check-status-btn">Check Status On My Existing Leads (Non-Admin)</button>
           <button class="btn primary" id="start-btn">Start</button>
@@ -861,6 +866,46 @@ async function submitLead(container) {
   }
 }
 
+/* ---------- Save/resume progress via URL (client-side only, no backend) ---------- */
+
+function buildShareUrl() {
+  const payload = JSON.stringify({ a: answers, s: stepIndex });
+  const url = new URL(window.location.href);
+  url.search = "";
+  url.searchParams.set("resume", payload); // URLSearchParams handles encoding
+  return url.toString();
+}
+
+function restoreFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const raw = params.get("resume"); // already decoded by URLSearchParams
+  if (!raw) return false;
+  try {
+    const payload = JSON.parse(raw);
+    Object.assign(answers, payload.a || {});
+    stepIndex = Math.min(Math.max(payload.s || 0, 0), steps.length - 1);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+document.getElementById("save-progress-btn").onclick = () => {
+  const url = buildShareUrl();
+  window.history.replaceState(null, "", url);
+  const message = "This saved link lets you pick up exactly where you left off. It's for your own use — anyone who has this link can see and resume this data, so don't share it with anyone else.";
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url).then(() => {
+      alert("Link copied to your clipboard.\n\n" + message);
+    }).catch(() => {
+      prompt(message + "\n\nCopy this link:", url);
+    });
+  } else {
+    prompt(message + "\n\nCopy this link:", url);
+  }
+};
+
+restoreFromUrl();
 renderStep();
 
 /* ============================================================

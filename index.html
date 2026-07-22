@@ -169,7 +169,10 @@
 
 <header class="top">
   <h1>Seller Lead Intake</h1>
-  <button id="admin-access-btn">Admin Access</button>
+  <div style="display:flex; gap:8px;">
+    <button id="save-progress-btn">Save My Progress</button>
+    <button id="admin-access-btn">Admin Access</button>
+  </div>
 </header>
 
 <!-- ================= PUBLIC WIZARD ================= -->
@@ -210,16 +213,18 @@
 
 <!-- ================= NON-ADMIN: CHECK MY LEADS ================= -->
 <div class="wrap" id="status-view" hidden>
-  <div class="card">
+  <div class="card" style="text-align:center;">
     <h2 class="step-title">Check Status On My Existing Leads</h2>
-    <p class="step-sub">Enter the email address you used when submitting a lead. Anyone who knows that email
+    <p class="step-sub" style="max-width:420px; margin-left:auto; margin-right:auto;">Enter the email address you used when submitting a lead. Anyone who knows that email
       address can look up and add notes to what was submitted under it — no separate password is used here.</p>
-    <label class="field-label">Email address</label>
-    <input type="email" id="status-email-input" placeholder="name@example.com">
-    <div class="error-text" id="status-email-error">Please enter a valid email address.</div>
-    <div class="nav-row">
-      <button class="btn secondary" id="status-back-btn">Back to Home</button>
-      <button class="btn primary" id="status-lookup-btn">Look Up My Leads</button>
+    <div style="max-width:360px; margin:0 auto; text-align:left;">
+      <label class="field-label">Email address</label>
+      <input type="email" id="status-email-input" placeholder="name@example.com">
+      <div class="error-text" id="status-email-error">Please enter a valid email address.</div>
+    </div>
+    <div class="nav-row" style="justify-content:center; gap:12px; max-width:360px; margin-left:auto; margin-right:auto;">
+      <button class="btn secondary" id="status-back-btn" style="flex:1;">Back to Home</button>
+      <button class="btn primary" id="status-lookup-btn" style="flex:1;">Look Up My Leads</button>
     </div>
   </div>
   <div id="status-message" class="banner info" hidden></div>
@@ -260,7 +265,7 @@
   <div class="detail-panel" id="detail-panel"></div>
 </div>
 
-<script src="config.js?v=10"></script>
-<script src="app.js?v=10"></script>
+<script src="config.js?v=11"></script>
+<script src="app.js?v=11"></script>
 </body>
 </html>
