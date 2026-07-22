@@ -964,9 +964,10 @@ function renderStatusLeads(email, leads) {
           ${fields.map(([k,v]) => `<div><dt>${k}</dt><dd>${escapeHtml(String(v ?? "—"))}</dd></div>`).join("")}
         </dl>
         <div class="notes-list">
-          <strong>Your Notes (you can edit these)</strong>
+          <strong>Notes</strong>
+          <p class="small-muted" style="margin:2px 0 8px;">Notes from admin appear here too. You can only edit notes you added yourself.</p>
           <div class="status-notes-container" data-lead-id="${lead["Lead ID"]}">
-            ${(lead.notes || []).map(n => renderStatusNoteItem(n)).join("") || `<p class="small-muted">No notes yet.</p>`}
+            ${(lead.notes || []).map(n => renderStatusNoteItem(n, email)).join("") || `<p class="small-muted">No notes yet.</p>`}
           </div>
           <textarea class="status-note-input" placeholder="Add a note (this can't edit or delete the property/business info above — only admin can do that)"></textarea>
           <button class="btn primary status-add-note-btn" style="margin-top:8px;" data-lead-id="${lead["Lead ID"]}">Add Note</button>
@@ -987,7 +988,7 @@ function renderStatusLeads(email, leads) {
       if (res.ok) {
         const lead = leads.find(l => l["Lead ID"] === btn.dataset.leadId);
         lead.notes = lead.notes || [];
-        lead.notes.push({ noteId: res.noteId, timestamp: new Date().toISOString(), note });
+        lead.notes.push({ noteId: res.noteId, timestamp: new Date().toISOString(), note, author: email });
         renderStatusLeads(email, leads);
       }
     };
@@ -996,12 +997,14 @@ function renderStatusLeads(email, leads) {
   bindStatusNoteEdits(container, email, leads);
 }
 
-function renderStatusNoteItem(n) {
+function renderStatusNoteItem(n, email) {
+  const isMine = !!(n.author && email && n.author.toLowerCase() === email.toLowerCase());
+  const authorLabel = isMine ? "You" : (n.author || "Admin");
   return `
     <div class="note-item" data-note-id="${n.noteId || ""}">
-      <span class="ts">${formatDate(n.timestamp)}</span>
+      <span class="ts">${formatDate(n.timestamp)} — ${escapeHtml(authorLabel)}</span>
       <span class="note-text">${escapeHtml(n.note)}</span>
-      ${n.noteId ? `<button type="button" class="link-btn status-edit-note-btn" style="margin-left:8px;">Edit</button>` : ""}
+      ${isMine && n.noteId ? `<button type="button" class="link-btn status-edit-note-btn" style="margin-left:8px;">Edit</button>` : ""}
     </div>
   `;
 }
@@ -1144,6 +1147,7 @@ function renderCrmTable() {
       <td>${escapeHtml(l["Senior Loan Willing"] || "")}</td>
       <td>${escapeHtml(l["Payment Structure Willing"] || "")}</td>
       <td>${escapeHtml(String(l["Price Sought"] ?? ""))}</td>
+      <td>${escapeHtml(l["Closing Likelihood"] ? String(l["Closing Likelihood"]) + "/5" : "—")}</td>
       <td><span class="status-pill">${escapeHtml(l["Status"] || "New")}</span></td>
     </tr>
   `).join("");
@@ -1171,6 +1175,12 @@ function openDetail(lead) {
       ${LEAD_STATUSES.map(s =>
         `<option value="${s}" ${lead["Status"] === s ? "selected" : ""}>${s}</option>`).join("")}
     </select>
+    <label class="field-label">Closing Likelihood <span class="small-muted">(1 = lowest, 5 = highest opportunity to close)</span></label>
+    <select id="likelihood-select">
+      <option value="" ${!lead["Closing Likelihood"] ? "selected" : ""}>Not scored</option>
+      ${[1,2,3,4,5].map(n =>
+        `<option value="${n}" ${String(lead["Closing Likelihood"]) === String(n) ? "selected" : ""}>${n}</option>`).join("")}
+    </select>
     <dl class="review-grid" style="margin-top:16px;">
       ${fields.map(([k,v]) => `<div><dt>${k}</dt><dd>${escapeHtml(String(v ?? "—"))}</dd></div>`).join("")}
     </dl>
@@ -1191,6 +1201,10 @@ function openDetail(lead) {
     const res = await api("updateStatus", { token: sessionToken, leadId: lead["Lead ID"], status: e.target.value });
     if (res.ok) { lead["Status"] = e.target.value; renderCrmTable(); }
   };
+  panel.querySelector("#likelihood-select").onchange = async (e) => {
+    const res = await api("updateClosingLikelihood", { token: sessionToken, leadId: lead["Lead ID"], score: e.target.value });
+    if (res.ok) { lead["Closing Likelihood"] = e.target.value; renderCrmTable(); }
+  };
   panel.querySelector("#add-note-btn").onclick = async () => {
     const noteInput = panel.querySelector("#new-note-input");
     const note = noteInput.value.trim();
@@ -1198,7 +1212,7 @@ function openDetail(lead) {
     const res = await api("addNote", { token: sessionToken, leadId: lead["Lead ID"], note });
     if (res.ok) {
       lead.notes = lead.notes || [];
-      lead.notes.push({ timestamp: new Date().toISOString(), note });
+      lead.notes.push({ timestamp: new Date().toISOString(), note, author: "Admin" });
       openDetail(lead);
     }
   };

@@ -27,7 +27,7 @@ const LEAD_COLUMNS = [
   'Total Debt', 'Senior Loan Willing', 'Payment Structure Willing',
   'Price Sought', 'Price Reasoning', 'Down Payment Needed', 'Down Payment Non-Negotiable',
   'Market Status', 'Source Link',
-  'Status'
+  'Status', 'Closing Likelihood'
 ];
 
 const NOTE_COLUMNS = ['Lead ID', 'Timestamp', 'Note', 'Author', 'Note ID'];
@@ -63,6 +63,8 @@ function doPost(e) {
         return jsonOut(withSession(body, addNote));
       case 'updateStatus':
         return jsonOut(withSession(body, updateStatus));
+      case 'updateClosingLikelihood':
+        return jsonOut(withSession(body, updateClosingLikelihood));
       case 'exportToSheet':
         return jsonOut(withSession(body, exportToSheet));
       case 'deleteAllLeads':
@@ -288,8 +290,10 @@ function addNote(body) {
 
 // ---------- Public: non-admin "check my leads" by email ----------
 // No password on this path by design -- knowing the email is the access
-// check. Only that email's own leads and only that email's own notes are
-// ever returned; admin notes are never exposed here.
+// check. Only that email's own leads are ever returned. All notes on the
+// lead are visible here (admin's included), tagged by author, but editing
+// is still restricted server-side (see editPublicNote) to notes this same
+// email actually authored. Closing Likelihood is stripped -- admin-only.
 
 function getLeadsByEmail(body) {
   if (!body.email) return { ok: false, error: 'Email is required.' };
@@ -304,15 +308,14 @@ function getLeadsByEmail(body) {
 
   const notesByLead = {};
   notes.forEach(function (n) {
-    const author = String(n['Author'] || 'Admin').trim().toLowerCase();
-    if (author !== targetEmail) return; // never expose admin's or anyone else's notes
     const id = n['Lead ID'];
     if (!notesByLead[id]) notesByLead[id] = [];
-    notesByLead[id].push({ noteId: n['Note ID'], timestamp: n['Timestamp'], note: n['Note'] });
+    notesByLead[id].push({ noteId: n['Note ID'], timestamp: n['Timestamp'], note: n['Note'], author: n['Author'] || 'Admin' });
   });
 
   leads.forEach(function (l) {
     l.notes = notesByLead[l['Lead ID']] || [];
+    delete l['Closing Likelihood'];
     delete l._row;
   });
 
@@ -363,6 +366,21 @@ function updateStatus(body) {
   if (!match) return { ok: false, error: 'Lead not found.' };
   const statusCol = getColumnIndex(sheet, 'Status');
   sheet.getRange(match._row, statusCol).setValue(body.status);
+  return { ok: true };
+}
+
+// Manual for now -- admin sets 1-5 (or blank for "not scored") by hand.
+// Room to later add an auto-scoring rule (based on down payment requested,
+// total debt, asking price, current asset value) without touching how this
+// is read/displayed anywhere -- it's just a value in this one column.
+function updateClosingLikelihood(body) {
+  if (!body.leadId) return { ok: false, error: 'Missing leadId.' };
+  const sheet = getSheet(LEADS_SHEET, LEAD_COLUMNS);
+  const leads = sheetToObjects(sheet);
+  const match = leads.find(function (l) { return l['Lead ID'] === body.leadId; });
+  if (!match) return { ok: false, error: 'Lead not found.' };
+  const col = getColumnIndex(sheet, 'Closing Likelihood');
+  sheet.getRange(match._row, col).setValue(body.score || '');
   return { ok: true };
 }
 
