@@ -9,6 +9,13 @@ const ADMIN_CONTACT_PHONE = "+1 520 633 6437";
 
 const LEAD_STATUSES = ["New", "Contacted", "Under Review", "Offer Sent", "Offer Signed By Seller", "Closed", "Dead"];
 
+const FOLLOWUP_REMINDER = `<strong>Follow-up reminder:</strong> If an offer has been sent to your lead and they
+  haven't signed it yet, please follow up by phone or email roughly every 7 days. Log anything they counter
+  with in the notes, or text admin directly at <strong>${ADMIN_CONTACT_PHONE}</strong>. You don't need to follow
+  up if admin lets you know the deal is already closing, the seller is communicating directly and consistently
+  with admin, or the lead is marked Dead. When a deal closes, admin will reach out to you directly — by text for
+  the banking info needed to pay you, and by email for paperwork to sign.`;
+
 async function api(action, payload) {
   const res = await fetch(window.APP_CONFIG.APPS_SCRIPT_URL, {
     method: "POST",
@@ -853,6 +860,7 @@ async function submitLead(container) {
         <p class="step-sub">Your submission was received. Any agreed terms will still be confirmed directly
         with our admin (${ADMIN_CONTACT_PHONE}) before anything closes. Here's a copy of what was submitted:</p>
       </div>
+      <div class="banner info" style="text-align:left;">${FOLLOWUP_REMINDER}</div>
       <dl class="review-grid" style="text-align:left;">
         ${rows.map(([k,v]) => `<div><dt>${k}</dt><dd>${escapeHtml(String(v ?? "—"))}</dd></div>`).join("")}
       </dl>
@@ -915,6 +923,7 @@ function restartWizard() {
 }
 
 document.getElementById("restart-btn").onclick = restartWizard;
+document.getElementById("status-followup-reminder").innerHTML = FOLLOWUP_REMINDER;
 
 document.getElementById("save-progress-btn").onclick = () => {
   const url = buildShareUrl();
