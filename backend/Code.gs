@@ -484,7 +484,8 @@ function checkAddressDuplicate(body) {
     duplicate: true,
     partial: exactMatches.length === 0,
     ownedByYou: ownedByYou,
-    submittedAt: earliest['Submitted At']
+    submittedAt: earliest['Submitted At'],
+    status: earliest['Status'] || 'New'
   };
 }
 
