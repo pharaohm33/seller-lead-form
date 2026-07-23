@@ -1290,7 +1290,7 @@ function renderCrmTable() {
       <td>${formatDate(l["Submitted At"])}</td>
       <td>${escapeHtml(l["Role"] || "")}</td>
       <td>${escapeHtml(l["Contact Name"] || "")}<br><span class="small-muted">${escapeHtml(l["Contact Email"] || "")} · ${escapeHtml(l["Contact Phone"] || "")}</span></td>
-      <td>${escapeHtml(l["City"] || "")}, ${escapeHtml(l["State"] || "")}</td>
+      <td>${escapeHtml(l["Street Address"] || "")}<br><span class="small-muted">${escapeHtml(l["City"] || "")}, ${escapeHtml(l["State"] || "")}</span></td>
       <td>${escapeHtml(l["Asset Type"] || "")}</td>
       <td>${escapeHtml(l["Senior Loan Willing"] || "")}</td>
       <td>${escapeHtml(l["Payment Structure Willing"] || "")}</td>
