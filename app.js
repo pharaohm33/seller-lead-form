@@ -209,7 +209,12 @@ const steps = [
         const res = await api("checkAddressDuplicate", { street, city, state, zip, email: answers.email });
         if (!res.ok || !res.duplicate) { banner.hidden = true; return; }
         const dateStr = formatDate(res.submittedAt);
-        if (res.ownedByYou) {
+        if (res.partial) {
+          banner.className = res.ownedByYou ? "banner info" : "banner warn";
+          banner.textContent = res.ownedByYou
+            ? `You may have already submitted this as part of a multi-property (portfolio) entry on ${dateStr}.`
+            : `This address may be part of a previously submitted portfolio listing (multiple properties in one entry) from ${dateStr} — unless that was you, this lead may already belong to someone else.`;
+        } else if (res.ownedByYou) {
           banner.className = "banner info";
           banner.textContent = `You already submitted this address on ${dateStr}.`;
         } else {

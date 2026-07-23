@@ -385,21 +385,68 @@ function normalizeAddressPart(s) {
   return wordNormalized.replace(/\s+/g, '');
 }
 
+// Splits a "portfolio" street address entry (multiple properties in one
+// field, e.g. "118 & 144 Main St", "118-144 Main St", "118/144 Main St",
+// "118, 144 Main St", "118 and 144 Main St", or "118 Main St & 144 Main
+// St") into individual comparable addresses. A bare hyphen only splits
+// when it sits directly between two digit runs, so unit designators like
+// "123-A Main St" are left alone. Returns [rawStreet] unchanged when there's
+// nothing to split (including when it can't tell where the street name is).
+function extractPortfolioAddresses(rawStreet) {
+  const s = String(rawStreet || '').trim();
+  if (!s) return [];
+
+  const fragments = s
+    .split(/\s*&\s*|\s*\/\s*|\s*,\s*|\s+and\s+|(?<=\d)\s*-\s*(?=\d)/i)
+    .map(function (f) { return f.trim(); })
+    .filter(Boolean);
+  if (fragments.length <= 1) return [s];
+
+  const lastFragment = fragments[fragments.length - 1];
+  if (!/[a-zA-Z]/.test(lastFragment)) return [s]; // no street name anywhere; can't safely split
+
+  const lastMatch = lastFragment.match(/^(\d+)\s+(.+)$/);
+  const sharedStreetName = lastMatch ? lastMatch[2] : null;
+
+  return fragments.map(function (f) {
+    const isPureNumber = /^\d+$/.test(f);
+    return (isPureNumber && sharedStreetName) ? (f + ' ' + sharedStreetName) : f;
+  });
+}
+
 function checkAddressDuplicate(body) {
-  const street = normalizeAddressPart(body.street);
   const city = normalizeAddressPart(body.city);
   const state = normalizeAddressPart(body.state);
   const zip = normalizeAddressPart(body.zip);
-  if (!street || !city || !state || !zip) return { ok: true, duplicate: false };
+  const rawStreet = String(body.street || '').trim();
+  if (!rawStreet || !city || !state || !zip) return { ok: true, duplicate: false };
+
+  const newComponents = extractPortfolioAddresses(rawStreet).map(normalizeAddressPart);
 
   const sheet = getSheet(LEADS_SHEET, LEAD_COLUMNS);
-  const matches = sheetToObjects(sheet).filter(function (l) {
-    return normalizeAddressPart(l['Street Address']) === street &&
-      normalizeAddressPart(l['City']) === city &&
+  const sameLocation = sheetToObjects(sheet).filter(function (l) {
+    return normalizeAddressPart(l['City']) === city &&
       normalizeAddressPart(l['State']) === state &&
       normalizeAddressPart(l['Zip']) === zip;
   });
 
+  const exactMatches = [];
+  const partialMatches = [];
+
+  sameLocation.forEach(function (l) {
+    const existingRaw = String(l['Street Address'] || '').trim();
+    const existingComponents = extractPortfolioAddresses(existingRaw).map(normalizeAddressPart);
+    const isSimpleFullMatch = newComponents.length === 1 && existingComponents.length === 1 &&
+      newComponents[0] === existingComponents[0];
+    if (isSimpleFullMatch) {
+      exactMatches.push(l);
+      return;
+    }
+    const overlaps = newComponents.some(function (nc) { return existingComponents.indexOf(nc) !== -1; });
+    if (overlaps) partialMatches.push(l);
+  });
+
+  const matches = exactMatches.length > 0 ? exactMatches : partialMatches;
   if (matches.length === 0) return { ok: true, duplicate: false };
 
   const targetEmail = String(body.email || '').trim().toLowerCase();
@@ -410,7 +457,13 @@ function checkAddressDuplicate(body) {
     return new Date(a['Submitted At']) < new Date(b['Submitted At']) ? a : b;
   });
 
-  return { ok: true, duplicate: true, ownedByYou: ownedByYou, submittedAt: earliest['Submitted At'] };
+  return {
+    ok: true,
+    duplicate: true,
+    partial: exactMatches.length === 0,
+    ownedByYou: ownedByYou,
+    submittedAt: earliest['Submitted At']
+  };
 }
 
 // ---------- Public: non-admin "check my leads" by email ----------
