@@ -9,6 +9,24 @@ const ADMIN_CONTACT_PHONE = "+1 520 633 6437";
 
 const LEAD_STATUSES = ["New", "Contacted", "Under Review", "Offer Sent", "Negotiation", "Offer Signed By Seller", "In Escrow To Close", "Closed", "Dead"];
 
+const STATUS_COLORS = {
+  "New": { bg: "#e5e7eb", fg: "#374151" },
+  "Contacted": { bg: "#dbeafe", fg: "#1d4ed8" },
+  "Under Review": { bg: "#fdf3e2", fg: "#a5680f" },
+  "Offer Sent": { bg: "#1e3a8a", fg: "#ffffff" },
+  "Negotiation": { bg: "#111827", fg: "#ffffff" },
+  "Offer Signed By Seller": { bg: "#e7f4ef", fg: "#1f7a5c" },
+  "In Escrow To Close": { bg: "#14532d", fg: "#ffffff" },
+  "Closed": { bg: "#e5e7eb", fg: "#374151" },
+  "Dead": { bg: "#fbeceb", fg: "#b3372c" }
+};
+
+function statusPillHtml(status) {
+  const s = status || "New";
+  const colors = STATUS_COLORS[s] || STATUS_COLORS["New"];
+  return `<span class="status-pill" style="background:${colors.bg}; color:${colors.fg};">${escapeHtml(s)}</span>`;
+}
+
 const FOLLOWUP_REMINDER = `<strong>Follow-up reminder:</strong> If an offer has been sent to your lead and they
   haven't signed it yet, please follow up by phone or email roughly every 7 days. Log anything they counter
   with in the notes, or text admin directly at <strong>${ADMIN_CONTACT_PHONE}</strong>. You don't need to follow
@@ -1296,7 +1314,7 @@ function renderCrmTable() {
       <td>${escapeHtml(l["Payment Structure Willing"] || "")}</td>
       <td>${escapeHtml(String(l["Price Sought"] ?? ""))}</td>
       <td>${escapeHtml(l["Closing Likelihood"] ? String(l["Closing Likelihood"]) + "/5" : "—")}</td>
-      <td><span class="status-pill">${escapeHtml(l["Status"] || "New")}</span></td>
+      <td>${statusPillHtml(l["Status"])}</td>
     </tr>
   `).join("");
   tbody.querySelectorAll("tr").forEach(tr => {
