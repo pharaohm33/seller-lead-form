@@ -138,6 +138,18 @@ function getColumnIndex(sheet, headerName) {
   return headers.indexOf(headerName) + 1;
 }
 
+// Forces a single cell to plain-text format and re-writes its value, so a
+// leading "+"/"-" or a leading zero can't get reinterpreted as a formula
+// or a number by Sheets' auto-parsing. Used for phone numbers and zip codes.
+function forceTextValue(sheet, row, headerName, value) {
+  if (value === undefined || value === null || value === '') return;
+  const col = getColumnIndex(sheet, headerName);
+  if (!col) return;
+  const cell = sheet.getRange(row, col);
+  cell.setNumberFormat('@');
+  cell.setValue(String(value));
+}
+
 // Builds a row from a {headerName: value} object rather than a fixed
 // positional array, since a sheet created before a later feature added new
 // columns will have those new columns appended at the end (by
@@ -205,6 +217,16 @@ function submitLead(body) {
     'Market Status': d.marketStatus, 'Source Link': d.sourceLink || '',
     'Status': 'New'
   });
+
+  // Google Sheets can misread a leading "+" (e.g. "+1 520-633-6437") as the
+  // start of a formula, and can drop a leading zero from a zip code by
+  // treating it as a number. Force these columns to plain text on the row
+  // we just wrote, then re-set their values so nothing gets silently
+  // mangled by that auto-parsing.
+  const newRow = sheet.getLastRow();
+  forceTextValue(sheet, newRow, 'Contact Phone', d.phone);
+  forceTextValue(sheet, newRow, 'Seller Contact Phone', d.sellerContactPhone);
+  forceTextValue(sheet, newRow, 'Zip', d.zip);
 
   return { ok: true, leadId: leadId };
 }
