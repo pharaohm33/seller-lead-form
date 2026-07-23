@@ -7,7 +7,7 @@ const COMMERCIAL_SUBTYPES = ["Multifamily","Office","Hotel/Motel","Mixed Use","I
 
 const ADMIN_CONTACT_PHONE = "+1 520 633 6437";
 
-const LEAD_STATUSES = ["New", "Contacted", "Under Review", "Offer Sent", "Offer Signed By Seller", "Closed", "Dead"];
+const LEAD_STATUSES = ["New", "Contacted", "Under Review", "Offer Sent", "Negotiation", "Offer Signed By Seller", "In Escrow To Close", "Closed", "Dead"];
 
 const FOLLOWUP_REMINDER = `<strong>Follow-up reminder:</strong> If an offer has been sent to your lead and they
   haven't signed it yet, please follow up by phone or email roughly every 7 days. Log anything they counter
