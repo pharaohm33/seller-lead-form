@@ -80,6 +80,8 @@ function doPost(e) {
         return jsonOut(withSession(body, deleteAllLeads));
       case 'getLeadsByEmail':
         return jsonOut(getLeadsByEmail(body));
+      case 'checkAddressDuplicate':
+        return jsonOut(checkAddressDuplicate(body));
       case 'addPublicNote':
         return jsonOut(addPublicNote(body));
       case 'editPublicNote':
@@ -316,6 +318,42 @@ function deleteNote(body) {
   if (!match) return { ok: false, error: 'Note not found.' };
   sheet.deleteRow(match._row);
   return { ok: true };
+}
+
+// ---------- Public: duplicate-address check ----------
+// No auth needed -- this only ever reveals a date, never who else
+// submitted it, so it's safe to expose to anyone filling out the form.
+
+function normalizeAddressPart(s) {
+  return String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function checkAddressDuplicate(body) {
+  const street = normalizeAddressPart(body.street);
+  const city = normalizeAddressPart(body.city);
+  const state = normalizeAddressPart(body.state);
+  const zip = normalizeAddressPart(body.zip);
+  if (!street || !city || !state || !zip) return { ok: true, duplicate: false };
+
+  const sheet = getSheet(LEADS_SHEET, LEAD_COLUMNS);
+  const matches = sheetToObjects(sheet).filter(function (l) {
+    return normalizeAddressPart(l['Street Address']) === street &&
+      normalizeAddressPart(l['City']) === city &&
+      normalizeAddressPart(l['State']) === state &&
+      normalizeAddressPart(l['Zip']) === zip;
+  });
+
+  if (matches.length === 0) return { ok: true, duplicate: false };
+
+  const targetEmail = String(body.email || '').trim().toLowerCase();
+  const ownedByYou = matches.some(function (l) {
+    return String(l['Contact Email'] || '').trim().toLowerCase() === targetEmail;
+  });
+  const earliest = matches.reduce(function (a, b) {
+    return new Date(a['Submitted At']) < new Date(b['Submitted At']) ? a : b;
+  });
+
+  return { ok: true, duplicate: true, ownedByYou: ownedByYou, submittedAt: earliest['Submitted At'] };
 }
 
 // ---------- Public: non-admin "check my leads" by email ----------

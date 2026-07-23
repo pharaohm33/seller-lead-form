@@ -187,6 +187,8 @@ const steps = [
           </div>
         </div>
 
+        <div class="banner warn" id="dup-address-banner" hidden style="margin-top:16px;"></div>
+
         <label class="field-label">Number of units <span class="req">*</span></label>
         <input type="number" id="units-input" min="1" step="1" placeholder="e.g. 1 for a single-family home">
         <div class="error-text" id="units-error">Enter the number of units (1 or more).</div>
@@ -196,6 +198,30 @@ const steps = [
       root.querySelector("#state-input").value = answers.state || "";
       root.querySelector("#zip-input").value = answers.zip || "";
       root.querySelector("#units-input").value = answers.units || "";
+
+      const checkDupAddress = async () => {
+        const street = root.querySelector("#street-input").value.trim();
+        const city = root.querySelector("#city-input").value.trim();
+        const state = root.querySelector("#state-input").value;
+        const zip = root.querySelector("#zip-input").value.trim();
+        const banner = root.querySelector("#dup-address-banner");
+        if (!street || !city || !state || !zip) { banner.hidden = true; return; }
+        const res = await api("checkAddressDuplicate", { street, city, state, zip, email: answers.email });
+        if (!res.ok || !res.duplicate) { banner.hidden = true; return; }
+        const dateStr = formatDate(res.submittedAt);
+        if (res.ownedByYou) {
+          banner.className = "banner info";
+          banner.textContent = `You already submitted this address on ${dateStr}.`;
+        } else {
+          banner.className = "banner warn";
+          banner.textContent = `This address was already submitted on ${dateStr} — unless that was you, this lead likely already belongs to someone else.`;
+        }
+        banner.hidden = false;
+      };
+      ["#street-input", "#city-input", "#zip-input"].forEach(sel => {
+        root.querySelector(sel).addEventListener("blur", checkDupAddress);
+      });
+      root.querySelector("#state-input").addEventListener("change", checkDupAddress);
     },
     validate(root) {
       answers.street = root.querySelector("#street-input").value.trim();
