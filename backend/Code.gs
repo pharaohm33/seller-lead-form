@@ -324,8 +324,61 @@ function deleteNote(body) {
 // No auth needed -- this only ever reveals a date, never who else
 // submitted it, so it's safe to expose to anyone filling out the form.
 
+// Word-for-word normalization so "123 Main St." and "123 Main Street"
+// (or "Saint Louis" vs "St Louis") compare equal. Only exact whole-word
+// matches get rewritten, so words like "Eastwood" are left alone even
+// though "east" appears in the map.
+const ADDRESS_ABBREVIATIONS = {
+  'street': 'st', 'st': 'st',
+  'avenue': 'ave', 'ave': 'ave', 'av': 'ave',
+  'boulevard': 'blvd', 'blvd': 'blvd',
+  'drive': 'dr', 'dr': 'dr',
+  'lane': 'ln', 'ln': 'ln',
+  'road': 'rd', 'rd': 'rd',
+  'court': 'ct', 'ct': 'ct',
+  'place': 'pl', 'pl': 'pl',
+  'circle': 'cir', 'cir': 'cir',
+  'terrace': 'ter', 'ter': 'ter',
+  'parkway': 'pkwy', 'pkwy': 'pkwy',
+  'highway': 'hwy', 'hwy': 'hwy',
+  'square': 'sq', 'sq': 'sq',
+  'trail': 'trl', 'trl': 'trl',
+  'plaza': 'plz', 'plz': 'plz',
+  'crossing': 'xing', 'xing': 'xing',
+  'point': 'pt', 'pt': 'pt',
+  'ridge': 'rdg', 'rdg': 'rdg',
+  'alley': 'aly', 'aly': 'aly',
+  'crescent': 'cres', 'cres': 'cres',
+  'expressway': 'expy', 'expy': 'expy',
+  'freeway': 'fwy', 'fwy': 'fwy',
+  'turnpike': 'tpke', 'tpke': 'tpke',
+  'extension': 'ext', 'ext': 'ext',
+  'junction': 'jct', 'jct': 'jct',
+  'heights': 'hts', 'hts': 'hts',
+  'gardens': 'gdns', 'gdns': 'gdns',
+  'village': 'vlg', 'vlg': 'vlg',
+  'manor': 'mnr', 'mnr': 'mnr',
+  'landing': 'lndg', 'lndg': 'lndg',
+  'north': 'n', 'south': 's', 'east': 'e', 'west': 'w',
+  'northeast': 'ne', 'northwest': 'nw', 'southeast': 'se', 'southwest': 'sw',
+  'apartment': 'apt', 'apt': 'apt',
+  'suite': 'ste', 'ste': 'ste',
+  'building': 'bldg', 'bldg': 'bldg',
+  'floor': 'fl', 'fl': 'fl',
+  'number': 'num', 'no': 'num', 'num': 'num',
+  'saint': 'st', 'fort': 'ft', 'ft': 'ft', 'mount': 'mt', 'mt': 'mt',
+  'mountain': 'mtn', 'mtn': 'mtn'
+};
+
 function normalizeAddressPart(s) {
-  return String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  return String(s || '')
+    .toLowerCase()
+    .replace(/[.,]/g, '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(function (w) { return ADDRESS_ABBREVIATIONS[w] || w; })
+    .join(' ');
 }
 
 function checkAddressDuplicate(body) {
