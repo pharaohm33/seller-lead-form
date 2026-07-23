@@ -27,6 +27,26 @@ function statusPillHtml(status) {
   return `<span class="status-pill" style="background:${colors.bg}; color:${colors.fg};">${escapeHtml(s)}</span>`;
 }
 
+// Display order, top to bottom. Kept in sync manually with the identical
+// array in backend/Code.gs (used there for the optional Sort Priority
+// column) -- there's no shared-import between the two runtimes.
+const STATUS_SORT_ORDER = [
+  "In Escrow To Close",
+  "Offer Signed By Seller",
+  "Negotiation",
+  "Offer Sent",
+  "Under Review",
+  "Contacted",
+  "New",
+  "Closed",
+  "Dead"
+];
+
+function statusSortIndex(status) {
+  const idx = STATUS_SORT_ORDER.indexOf(status || "New");
+  return idx === -1 ? STATUS_SORT_ORDER.length : idx;
+}
+
 const FOLLOWUP_REMINDER = `<strong>Follow-up reminder:</strong> If an offer has been sent to your lead and they
   haven't signed it yet, please follow up by phone or email roughly every 7 days. Log anything they counter
   with in the notes, or text admin directly at <strong>${ADMIN_CONTACT_PHONE}</strong>. You don't need to follow
@@ -1006,6 +1026,11 @@ function showStatusView() {
   document.getElementById("status-leads-container").innerHTML = "";
   document.getElementById("status-message").hidden = true;
   document.getElementById("status-email-error").classList.remove("show");
+  statusSearchQuery = "";
+  statusLeadsAll = [];
+  statusLeadsEmail = "";
+  document.getElementById("status-search-input").value = "";
+  document.getElementById("status-search-input").hidden = true;
 }
 
 function hideStatusView() {
@@ -1015,6 +1040,11 @@ function hideStatusView() {
 
 document.getElementById("status-back-btn").onclick = hideStatusView;
 
+document.getElementById("status-search-input").oninput = (e) => {
+  statusSearchQuery = e.target.value.trim();
+  renderStatusLeads(statusLeadsEmail, statusLeadsAll);
+};
+
 document.getElementById("status-lookup-btn").onclick = async () => {
   const emailInput = document.getElementById("status-email-input");
   const email = emailInput.value.trim();
@@ -1022,6 +1052,9 @@ document.getElementById("status-lookup-btn").onclick = async () => {
   const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   errEl.classList.toggle("show", !emailOk);
   if (!emailOk) return;
+
+  statusSearchQuery = "";
+  document.getElementById("status-search-input").value = "";
 
   const msgEl = document.getElementById("status-message");
   msgEl.hidden = false;
@@ -1096,9 +1129,32 @@ function buildLeadFields(lead) {
   return fields;
 }
 
+let statusLeadsAll = [];
+let statusLeadsEmail = "";
+let statusSearchQuery = "";
+
+function leadMatchesAddressSearch(lead, query) {
+  if (!query) return true;
+  const haystack = [lead["Street Address"], lead["City"], lead["State"], lead["Zip"]]
+    .map(v => String(v || "").toLowerCase()).join(" ");
+  return haystack.indexOf(query.toLowerCase()) !== -1;
+}
+
 function renderStatusLeads(email, leads) {
+  statusLeadsAll = leads;
+  statusLeadsEmail = email;
   const container = document.getElementById("status-leads-container");
-  container.innerHTML = leads.map(lead => {
+  const searchInput = document.getElementById("status-search-input");
+  searchInput.hidden = leads.length <= 1;
+
+  const visibleLeads = leads.filter(lead => leadMatchesAddressSearch(lead, statusSearchQuery));
+
+  if (visibleLeads.length === 0) {
+    container.innerHTML = `<p class="small-muted" style="padding:12px;">No leads match your search.</p>`;
+    return;
+  }
+
+  container.innerHTML = visibleLeads.map(lead => {
     const fields = buildLeadFields(lead).filter(([k]) => k !== "Email" && k !== "Phone");
     return `
       <div class="card">
@@ -1272,6 +1328,11 @@ document.getElementById("admin-logout-btn").onclick = () => {
   document.getElementById("public-view").hidden = false;
 };
 
+document.getElementById("crm-search-input").oninput = (e) => {
+  crmSearchQuery = e.target.value.trim();
+  renderCrmTable();
+};
+
 async function showAdminView() {
   document.getElementById("public-view").hidden = true;
   document.getElementById("admin-view").hidden = false;
@@ -1285,25 +1346,48 @@ function adminMessage(text, type) {
   el.className = "banner " + (type || "info");
 }
 
+let crmSearchQuery = "";
+
 async function loadLeads() {
   adminMessage("Loading leads...", "info");
   const res = await api("getLeads", { token: sessionToken });
   if (!res.ok) { adminMessage(res.error, "danger"); return; }
-  currentLeads = res.leads.sort((a, b) => new Date(b["Submitted At"]) - new Date(a["Submitted At"]));
+  currentLeads = res.leads;
   adminMessage("", "info");
   renderCrmTable();
+}
+
+function leadMatchesSearch(l, query) {
+  if (!query) return true;
+  const haystack = [
+    l["Street Address"], l["City"], l["State"], l["Zip"],
+    l["Contact Name"], l["Contact Email"]
+  ].map(v => String(v || "").toLowerCase()).join(" ");
+  return haystack.indexOf(query.toLowerCase()) !== -1;
 }
 
 function renderCrmTable() {
   const tbody = document.getElementById("crm-tbody");
   const emptyEl = document.getElementById("crm-empty");
-  if (currentLeads.length === 0) {
+
+  const visibleLeads = currentLeads
+    .filter(l => leadMatchesSearch(l, crmSearchQuery))
+    .sort((a, b) => {
+      const statusDiff = statusSortIndex(a["Status"]) - statusSortIndex(b["Status"]);
+      if (statusDiff !== 0) return statusDiff;
+      return new Date(b["Submitted At"]) - new Date(a["Submitted At"]); // newest first within same status
+    });
+
+  if (visibleLeads.length === 0) {
     tbody.innerHTML = "";
     emptyEl.hidden = false;
+    emptyEl.textContent = currentLeads.length === 0
+      ? "No leads yet."
+      : "No leads match your search.";
     return;
   }
   emptyEl.hidden = true;
-  tbody.innerHTML = currentLeads.map((l, i) => `
+  tbody.innerHTML = visibleLeads.map((l, i) => `
     <tr data-idx="${i}">
       <td>${formatDate(l["Submitted At"])}</td>
       <td>${escapeHtml(l["Role"] || "")}</td>
@@ -1318,7 +1402,7 @@ function renderCrmTable() {
     </tr>
   `).join("");
   tbody.querySelectorAll("tr").forEach(tr => {
-    tr.onclick = () => openDetail(currentLeads[Number(tr.dataset.idx)]);
+    tr.onclick = () => openDetail(visibleLeads[Number(tr.dataset.idx)]);
   });
 }
 

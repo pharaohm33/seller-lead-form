@@ -27,17 +27,41 @@ const LEAD_COLUMNS = [
   'Total Debt', 'Senior Loan Willing', 'Payment Structure Willing',
   'Price Sought', 'Price Reasoning', 'Down Payment Needed', 'Down Payment Non-Negotiable',
   'Market Status', 'Source Link',
-  'Status', 'Closing Likelihood'
+  'Status', 'Closing Likelihood', 'Sort Priority'
 ];
 
 const NOTE_COLUMNS = ['Lead ID', 'Timestamp', 'Note', 'Author', 'Note ID', 'Visibility'];
+
+// Display order, top to bottom, for the app's CRM table. Kept in sync
+// manually with the identical STATUS_SORT_ORDER array in app.js -- there's
+// no shared-import between the two runtimes. Sort Priority is just a
+// helper number (its index here) written alongside Status so you can
+// select that column in the Sheets UI and sort by it yourself (Data >
+// Sort range) to see the same order the app shows, without this script
+// ever physically reordering your live rows.
+const STATUS_SORT_ORDER = [
+  'In Escrow To Close',
+  'Offer Signed By Seller',
+  'Negotiation',
+  'Offer Sent',
+  'Under Review',
+  'Contacted',
+  'New',
+  'Closed',
+  'Dead'
+];
+
+function getSortPriority(status) {
+  const idx = STATUS_SORT_ORDER.indexOf(status || 'New');
+  return idx === -1 ? STATUS_SORT_ORDER.length : idx;
+}
 
 // Allowlist, not a blocklist: only these columns are ever sent to the
 // public getLeadsByEmail endpoint. Anything you add directly in the Leads
 // sheet -- extra columns, private calculations, doc links -- is invisible
 // to that endpoint by default, not just unrendered by the front-end. Add a
 // column here deliberately if you ever want it exposed to submitters.
-const PUBLIC_LEAD_FIELDS = LEAD_COLUMNS.filter(function (c) { return c !== 'Closing Likelihood'; });
+const PUBLIC_LEAD_FIELDS = LEAD_COLUMNS.filter(function (c) { return c !== 'Closing Likelihood' && c !== 'Sort Priority'; });
 
 function doGet(e) {
   const action = e.parameter.action;
@@ -228,7 +252,7 @@ function submitLead(body) {
     'Down Payment Needed': (d.downPaymentNeeded === undefined || d.downPaymentNeeded === '') ? 'Skipped' : d.downPaymentNeeded,
     'Down Payment Non-Negotiable': d.downPaymentNonNegotiable || 'N/A',
     'Market Status': d.marketStatus, 'Source Link': d.sourceLink || '',
-    'Status': 'New'
+    'Status': 'New', 'Sort Priority': getSortPriority('New')
   });
 
   // Google Sheets can misread a leading "+" (e.g. "+1 520-633-6437") as the
@@ -601,7 +625,23 @@ function updateStatus(body) {
   if (!match) return { ok: false, error: 'Lead not found.' };
   const statusCol = getColumnIndex(sheet, 'Status');
   sheet.getRange(match._row, statusCol).setValue(body.status);
+  const priorityCol = getColumnIndex(sheet, 'Sort Priority');
+  if (priorityCol) sheet.getRange(match._row, priorityCol).setValue(getSortPriority(body.status));
   return { ok: true };
+}
+
+// One-time convenience: run this manually from the Apps Script editor
+// (select "backfillSortPriority" in the function dropdown, click Run) to
+// populate Sort Priority for leads that existed before this column did.
+// New leads and any future status change already keep it current on
+// their own -- this is only needed once, for old rows.
+function backfillSortPriority() {
+  const sheet = getSheet(LEADS_SHEET, LEAD_COLUMNS);
+  const leads = sheetToObjects(sheet);
+  const priorityCol = getColumnIndex(sheet, 'Sort Priority');
+  leads.forEach(function (l) {
+    sheet.getRange(l._row, priorityCol).setValue(getSortPriority(l['Status']));
+  });
 }
 
 // Manual for now -- admin sets 1-5 (or blank for "not scored") by hand.
