@@ -371,7 +371,7 @@ const ADDRESS_ABBREVIATIONS = {
 };
 
 function normalizeAddressPart(s) {
-  return String(s || '')
+  const wordNormalized = String(s || '')
     .toLowerCase()
     .replace(/[.,]/g, '')
     .trim()
@@ -379,6 +379,10 @@ function normalizeAddressPart(s) {
     .filter(Boolean)
     .map(function (w) { return ADDRESS_ABBREVIATIONS[w] || w; })
     .join(' ');
+  // Collapse all remaining whitespace so extra spaces (double-spaced,
+  // trailing/leading) and missing spaces ("123MainSt" vs "123 Main St")
+  // both compare equal -- spacing stops mattering entirely at this point.
+  return wordNormalized.replace(/\s+/g, '');
 }
 
 function checkAddressDuplicate(body) {
