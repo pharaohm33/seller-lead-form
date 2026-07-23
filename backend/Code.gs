@@ -183,6 +183,17 @@ function sheetToObjects(sheet) {
 
 // ---------- Public: submit a lead ----------
 
+// Strips "+" specifically (leaves hyphens/parens/spaces alone -- those
+// write to Sheets fine). A leading "+" is what makes Sheets' auto-parser
+// treat the value as the start of a formula and throw an error in the
+// cell instead of storing the phone number, and that error happens at
+// the initial write itself -- before forceTextValue() below ever gets a
+// chance to run -- so the "+" has to be gone before the row is appended,
+// not fixed up afterward.
+function sanitizePhone(phone) {
+  return String(phone || '').replace(/\+/g, '').trim();
+}
+
 function submitLead(body) {
   const d = body.data || {};
   const required = ['role', 'name', 'email', 'phone', 'street', 'city', 'state', 'zip', 'units', 'assetType', 'marketStatus'];
@@ -195,11 +206,13 @@ function submitLead(body) {
   const sheet = getSheet(LEADS_SHEET, LEAD_COLUMNS);
   const leadId = Utilities.getUuid();
   const submittedAt = new Date().toISOString();
+  const phone = sanitizePhone(d.phone);
+  const sellerContactPhone = sanitizePhone(d.sellerContactPhone);
 
   appendRowByHeaders(sheet, {
     'Lead ID': leadId, 'Submitted At': submittedAt, 'Role': d.role, 'Contact Name': d.name,
-    'Contact Email': d.email, 'Contact Phone': d.phone, 'Social Link': d.socialLink || '',
-    'Seller Contact Name': d.sellerContactName || '', 'Seller Contact Phone': d.sellerContactPhone || '',
+    'Contact Email': d.email, 'Contact Phone': phone, 'Social Link': d.socialLink || '',
+    'Seller Contact Name': d.sellerContactName || '', 'Seller Contact Phone': sellerContactPhone,
     'Seller Contact Email': d.sellerContactEmail || '',
     'Street Address': d.street, 'City': d.city, 'State': d.state, 'Zip': d.zip, 'Units': d.units,
     'Asset Type': d.assetType, 'Asset Subtype': d.assetSubtype || '',
@@ -224,8 +237,8 @@ function submitLead(body) {
   // we just wrote, then re-set their values so nothing gets silently
   // mangled by that auto-parsing.
   const newRow = sheet.getLastRow();
-  forceTextValue(sheet, newRow, 'Contact Phone', d.phone);
-  forceTextValue(sheet, newRow, 'Seller Contact Phone', d.sellerContactPhone);
+  forceTextValue(sheet, newRow, 'Contact Phone', phone);
+  forceTextValue(sheet, newRow, 'Seller Contact Phone', sellerContactPhone);
   forceTextValue(sheet, newRow, 'Zip', d.zip);
 
   return { ok: true, leadId: leadId };
