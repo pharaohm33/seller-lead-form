@@ -1157,9 +1157,16 @@ function renderStatusLeads(email, leads) {
   }
 
   container.innerHTML = visibleLeads.map(lead => {
-    const fields = buildLeadFields(lead).filter(([k]) => k !== "Email" && k !== "Phone");
+    const fields = buildLeadFields(lead).filter(([k]) => k !== "Email" && k !== "Phone" && k !== "Status");
     return `
       <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:16px; padding-bottom:16px; border-bottom:1px solid var(--border);">
+          <div>
+            <div style="font-size:18px; font-weight:700;">${escapeHtml(lead["Street Address"] || "")}</div>
+            <div class="small-muted">${escapeHtml(lead["City"] || "")}, ${escapeHtml(lead["State"] || "")}</div>
+          </div>
+          ${statusPillHtml(lead["Status"])}
+        </div>
         <dl class="review-grid">
           ${fields.map(([k,v]) => `<div><dt>${k}</dt><dd>${escapeHtml(String(v ?? "—"))}</dd></div>`).join("")}
         </dl>
