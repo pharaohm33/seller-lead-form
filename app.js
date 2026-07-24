@@ -1149,7 +1149,13 @@ function renderStatusResultsTable(email, leads) {
   const searchInput = document.getElementById("status-search-input");
   searchInput.hidden = leads.length <= 1;
 
-  const visibleLeads = leads.filter(lead => leadMatchesAddressSearch(lead, statusSearchQuery));
+  const visibleLeads = leads
+    .filter(lead => leadMatchesAddressSearch(lead, statusSearchQuery))
+    .sort((a, b) => {
+      const statusDiff = statusSortIndex(a["Status"]) - statusSortIndex(b["Status"]);
+      if (statusDiff !== 0) return statusDiff;
+      return new Date(b["Submitted At"]) - new Date(a["Submitted At"]); // newest first within same status
+    });
 
   if (visibleLeads.length === 0) {
     container.innerHTML = `<p class="small-muted" style="padding:12px;">${leads.length === 0 ? "No leads found for that email address." : "No leads match your search."}</p>`;
