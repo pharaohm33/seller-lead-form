@@ -15,7 +15,7 @@ const STATUS_COLORS = {
   "Under Review": { bg: "#fdf3e2", fg: "#a5680f" },
   "Offer Sent": { bg: "#1e3a8a", fg: "#ffffff" },
   "Negotiation": { bg: "#111827", fg: "#ffffff" },
-  "Verbally Accepted But Not Signed": { bg: "#ffedd5", fg: "#c2410c" },
+  "Verbally Accepted But Not Signed": { bg: "#d1fae5", fg: "#065f46" },
   "Offer Signed By Seller": { bg: "#e7f4ef", fg: "#1f7a5c" },
   "In Escrow To Close": { bg: "#14532d", fg: "#ffffff" },
   "Closed": { bg: "#e5e7eb", fg: "#374151" },
@@ -1044,7 +1044,7 @@ document.getElementById("status-back-btn").onclick = hideStatusView;
 
 document.getElementById("status-search-input").oninput = (e) => {
   statusSearchQuery = e.target.value.trim();
-  renderStatusLeads(statusLeadsEmail, statusLeadsAll);
+  renderStatusResultsTable(statusLeadsEmail, statusLeadsAll);
 };
 
 document.getElementById("status-lookup-btn").onclick = async () => {
@@ -1076,7 +1076,7 @@ document.getElementById("status-lookup-btn").onclick = async () => {
     return;
   }
   msgEl.hidden = true;
-  renderStatusLeads(email, res.leads);
+  renderStatusResultsTable(email, res.leads);
 };
 
 function buildLeadFields(lead) {
@@ -1142,7 +1142,7 @@ function leadMatchesAddressSearch(lead, query) {
   return haystack.indexOf(query.toLowerCase()) !== -1;
 }
 
-function renderStatusLeads(email, leads) {
+function renderStatusResultsTable(email, leads) {
   statusLeadsAll = leads;
   statusLeadsEmail = email;
   const container = document.getElementById("status-leads-container");
@@ -1152,56 +1152,78 @@ function renderStatusLeads(email, leads) {
   const visibleLeads = leads.filter(lead => leadMatchesAddressSearch(lead, statusSearchQuery));
 
   if (visibleLeads.length === 0) {
-    container.innerHTML = `<p class="small-muted" style="padding:12px;">No leads match your search.</p>`;
+    container.innerHTML = `<p class="small-muted" style="padding:12px;">${leads.length === 0 ? "No leads found for that email address." : "No leads match your search."}</p>`;
     return;
   }
 
-  container.innerHTML = visibleLeads.map(lead => {
-    const fields = buildLeadFields(lead).filter(([k]) => k !== "Email" && k !== "Phone" && k !== "Status");
-    return `
-      <div class="card">
-        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:16px; padding-bottom:16px; border-bottom:1px solid var(--border);">
-          <div>
-            <div style="font-size:18px; font-weight:700;">${escapeHtml(lead["Street Address"] || "")}</div>
-            <div class="small-muted">${escapeHtml(lead["City"] || "")}, ${escapeHtml(lead["State"] || "")}</div>
-          </div>
-          ${statusPillHtml(lead["Status"])}
-        </div>
-        <dl class="review-grid">
-          ${fields.map(([k,v]) => `<div><dt>${k}</dt><dd>${escapeHtml(String(v ?? "—"))}</dd></div>`).join("")}
-        </dl>
-        <div class="notes-list">
-          <strong>Notes</strong>
-          <p class="small-muted" style="margin:2px 0 8px;">Notes from admin appear here too. You can only edit notes you added yourself.</p>
-          <div class="status-notes-container" data-lead-id="${lead["Lead ID"]}">
-            ${(lead.notes || []).map(n => renderStatusNoteItem(n, email)).join("") || `<p class="small-muted">No notes yet.</p>`}
-          </div>
-          <textarea class="status-note-input" placeholder="Add a note (this can't edit or delete the property/business info above — only admin can do that)"></textarea>
-          <button class="btn primary status-add-note-btn" style="margin-top:8px;" data-lead-id="${lead["Lead ID"]}">Add Note</button>
-        </div>
-      </div>
-    `;
-  }).join("");
-
-  container.querySelectorAll(".status-add-note-btn").forEach(btn => {
-    btn.onclick = async () => {
-      const card = btn.closest(".card");
-      const textarea = card.querySelector(".status-note-input");
-      const note = textarea.value.trim();
-      if (!note) return;
-      btn.disabled = true;
-      const res = await api("addPublicNote", { email, leadId: btn.dataset.leadId, note });
-      btn.disabled = false;
-      if (res.ok) {
-        const lead = leads.find(l => l["Lead ID"] === btn.dataset.leadId);
-        lead.notes = lead.notes || [];
-        lead.notes.push({ noteId: res.noteId, timestamp: new Date().toISOString(), note, author: email });
-        renderStatusLeads(email, leads);
-      }
-    };
+  container.innerHTML = `
+    <table class="crm-table">
+      <thead>
+        <tr>
+          <th>Submitted</th><th>Role</th><th>Contact</th><th>Address</th><th>Asset Type</th><th>Senior Loan</th><th>Payment Structure</th><th>Price Sought</th><th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="status-results-tbody"></tbody>
+    </table>
+  `;
+  const tbody = document.getElementById("status-results-tbody");
+  tbody.innerHTML = visibleLeads.map((l, i) => `
+    <tr data-idx="${i}">
+      <td>${formatDate(l["Submitted At"])}</td>
+      <td>${escapeHtml(l["Role"] || "")}</td>
+      <td>${escapeHtml(l["Contact Name"] || "")}<br><span class="small-muted">${escapeHtml(l["Contact Email"] || "")} · ${escapeHtml(l["Contact Phone"] || "")}</span></td>
+      <td>${escapeHtml(l["Street Address"] || "")}<br><span class="small-muted">${escapeHtml(l["City"] || "")}, ${escapeHtml(l["State"] || "")}</span></td>
+      <td>${escapeHtml(l["Asset Type"] || "")}</td>
+      <td>${escapeHtml(l["Senior Loan Willing"] || "")}</td>
+      <td>${escapeHtml(l["Payment Structure Willing"] || "")}</td>
+      <td>${escapeHtml(String(l["Price Sought"] ?? ""))}</td>
+      <td>${statusPillHtml(l["Status"])}</td>
+    </tr>
+  `).join("");
+  tbody.querySelectorAll("tr").forEach(tr => {
+    tr.onclick = () => openStatusDetail(visibleLeads[Number(tr.dataset.idx)], email, leads);
   });
+}
 
-  bindStatusNoteEdits(container, email, leads);
+function openStatusDetail(lead, email, leads) {
+  const overlay = document.getElementById("detail-overlay");
+  const panel = document.getElementById("detail-panel");
+  overlay.hidden = false;
+
+  const fields = buildLeadFields(lead).filter(([k]) => k !== "Status");
+
+  panel.innerHTML = `
+    <button class="link-btn" id="close-detail-btn" style="float:right;">Close ✕</button>
+    <h2>Lead Detail</h2>
+    <div style="margin:8px 0 16px;">${statusPillHtml(lead["Status"])}</div>
+    <dl class="review-grid">
+      ${fields.map(([k,v]) => `<div><dt>${k}</dt><dd>${escapeHtml(String(v ?? "—"))}</dd></div>`).join("")}
+    </dl>
+    <div class="notes-list">
+      <strong>Notes</strong>
+      <p class="small-muted" style="margin:2px 0 8px;">Notes from admin appear here too. You can only edit or delete notes you added yourself.</p>
+      <div class="status-notes-container" data-lead-id="${lead["Lead ID"]}">
+        ${(lead.notes || []).map(n => renderStatusNoteItem(n, email)).join("") || `<p class="small-muted">No notes yet.</p>`}
+      </div>
+      <textarea class="status-note-input" placeholder="Add a note (this can't edit or delete the property/business info above — only admin can do that)"></textarea>
+      <button class="btn primary status-add-note-btn" style="margin-top:8px;">Add Note</button>
+    </div>
+  `;
+
+  panel.querySelector("#close-detail-btn").onclick = () => overlay.hidden = true;
+  panel.querySelector(".status-add-note-btn").onclick = async () => {
+    const textarea = panel.querySelector(".status-note-input");
+    const note = textarea.value.trim();
+    if (!note) return;
+    const res = await api("addPublicNote", { email, leadId: lead["Lead ID"], note });
+    if (res.ok) {
+      lead.notes = lead.notes || [];
+      lead.notes.push({ noteId: res.noteId, timestamp: new Date().toISOString(), note, author: email });
+      openStatusDetail(lead, email, leads);
+    }
+  };
+
+  bindStatusNoteEdits(panel, email, leads, () => openStatusDetail(lead, email, leads));
 }
 
 function renderStatusNoteItem(n, email) {
@@ -1225,7 +1247,7 @@ function renderStatusNoteItem(n, email) {
   `;
 }
 
-function bindStatusNoteEdits(container, email, leads) {
+function bindStatusNoteEdits(container, email, leads, rerender) {
   container.querySelectorAll(".status-edit-note-btn").forEach(btn => {
     btn.onclick = () => {
       const item = btn.closest(".note-item");
@@ -1239,7 +1261,7 @@ function bindStatusNoteEdits(container, email, leads) {
           <button type="button" class="btn primary status-save-edit-btn">Save</button>
         </div>
       `;
-      item.querySelector(".status-cancel-edit-btn").onclick = () => renderStatusLeads(email, leads);
+      item.querySelector(".status-cancel-edit-btn").onclick = () => rerender();
       item.querySelector(".status-save-edit-btn").onclick = async () => {
         const newText = item.querySelector(".status-edit-note-input").value.trim();
         if (!newText) return;
@@ -1252,7 +1274,7 @@ function bindStatusNoteEdits(container, email, leads) {
               if (n.noteId === noteId) n.note = newText;
             });
           });
-          renderStatusLeads(email, leads);
+          rerender();
         } else {
           saveBtn.disabled = false;
         }
@@ -1270,7 +1292,7 @@ function bindStatusNoteEdits(container, email, leads) {
         leads.forEach(l => {
           l.notes = (l.notes || []).filter(n => n.noteId !== noteId);
         });
-        renderStatusLeads(email, leads);
+        rerender();
       }
     };
   });
