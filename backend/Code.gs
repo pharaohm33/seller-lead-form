@@ -42,6 +42,7 @@ const NOTE_COLUMNS = ['Lead ID', 'Timestamp', 'Note', 'Author', 'Note ID', 'Visi
 const STATUS_SORT_ORDER = [
   'In Escrow To Close',
   'Offer Signed By Seller',
+  'Verbally Accepted But Not Signed',
   'Negotiation',
   'Offer Sent',
   'Under Review',

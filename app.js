@@ -7,7 +7,7 @@ const COMMERCIAL_SUBTYPES = ["Multifamily","Office","Hotel/Motel","Mixed Use","I
 
 const ADMIN_CONTACT_PHONE = "+1 520 633 6437";
 
-const LEAD_STATUSES = ["New", "Contacted", "Under Review", "Offer Sent", "Negotiation", "Offer Signed By Seller", "In Escrow To Close", "Closed", "Dead"];
+const LEAD_STATUSES = ["New", "Contacted", "Under Review", "Offer Sent", "Negotiation", "Verbally Accepted But Not Signed", "Offer Signed By Seller", "In Escrow To Close", "Closed", "Dead"];
 
 const STATUS_COLORS = {
   "New": { bg: "#e5e7eb", fg: "#374151" },
@@ -15,6 +15,7 @@ const STATUS_COLORS = {
   "Under Review": { bg: "#fdf3e2", fg: "#a5680f" },
   "Offer Sent": { bg: "#1e3a8a", fg: "#ffffff" },
   "Negotiation": { bg: "#111827", fg: "#ffffff" },
+  "Verbally Accepted But Not Signed": { bg: "#ffedd5", fg: "#c2410c" },
   "Offer Signed By Seller": { bg: "#e7f4ef", fg: "#1f7a5c" },
   "In Escrow To Close": { bg: "#14532d", fg: "#ffffff" },
   "Closed": { bg: "#e5e7eb", fg: "#374151" },
@@ -33,6 +34,7 @@ function statusPillHtml(status) {
 const STATUS_SORT_ORDER = [
   "In Escrow To Close",
   "Offer Signed By Seller",
+  "Verbally Accepted But Not Signed",
   "Negotiation",
   "Offer Sent",
   "Under Review",
