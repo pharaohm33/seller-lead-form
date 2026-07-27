@@ -1522,8 +1522,18 @@ function openDetail(lead) {
     teamInput.onblur = async (e) => {
       const team = e.target.value.trim();
       const res = await api("updateTeam", { token: sessionToken, leadId: lead["Lead ID"], team });
-      if (res.ok) { lead["Team"] = team; renderCrmTable(); }
-      else alert("Failed to save team: " + (res.error || "unknown error"));
+      if (res.ok) {
+        // Team is keyed by submitter email, not per-lead -- the backend just
+        // applied it to every lead on file from this same email, so mirror
+        // that here instead of only updating the one lead we opened.
+        const targetEmail = String(lead["Contact Email"] || "").trim().toLowerCase();
+        currentLeads.forEach(l => {
+          if (String(l["Contact Email"] || "").trim().toLowerCase() === targetEmail) l["Team"] = team;
+        });
+        renderCrmTable();
+      } else {
+        alert("Failed to save team: " + (res.error || "unknown error"));
+      }
     };
   }
   bindAdminNoteControls(panel, lead);

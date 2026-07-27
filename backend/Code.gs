@@ -240,6 +240,17 @@ function submitLead(body) {
   const sellerContactPhone = sanitizePhone(d.sellerContactPhone);
   const referrerPhone = sanitizePhone(d.referrerPhone);
 
+  // If this email already has a Team assigned from an earlier lead, carry
+  // it forward automatically -- see updateTeam() for why Team is keyed by
+  // submitter email rather than per-lead.
+  const submitterEmail = String(d.email || '').trim().toLowerCase();
+  const existingTeamLead = submitterEmail
+    ? sheetToObjects(sheet).find(function (l) {
+        return String(l['Contact Email'] || '').trim().toLowerCase() === submitterEmail && l['Team'];
+      })
+    : null;
+  const inheritedTeam = existingTeamLead ? existingTeamLead['Team'] : '';
+
   appendRowByHeaders(sheet, {
     'Lead ID': leadId, 'Submitted At': submittedAt, 'Role': d.role, 'Contact Name': d.name,
     'Contact Email': d.email, 'Contact Phone': phone, 'Social Link': d.socialLink || '',
@@ -260,7 +271,7 @@ function submitLead(body) {
     'Down Payment Needed': (d.downPaymentNeeded === undefined || d.downPaymentNeeded === '') ? 'Skipped' : d.downPaymentNeeded,
     'Down Payment Non-Negotiable': d.downPaymentNonNegotiable || 'N/A',
     'Market Status': d.marketStatus, 'Source Link': d.sourceLink || '',
-    'Status': 'New', 'Sort Priority': getSortPriority('New')
+    'Status': 'New', 'Sort Priority': getSortPriority('New'), 'Team': inheritedTeam
   });
 
   // Google Sheets can misread a leading "+" (e.g. "+1 520-633-6437") as the
@@ -670,7 +681,10 @@ function updateClosingLikelihood(body) {
 
 // Admin-only, free text -- lets you group non-seller submitters (bird
 // dogs, wholesalers, etc.) by team. Never sent to the public endpoint
-// (see PUBLIC_LEAD_FIELDS).
+// (see PUBLIC_LEAD_FIELDS). Team represents the submitter, not a single
+// deal, so this applies to every lead on file from the same Contact Email,
+// not just the one being edited -- and submitLead() below carries it
+// forward automatically onto that email's future submissions too.
 function updateTeam(body) {
   if (!body.leadId) return { ok: false, error: 'Missing leadId.' };
   const sheet = getSheet(LEADS_SHEET, LEAD_COLUMNS);
@@ -678,8 +692,17 @@ function updateTeam(body) {
   const match = leads.find(function (l) { return l['Lead ID'] === body.leadId; });
   if (!match) return { ok: false, error: 'Lead not found.' };
   const col = getColumnIndex(sheet, 'Team');
-  sheet.getRange(match._row, col).setValue(body.team || '');
-  return { ok: true };
+  const team = body.team || '';
+  const targetEmail = String(match['Contact Email'] || '').trim().toLowerCase();
+
+  const sameEmailLeads = targetEmail
+    ? leads.filter(function (l) { return String(l['Contact Email'] || '').trim().toLowerCase() === targetEmail; })
+    : [match];
+  sameEmailLeads.forEach(function (l) {
+    sheet.getRange(l._row, col).setValue(team);
+  });
+
+  return { ok: true, updatedCount: sameEmailLeads.length };
 }
 
 // ---------- Admin: export + gated delete ----------
