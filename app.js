@@ -1510,18 +1510,52 @@ function openDetail(lead) {
   panel.querySelector("#status-select").onchange = async (e) => {
     const res = await api("updateStatus", { token: sessionToken, leadId: lead["Lead ID"], status: e.target.value });
     if (res.ok) { lead["Status"] = e.target.value; renderCrmTable(); }
+    else alert("Failed to save status: " + (res.error || "unknown error"));
   };
   panel.querySelector("#likelihood-select").onchange = async (e) => {
     const res = await api("updateClosingLikelihood", { token: sessionToken, leadId: lead["Lead ID"], score: e.target.value });
     if (res.ok) { lead["Closing Likelihood"] = e.target.value; renderCrmTable(); }
+    else alert("Failed to save closing likelihood: " + (res.error || "unknown error"));
   };
   const teamInput = panel.querySelector("#team-input");
   if (teamInput) {
     teamInput.onblur = async (e) => {
-      const res = await api("updateTeam", { token: sessionToken, leadId: lead["Lead ID"], team: e.target.value.trim() });
-      if (res.ok) { lead["Team"] = e.target.value.trim(); renderCrmTable(); }
+      const team = e.target.value.trim();
+      const res = await api("updateTeam", { token: sessionToken, leadId: lead["Lead ID"], team });
+      if (res.ok) { lead["Team"] = team; renderCrmTable(); }
+      else alert("Failed to save team: " + (res.error || "unknown error"));
     };
   }
+  bindAdminNoteControls(panel, lead);
+}
+
+// Wires up the "add note" and "delete note" controls inside an already-open
+// detail panel. Split out from openDetail() so adding/deleting a note only
+// touches #notes-container -- re-running openDetail() here would rebuild
+// the whole panel from `lead`, wiping out any in-progress edit (e.g. a
+// Team value the admin just typed but hasn't blurred out of yet) that
+// hasn't been written back to `lead` by its own async save yet.
+function bindAdminNoteControls(panel, lead) {
+  const notesContainer = panel.querySelector("#notes-container");
+
+  function renderNotes() {
+    notesContainer.innerHTML = (lead.notes || []).map(n => renderAdminNoteItem(n)).join("") || `<p class="small-muted">No notes yet.</p>`;
+    notesContainer.querySelectorAll(".admin-delete-note-btn").forEach(btn => {
+      btn.onclick = async () => {
+        const item = btn.closest(".note-item");
+        const noteId = item.dataset.noteId;
+        if (!confirm("Delete this note? This cannot be undone.")) return;
+        const res = await api("deleteNote", { token: sessionToken, noteId });
+        if (res.ok) {
+          lead.notes = (lead.notes || []).filter(n => n.noteId !== noteId);
+          renderNotes();
+        } else {
+          alert("Failed to delete note: " + (res.error || "unknown error"));
+        }
+      };
+    });
+  }
+
   panel.querySelector("#add-note-btn").onclick = async () => {
     const noteInput = panel.querySelector("#new-note-input");
     const note = noteInput.value.trim();
@@ -1531,21 +1565,15 @@ function openDetail(lead) {
     if (res.ok) {
       lead.notes = lead.notes || [];
       lead.notes.push({ noteId: res.noteId, timestamp: new Date().toISOString(), note, author: "Admin", visibility: isPrivate ? "Private" : "Shared" });
-      openDetail(lead);
+      noteInput.value = "";
+      panel.querySelector("#private-note-checkbox").checked = false;
+      renderNotes();
+    } else {
+      alert("Failed to add note: " + (res.error || "unknown error"));
     }
   };
-  panel.querySelectorAll(".admin-delete-note-btn").forEach(btn => {
-    btn.onclick = async () => {
-      const item = btn.closest(".note-item");
-      const noteId = item.dataset.noteId;
-      if (!confirm("Delete this note? This cannot be undone.")) return;
-      const res = await api("deleteNote", { token: sessionToken, noteId });
-      if (res.ok) {
-        lead.notes = (lead.notes || []).filter(n => n.noteId !== noteId);
-        openDetail(lead);
-      }
-    };
-  });
+
+  renderNotes();
 }
 
 function renderAdminNoteItem(n) {
