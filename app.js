@@ -132,6 +132,16 @@ const steps = [
 
         <label class="field-label">Social media profile link <span class="small-muted">(optional)</span></label>
         <input type="text" id="social-input" placeholder="https://...">
+
+        <label class="field-label">Who referred you? <span class="small-muted">(optional)</span></label>
+        <div class="row2">
+          <div>
+            <input type="text" id="referrer-name-input" placeholder="Referrer's name">
+          </div>
+          <div>
+            <input type="tel" id="referrer-phone-input" placeholder="Referrer's phone">
+          </div>
+        </div>
       `;
       root.querySelectorAll("#role-group .choice-btn").forEach(btn => {
         if (btn.dataset.value === answers.role) btn.classList.add("selected");
@@ -145,12 +155,16 @@ const steps = [
       root.querySelector("#email-input").value = answers.email || "";
       root.querySelector("#phone-input").value = answers.phone || "";
       root.querySelector("#social-input").value = answers.socialLink || "";
+      root.querySelector("#referrer-name-input").value = answers.referrerName || "";
+      root.querySelector("#referrer-phone-input").value = answers.referrerPhone || "";
     },
     validate(root) {
       answers.name = root.querySelector("#name-input").value.trim();
       answers.email = root.querySelector("#email-input").value.trim();
       answers.phone = root.querySelector("#phone-input").value.trim();
       answers.socialLink = root.querySelector("#social-input").value.trim();
+      answers.referrerName = root.querySelector("#referrer-name-input").value.trim();
+      answers.referrerPhone = root.querySelector("#referrer-phone-input").value.trim();
       let ok = true;
       toggleError(root, "#role-error", !answers.role); if (!answers.role) ok = false;
       toggleError(root, "#name-error", !answers.name); if (!answers.name) ok = false;
@@ -764,6 +778,7 @@ function buildAnswerRows() {
   const rows = [
     ["Role", answers.role], ["Name", answers.name], ["Email", answers.email], ["Phone", answers.phone],
     ["Social Link", answers.socialLink || "—"],
+    ["Referred By", answers.referrerName || "—"], ["Referrer Phone", answers.referrerPhone || "—"],
   ];
   if (answers.role && answers.role !== "Seller") {
     rows.push(
@@ -904,6 +919,7 @@ async function submitLead(container) {
     const res = await api("submitLead", {
       data: {
         role: answers.role, name: answers.name, email: answers.email, phone: answers.phone, socialLink: answers.socialLink,
+        referrerName: answers.referrerName, referrerPhone: answers.referrerPhone,
         sellerContactName: answers.sellerContactName, sellerContactPhone: answers.sellerContactPhone,
         sellerContactEmail: answers.sellerContactEmail,
         street: answers.street, city: answers.city, state: answers.state, zip: answers.zip, units: answers.units,
@@ -1084,6 +1100,7 @@ function buildLeadFields(lead) {
     ["Submitted", formatDate(lead["Submitted At"])],
     ["Role", lead["Role"]], ["Name", lead["Contact Name"]], ["Email", lead["Contact Email"]], ["Phone", lead["Contact Phone"]],
     ["Social Link", lead["Social Link"] || "—"],
+    ["Referred By", lead["Referrer Name"] || "—"], ["Referrer Phone", lead["Referrer Phone"] || "—"],
   ];
   if (lead["Role"] && lead["Role"] !== "Seller") {
     fields.push(
@@ -1429,6 +1446,7 @@ function renderCrmTable() {
       <td>${formatDate(l["Submitted At"])}</td>
       <td>${escapeHtml(l["Role"] || "")}</td>
       <td>${escapeHtml(l["Contact Name"] || "")}<br><span class="small-muted">${escapeHtml(l["Contact Email"] || "")} · ${escapeHtml(l["Contact Phone"] || "")}</span></td>
+      <td>${l["Role"] === "Seller" ? "—" : escapeHtml(l["Team"] || "—")}</td>
       <td>${escapeHtml(l["Street Address"] || "")}<br><span class="small-muted">${escapeHtml(l["City"] || "")}, ${escapeHtml(l["State"] || "")}</span></td>
       <td>${escapeHtml(l["Asset Type"] || "")}</td>
       <td>${escapeHtml(l["Senior Loan Willing"] || "")}</td>
@@ -1468,6 +1486,10 @@ function openDetail(lead) {
       ${[1,2,3,4,5].map(n =>
         `<option value="${n}" ${String(lead["Closing Likelihood"]) === String(n) ? "selected" : ""}>${n}</option>`).join("")}
     </select>
+    ${lead["Role"] !== "Seller" ? `
+      <label class="field-label">Team <span class="small-muted">(admin-only, since this submitter isn't the seller)</span></label>
+      <input type="text" id="team-input" placeholder="e.g. Team Alpha" value="${escapeHtml(lead["Team"] || "")}">
+    ` : ""}
     <dl class="review-grid" style="margin-top:16px;">
       ${fields.map(([k,v]) => `<div><dt>${k}</dt><dd>${escapeHtml(String(v ?? "—"))}</dd></div>`).join("")}
     </dl>
@@ -1493,6 +1515,13 @@ function openDetail(lead) {
     const res = await api("updateClosingLikelihood", { token: sessionToken, leadId: lead["Lead ID"], score: e.target.value });
     if (res.ok) { lead["Closing Likelihood"] = e.target.value; renderCrmTable(); }
   };
+  const teamInput = panel.querySelector("#team-input");
+  if (teamInput) {
+    teamInput.onblur = async (e) => {
+      const res = await api("updateTeam", { token: sessionToken, leadId: lead["Lead ID"], team: e.target.value.trim() });
+      if (res.ok) { lead["Team"] = e.target.value.trim(); renderCrmTable(); }
+    };
+  }
   panel.querySelector("#add-note-btn").onclick = async () => {
     const noteInput = panel.querySelector("#new-note-input");
     const note = noteInput.value.trim();

@@ -19,6 +19,7 @@ const SESSION_HOURS = 12;
 
 const LEAD_COLUMNS = [
   'Lead ID', 'Submitted At', 'Role', 'Contact Name', 'Contact Email', 'Contact Phone', 'Social Link',
+  'Referrer Name', 'Referrer Phone',
   'Seller Contact Name', 'Seller Contact Phone', 'Seller Contact Email',
   'Street Address', 'City', 'State', 'Zip', 'Units',
   'Asset Type', 'Asset Subtype', 'Beds', 'Baths', 'Sq Ft',
@@ -27,7 +28,7 @@ const LEAD_COLUMNS = [
   'Total Debt', 'Senior Loan Willing', 'Payment Structure Willing',
   'Price Sought', 'Price Reasoning', 'Down Payment Needed', 'Down Payment Non-Negotiable',
   'Market Status', 'Source Link',
-  'Status', 'Closing Likelihood', 'Sort Priority'
+  'Status', 'Closing Likelihood', 'Sort Priority', 'Team'
 ];
 
 const NOTE_COLUMNS = ['Lead ID', 'Timestamp', 'Note', 'Author', 'Note ID', 'Visibility'];
@@ -62,7 +63,9 @@ function getSortPriority(status) {
 // sheet -- extra columns, private calculations, doc links -- is invisible
 // to that endpoint by default, not just unrendered by the front-end. Add a
 // column here deliberately if you ever want it exposed to submitters.
-const PUBLIC_LEAD_FIELDS = LEAD_COLUMNS.filter(function (c) { return c !== 'Closing Likelihood' && c !== 'Sort Priority'; });
+const PUBLIC_LEAD_FIELDS = LEAD_COLUMNS.filter(function (c) {
+  return c !== 'Closing Likelihood' && c !== 'Sort Priority' && c !== 'Team';
+});
 
 function doGet(e) {
   const action = e.parameter.action;
@@ -99,6 +102,8 @@ function doPost(e) {
         return jsonOut(withSession(body, updateStatus));
       case 'updateClosingLikelihood':
         return jsonOut(withSession(body, updateClosingLikelihood));
+      case 'updateTeam':
+        return jsonOut(withSession(body, updateTeam));
       case 'exportToSheet':
         return jsonOut(withSession(body, exportToSheet));
       case 'deleteAllLeads':
@@ -233,10 +238,12 @@ function submitLead(body) {
   const submittedAt = new Date().toISOString();
   const phone = sanitizePhone(d.phone);
   const sellerContactPhone = sanitizePhone(d.sellerContactPhone);
+  const referrerPhone = sanitizePhone(d.referrerPhone);
 
   appendRowByHeaders(sheet, {
     'Lead ID': leadId, 'Submitted At': submittedAt, 'Role': d.role, 'Contact Name': d.name,
     'Contact Email': d.email, 'Contact Phone': phone, 'Social Link': d.socialLink || '',
+    'Referrer Name': d.referrerName || '', 'Referrer Phone': referrerPhone,
     'Seller Contact Name': d.sellerContactName || '', 'Seller Contact Phone': sellerContactPhone,
     'Seller Contact Email': d.sellerContactEmail || '',
     'Street Address': d.street, 'City': d.city, 'State': d.state, 'Zip': d.zip, 'Units': d.units,
@@ -264,6 +271,7 @@ function submitLead(body) {
   const newRow = sheet.getLastRow();
   forceTextValue(sheet, newRow, 'Contact Phone', phone);
   forceTextValue(sheet, newRow, 'Seller Contact Phone', sellerContactPhone);
+  forceTextValue(sheet, newRow, 'Referrer Phone', referrerPhone);
   forceTextValue(sheet, newRow, 'Zip', d.zip);
 
   return { ok: true, leadId: leadId };
@@ -657,6 +665,20 @@ function updateClosingLikelihood(body) {
   if (!match) return { ok: false, error: 'Lead not found.' };
   const col = getColumnIndex(sheet, 'Closing Likelihood');
   sheet.getRange(match._row, col).setValue(body.score || '');
+  return { ok: true };
+}
+
+// Admin-only, free text -- lets you group non-seller submitters (bird
+// dogs, wholesalers, etc.) by team. Never sent to the public endpoint
+// (see PUBLIC_LEAD_FIELDS).
+function updateTeam(body) {
+  if (!body.leadId) return { ok: false, error: 'Missing leadId.' };
+  const sheet = getSheet(LEADS_SHEET, LEAD_COLUMNS);
+  const leads = sheetToObjects(sheet);
+  const match = leads.find(function (l) { return l['Lead ID'] === body.leadId; });
+  if (!match) return { ok: false, error: 'Lead not found.' };
+  const col = getColumnIndex(sheet, 'Team');
+  sheet.getRange(match._row, col).setValue(body.team || '');
   return { ok: true };
 }
 
