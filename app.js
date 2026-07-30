@@ -28,9 +28,10 @@ function statusPillHtml(status) {
   return `<span class="status-pill" style="background:${colors.bg}; color:${colors.fg};">${escapeHtml(s)}</span>`;
 }
 
-// Display order, top to bottom. Kept in sync manually with the identical
-// array in backend/Code.gs (used there for the optional Sort Priority
-// column) -- there's no shared-import between the two runtimes.
+// Display order, top to bottom, for the NON-ADMIN status view. Kept in
+// sync manually with the identical array in backend/Code.gs (used there
+// for the optional Sort Priority column) -- there's no shared-import
+// between the two runtimes.
 const STATUS_SORT_ORDER = [
   "In Escrow To Close",
   "Offer Signed By Seller",
@@ -47,6 +48,28 @@ const STATUS_SORT_ORDER = [
 function statusSortIndex(status) {
   const idx = STATUS_SORT_ORDER.indexOf(status || "New");
   return idx === -1 ? STATUS_SORT_ORDER.length : idx;
+}
+
+// Admin's CRM table sorts "New" above "Offer Sent" so incoming leads that
+// need a first look surface without scrolling, ahead of leads that are
+// already in progress and just waiting on a response. Non-admins keep the
+// order above so a submitter's own "Offer Sent" leads stay easy to find.
+const ADMIN_STATUS_SORT_ORDER = [
+  "In Escrow To Close",
+  "Offer Signed By Seller",
+  "Verbally Accepted But Not Signed",
+  "Negotiation",
+  "New",
+  "Offer Sent",
+  "Under Review",
+  "Contacted",
+  "Closed",
+  "Dead"
+];
+
+function adminStatusSortIndex(status) {
+  const idx = ADMIN_STATUS_SORT_ORDER.indexOf(status || "New");
+  return idx === -1 ? ADMIN_STATUS_SORT_ORDER.length : idx;
 }
 
 const FOLLOWUP_REMINDER = `<strong>Follow-up reminder:</strong> If an offer has been sent to your lead and they
@@ -1427,7 +1450,7 @@ function renderCrmTable() {
   const visibleLeads = currentLeads
     .filter(l => leadMatchesSearch(l, crmSearchQuery))
     .sort((a, b) => {
-      const statusDiff = statusSortIndex(a["Status"]) - statusSortIndex(b["Status"]);
+      const statusDiff = adminStatusSortIndex(a["Status"]) - adminStatusSortIndex(b["Status"]);
       if (statusDiff !== 0) return statusDiff;
       return new Date(b["Submitted At"]) - new Date(a["Submitted At"]); // newest first within same status
     });

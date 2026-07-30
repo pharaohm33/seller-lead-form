@@ -33,22 +33,26 @@ const LEAD_COLUMNS = [
 
 const NOTE_COLUMNS = ['Lead ID', 'Timestamp', 'Note', 'Author', 'Note ID', 'Visibility'];
 
-// Display order, top to bottom, for the app's CRM table. Kept in sync
-// manually with the identical STATUS_SORT_ORDER array in app.js -- there's
-// no shared-import between the two runtimes. Sort Priority is just a
-// helper number (its index here) written alongside Status so you can
-// select that column in the Sheets UI and sort by it yourself (Data >
-// Sort range) to see the same order the app shows, without this script
-// ever physically reordering your live rows.
+// Display order, top to bottom, for the ADMIN CRM table specifically (only
+// admin ever views this raw Sheet, since it holds admin-only columns like
+// Team and Closing Likelihood). Kept in sync manually with the identical
+// ADMIN_STATUS_SORT_ORDER array in app.js -- there's no shared-import
+// between the two runtimes. The non-admin status view uses a different
+// order (New sorts lower there) that isn't reflected here since non-admins
+// never see this Sheet directly. Sort Priority is just a helper number
+// (its index here) written alongside Status so you can select that column
+// in the Sheets UI and sort by it yourself (Data > Sort range) to see the
+// same order the admin app shows, without this script ever physically
+// reordering your live rows.
 const STATUS_SORT_ORDER = [
   'In Escrow To Close',
   'Offer Signed By Seller',
   'Verbally Accepted But Not Signed',
   'Negotiation',
+  'New',
   'Offer Sent',
   'Under Review',
   'Contacted',
-  'New',
   'Closed',
   'Dead'
 ];
