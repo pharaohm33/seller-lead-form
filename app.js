@@ -72,6 +72,18 @@ function adminStatusSortIndex(status) {
   return idx === -1 ? ADMIN_STATUS_SORT_ORDER.length : idx;
 }
 
+// "newest" ignores status entirely and sorts purely by submission date;
+// "default" (or anything else) keeps the existing status-priority order,
+// falling back to newest-first as the tiebreak within the same status.
+function leadSortComparator(mode, statusIndexFn) {
+  return (a, b) => {
+    if (mode === "newest") return new Date(b["Submitted At"]) - new Date(a["Submitted At"]);
+    const statusDiff = statusIndexFn(a["Status"]) - statusIndexFn(b["Status"]);
+    if (statusDiff !== 0) return statusDiff;
+    return new Date(b["Submitted At"]) - new Date(a["Submitted At"]);
+  };
+}
+
 const FOLLOWUP_REMINDER = `<strong>Follow-up reminder:</strong> If an offer has been sent to your lead and they
   haven't signed it yet, please follow up by phone or email roughly every 7 days. Log anything they counter
   with in the notes, or text admin directly at <strong>${ADMIN_CONTACT_PHONE}</strong>. You don't need to follow
@@ -1068,10 +1080,13 @@ function showStatusView() {
   document.getElementById("status-message").hidden = true;
   document.getElementById("status-email-error").classList.remove("show");
   statusSearchQuery = "";
+  statusSortMode = "default";
   statusLeadsAll = [];
   statusLeadsEmail = "";
   document.getElementById("status-search-input").value = "";
   document.getElementById("status-search-input").hidden = true;
+  document.getElementById("status-sort-select").value = "default";
+  document.getElementById("status-sort-select").hidden = true;
 }
 
 function hideStatusView() {
@@ -1083,6 +1098,11 @@ document.getElementById("status-back-btn").onclick = hideStatusView;
 
 document.getElementById("status-search-input").oninput = (e) => {
   statusSearchQuery = e.target.value.trim();
+  renderStatusResultsTable(statusLeadsEmail, statusLeadsAll);
+};
+
+document.getElementById("status-sort-select").onchange = (e) => {
+  statusSortMode = e.target.value;
   renderStatusResultsTable(statusLeadsEmail, statusLeadsAll);
 };
 
@@ -1174,6 +1194,7 @@ function buildLeadFields(lead) {
 let statusLeadsAll = [];
 let statusLeadsEmail = "";
 let statusSearchQuery = "";
+let statusSortMode = "default";
 
 function leadMatchesAddressSearch(lead, query) {
   if (!query) return true;
@@ -1187,15 +1208,13 @@ function renderStatusResultsTable(email, leads) {
   statusLeadsEmail = email;
   const container = document.getElementById("status-leads-container");
   const searchInput = document.getElementById("status-search-input");
+  const sortSelect = document.getElementById("status-sort-select");
   searchInput.hidden = leads.length <= 1;
+  sortSelect.hidden = leads.length <= 1;
 
   const visibleLeads = leads
     .filter(lead => leadMatchesAddressSearch(lead, statusSearchQuery))
-    .sort((a, b) => {
-      const statusDiff = statusSortIndex(a["Status"]) - statusSortIndex(b["Status"]);
-      if (statusDiff !== 0) return statusDiff;
-      return new Date(b["Submitted At"]) - new Date(a["Submitted At"]); // newest first within same status
-    });
+    .sort(leadSortComparator(statusSortMode, statusSortIndex));
 
   if (visibleLeads.length === 0) {
     container.innerHTML = `<p class="small-muted" style="padding:12px;">${leads.length === 0 ? "No leads found for that email address." : "No leads match your search."}</p>`;
@@ -1410,6 +1429,11 @@ document.getElementById("crm-search-input").oninput = (e) => {
   renderCrmTable();
 };
 
+document.getElementById("crm-sort-select").onchange = (e) => {
+  crmSortMode = e.target.value;
+  renderCrmTable();
+};
+
 async function showAdminView() {
   document.getElementById("public-view").hidden = true;
   document.getElementById("admin-view").hidden = false;
@@ -1424,6 +1448,7 @@ function adminMessage(text, type) {
 }
 
 let crmSearchQuery = "";
+let crmSortMode = "default";
 
 async function loadLeads() {
   adminMessage("Loading leads...", "info");
@@ -1449,11 +1474,7 @@ function renderCrmTable() {
 
   const visibleLeads = currentLeads
     .filter(l => leadMatchesSearch(l, crmSearchQuery))
-    .sort((a, b) => {
-      const statusDiff = adminStatusSortIndex(a["Status"]) - adminStatusSortIndex(b["Status"]);
-      if (statusDiff !== 0) return statusDiff;
-      return new Date(b["Submitted At"]) - new Date(a["Submitted At"]); // newest first within same status
-    });
+    .sort(leadSortComparator(crmSortMode, adminStatusSortIndex));
 
   if (visibleLeads.length === 0) {
     tbody.innerHTML = "";

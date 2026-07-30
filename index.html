@@ -237,7 +237,13 @@
     </div>
   </div>
   <div id="status-message" class="banner info" hidden></div>
-  <input type="text" id="status-search-input" placeholder="Search your leads by address..." hidden style="margin-bottom:12px;">
+  <div style="display:flex; gap:8px; margin-bottom:12px;">
+    <input type="text" id="status-search-input" placeholder="Search your leads by address..." hidden style="flex:1; width:auto; margin-bottom:0;">
+    <select id="status-sort-select" hidden style="flex:0 0 auto; width:auto;">
+      <option value="default">Sort: Default</option>
+      <option value="newest">Sort: Newest</option>
+    </select>
+  </div>
   <div id="status-leads-container"></div>
 </div>
 
@@ -251,7 +257,13 @@
     </div>
   </div>
   <div id="admin-message" class="banner info" hidden></div>
-  <input type="text" id="crm-search-input" placeholder="Search by address, city, zip, name, or email..." style="margin-bottom:16px;">
+  <div style="display:flex; gap:8px; margin-bottom:16px;">
+    <input type="text" id="crm-search-input" placeholder="Search by address, city, zip, name, or email..." style="flex:1; width:auto; margin-bottom:0;">
+    <select id="crm-sort-select" style="flex:0 0 auto; width:auto;">
+      <option value="default">Sort: Default</option>
+      <option value="newest">Sort: Newest</option>
+    </select>
+  </div>
   <div id="crm-table-wrap">
     <table class="crm-table">
       <thead>
@@ -276,7 +288,7 @@
   <div class="detail-panel" id="detail-panel"></div>
 </div>
 
-<script src="config.js?v=29"></script>
-<script src="app.js?v=29"></script>
+<script src="config.js?v=30"></script>
+<script src="app.js?v=30"></script>
 </body>
 </html>
