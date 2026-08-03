@@ -451,7 +451,7 @@ const steps = [
           ${disclaimer}
           <label class="field-label">Is the property currently occupied by a paying tenant? <span class="req">*</span></label>
           <div class="choice-group" id="occupied-group">
-            ${["Occupied (has a landlord/tenant)", "Vacant (no tenant)", "Vacant - Short-Term Rental (STR)"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
+            ${["Occupied (has a landlord/tenant)", "Vacant (no tenant)"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
           </div>
           <div class="error-text" id="occupied-error">Please choose one.</div>
           <div id="income-sub"></div>
@@ -467,96 +467,83 @@ const steps = [
             sub.querySelector("#noi-input").value = answers.residentialNOI || "";
           } else if (answers.residentialOccupied === "Vacant (no tenant)") {
             sub.innerHTML = `
-              <p class="hint">Look up the estimated monthly rental value on <strong>rentcast.io</strong> for
-              this property, then look up annual property taxes and insurance for a
+              <p class="hint">Look up annual property taxes and insurance for a
               ${answers.beds || "?"} bed / ${answers.baths || "?"} bath home in
-              ${answers.city || "this city"}${answers.state ? ", " + answers.state : ""}, and enter them below.</p>
-              <a href="https://www.rentcast.io/" target="_blank" rel="noopener" class="link-btn">Open rentcast.io &rarr;</a>
-              <label class="field-label">Estimated Monthly Rent (rentcast.io) <span class="req">*</span></label>
-              <input type="number" id="rent-input" placeholder="$">
-              <div class="error-text" id="rent-error">Required.</div>
+              ${answers.city || "this city"}${answers.state ? ", " + answers.state : ""}
+              (search Google, or check the county assessor and an insurance quote, and use the
+              middle of any range you find), and enter them below — these apply to both rental
+              strategies below.</p>
               <label class="field-label">Annual Property Taxes <span class="req">*</span></label>
               <input type="number" id="taxes-input" placeholder="$">
               <div class="error-text" id="taxes-error">Required.</div>
               <label class="field-label">Annual Insurance <span class="req">*</span></label>
               <input type="number" id="insurance-input" placeholder="$">
               <div class="error-text" id="insurance-error">Required.</div>
+
+              <h3 class="step-title" style="font-size:18px; margin-top:24px;">Long-Term Rental</h3>
+              <p class="hint">Look up the estimated monthly rental value on <strong>rentcast.io</strong> for this property.</p>
+              <a href="https://www.rentcast.io/" target="_blank" rel="noopener" class="link-btn">Open rentcast.io &rarr;</a>
+              <label class="field-label">Estimated Monthly Rent (rentcast.io) <span class="req">*</span></label>
+              <input type="number" id="rent-input" placeholder="$">
+              <div class="error-text" id="rent-error">Required.</div>
               <label class="field-label">Expense Ratio % <span class="small-muted">(other operating expenses — maintenance, vacancy, management, capex — as a % of gross rent)</span> <span class="req">*</span></label>
               <input type="number" id="expense-ratio-input" placeholder="e.g. 35" min="0" max="100">
               <div class="error-text" id="expense-ratio-error">Required.</div>
-              <div class="banner info" id="computed-noi-banner"></div>
-            `;
-            sub.querySelector("#rent-input").value = answers.rentcastMonthlyRent || "";
-            sub.querySelector("#taxes-input").value = answers.annualPropertyTaxes || "";
-            sub.querySelector("#insurance-input").value = answers.annualInsurance || "";
-            sub.querySelector("#expense-ratio-input").value = answers.expenseRatio || "";
-            const recompute = () => {
-              const rent = Number(sub.querySelector("#rent-input").value) || 0;
-              const taxes = Number(sub.querySelector("#taxes-input").value) || 0;
-              const insurance = Number(sub.querySelector("#insurance-input").value) || 0;
-              const expenseRatio = Number(sub.querySelector("#expense-ratio-input").value) || 0;
-              const grossAnnualRent = rent * 12;
-              const grossBeforeMaintenance = grossAnnualRent - taxes - insurance;
-              const otherExpenses = grossAnnualRent * (expenseRatio / 100);
-              const noi = grossBeforeMaintenance - otherExpenses;
-              sub.querySelector("#computed-noi-banner").innerHTML = `
-                <div><strong>Gross Rental Income Potential:</strong> $${grossBeforeMaintenance.toLocaleString(undefined, {maximumFractionDigits: 0})}
-                  <span class="small-muted">(monthly rent &times; 12, minus taxes and insurance only — no maintenance/expense ratio applied)</span></div>
-                <div style="margin-top:6px;"><strong>Likely Net Cashflow Per Year:</strong> $${noi.toLocaleString(undefined, {maximumFractionDigits: 0})}
-                  <span class="small-muted">(same as above, minus the ${expenseRatio}% expense ratio)</span></div>
-              `;
-              answers.residentialNOI = noi;
-            };
-            ["#rent-input", "#taxes-input", "#insurance-input", "#expense-ratio-input"].forEach(sel => {
-              sub.querySelector(sel).oninput = recompute;
-            });
-            recompute();
-          } else if (answers.residentialOccupied === "Vacant - Short-Term Rental (STR)") {
-            sub.innerHTML = `
-              <p class="hint">First, search Google for the typical annual property taxes and annual insurance
-              for a long-term rental ${answers.beds || "?"} bed / ${answers.baths || "?"} bath home in
-              ${answers.city || "this city"}${answers.state ? ", " + answers.state : ""}, and enter the
-              <strong>middle of the range</strong> you find for each below.</p>
-              <label class="field-label">Annual Property Taxes <span class="req">*</span></label>
-              <input type="number" id="str-taxes-input" placeholder="$">
-              <div class="error-text" id="str-taxes-error">Required.</div>
-              <label class="field-label">Annual Insurance <span class="req">*</span></label>
-              <input type="number" id="str-insurance-input" placeholder="$">
-              <div class="error-text" id="str-insurance-error">Required.</div>
-              <p class="hint" style="margin-top:16px;">Then look up this property's projected annual
-              short-term rental revenue on <strong>airdna.co</strong> by entering the address.</p>
+              <div class="banner info" id="computed-ltr-noi-banner"></div>
+
+              <h3 class="step-title" style="font-size:18px; margin-top:24px;">Short-Term Rental (STR)</h3>
+              <p class="hint">Look up this property's projected annual short-term rental revenue on <strong>airdna.co</strong> by entering the address.</p>
               <a href="https://www.airdna.co/" target="_blank" rel="noopener" class="link-btn">Open airdna.co &rarr;</a>
               <label class="field-label">Projected Annual STR Revenue (airdna.co) <span class="req">*</span></label>
               <input type="number" id="str-revenue-input" placeholder="$">
               <div class="error-text" id="str-revenue-error">Required.</div>
               <div class="banner info" id="computed-str-noi-banner"></div>
             `;
-            sub.querySelector("#str-taxes-input").value = answers.annualPropertyTaxes || "";
-            sub.querySelector("#str-insurance-input").value = answers.annualInsurance || "";
+            sub.querySelector("#taxes-input").value = answers.annualPropertyTaxes || "";
+            sub.querySelector("#insurance-input").value = answers.annualInsurance || "";
+            sub.querySelector("#rent-input").value = answers.rentcastMonthlyRent || "";
+            sub.querySelector("#expense-ratio-input").value = answers.expenseRatio || "";
             sub.querySelector("#str-revenue-input").value = answers.strAnnualRevenue || "";
-            const recomputeStr = () => {
-              const revenue = Number(sub.querySelector("#str-revenue-input").value) || 0;
-              const taxes = Number(sub.querySelector("#str-taxes-input").value) || 0;
-              const insurance = Number(sub.querySelector("#str-insurance-input").value) || 0;
-              const grossBeforeExpenseRatio = revenue - taxes - insurance;
-              const otherExpenses = revenue * (STR_EXPENSE_RATIO / 100);
-              const noi = grossBeforeExpenseRatio - otherExpenses;
+            const recompute = () => {
+              const taxes = Number(sub.querySelector("#taxes-input").value) || 0;
+              const insurance = Number(sub.querySelector("#insurance-input").value) || 0;
+              const rent = Number(sub.querySelector("#rent-input").value) || 0;
+              const expenseRatio = Number(sub.querySelector("#expense-ratio-input").value) || 0;
+              const strRevenue = Number(sub.querySelector("#str-revenue-input").value) || 0;
+
+              const grossAnnualRent = rent * 12;
+              const ltrGrossBeforeExpenses = grossAnnualRent - taxes - insurance;
+              const ltrOtherExpenses = grossAnnualRent * (expenseRatio / 100);
+              const ltrNOI = ltrGrossBeforeExpenses - ltrOtherExpenses;
+              sub.querySelector("#computed-ltr-noi-banner").innerHTML = `
+                <div><strong>Gross Rental Income Potential:</strong> $${ltrGrossBeforeExpenses.toLocaleString(undefined, {maximumFractionDigits: 0})}
+                  <span class="small-muted">(monthly rent &times; 12, minus taxes and insurance only — no maintenance/expense ratio applied)</span></div>
+                <div style="margin-top:6px;"><strong>Likely Net Cashflow Per Year:</strong> $${ltrNOI.toLocaleString(undefined, {maximumFractionDigits: 0})}
+                  <span class="small-muted">(same as above, minus the ${expenseRatio}% expense ratio)</span></div>
+              `;
+
+              const strGrossBeforeExpenses = strRevenue - taxes - insurance;
+              const strOtherExpenses = strRevenue * (STR_EXPENSE_RATIO / 100);
+              const strNOI = strGrossBeforeExpenses - strOtherExpenses;
               sub.querySelector("#computed-str-noi-banner").innerHTML = `
-                <div><strong>Gross STR Revenue Potential:</strong> $${grossBeforeExpenseRatio.toLocaleString(undefined, {maximumFractionDigits: 0})}
+                <div><strong>Gross STR Revenue Potential:</strong> $${strGrossBeforeExpenses.toLocaleString(undefined, {maximumFractionDigits: 0})}
                   <span class="small-muted">(airdna.co annual revenue minus taxes and insurance only — no expense ratio applied)</span></div>
-                <div style="margin-top:6px;"><strong>Likely Net Cashflow Per Year:</strong> $${noi.toLocaleString(undefined, {maximumFractionDigits: 0})}
+                <div style="margin-top:6px;"><strong>Likely Net Cashflow Per Year:</strong> $${strNOI.toLocaleString(undefined, {maximumFractionDigits: 0})}
                   <span class="small-muted">(same as above, minus a preset ${STR_EXPENSE_RATIO}% expense ratio)</span></div>
               `;
-              answers.residentialNOI = noi;
-              answers.strAnnualRevenue = revenue;
+
               answers.annualPropertyTaxes = taxes;
               answers.annualInsurance = insurance;
-              answers.expenseRatio = STR_EXPENSE_RATIO;
+              answers.rentcastMonthlyRent = rent;
+              answers.expenseRatio = expenseRatio;
+              answers.residentialNOI = ltrNOI;
+              answers.strAnnualRevenue = strRevenue;
+              answers.strNOI = strNOI;
             };
-            ["#str-revenue-input", "#str-taxes-input", "#str-insurance-input"].forEach(sel => {
-              sub.querySelector(sel).oninput = recomputeStr;
+            ["#taxes-input", "#insurance-input", "#rent-input", "#expense-ratio-input", "#str-revenue-input"].forEach(sel => {
+              sub.querySelector(sel).oninput = recompute;
             });
-            recomputeStr();
+            recompute();
           } else {
             sub.innerHTML = "";
           }
@@ -625,26 +612,18 @@ const steps = [
           toggleError(root, "#noi-error", !ok);
           return ok;
         }
-        if (answers.residentialOccupied === "Vacant - Short-Term Rental (STR)") {
-          answers.strAnnualRevenue = root.querySelector("#str-revenue-input").value;
-          answers.annualPropertyTaxes = root.querySelector("#str-taxes-input").value;
-          answers.annualInsurance = root.querySelector("#str-insurance-input").value;
-          answers.expenseRatio = STR_EXPENSE_RATIO;
-          let okStr = true;
-          toggleError(root, "#str-revenue-error", !answers.strAnnualRevenue); if (!answers.strAnnualRevenue) okStr = false;
-          toggleError(root, "#str-taxes-error", !answers.annualPropertyTaxes); if (!answers.annualPropertyTaxes) okStr = false;
-          toggleError(root, "#str-insurance-error", !answers.annualInsurance); if (!answers.annualInsurance) okStr = false;
-          return okStr;
-        }
-        answers.rentcastMonthlyRent = root.querySelector("#rent-input").value;
+        // Vacant (no tenant) -- always computes both LTR and STR so admin can compare
         answers.annualPropertyTaxes = root.querySelector("#taxes-input").value;
         answers.annualInsurance = root.querySelector("#insurance-input").value;
+        answers.rentcastMonthlyRent = root.querySelector("#rent-input").value;
         answers.expenseRatio = root.querySelector("#expense-ratio-input").value;
+        answers.strAnnualRevenue = root.querySelector("#str-revenue-input").value;
         let ok = true;
-        toggleError(root, "#rent-error", !answers.rentcastMonthlyRent); if (!answers.rentcastMonthlyRent) ok = false;
         toggleError(root, "#taxes-error", !answers.annualPropertyTaxes); if (!answers.annualPropertyTaxes) ok = false;
         toggleError(root, "#insurance-error", !answers.annualInsurance); if (!answers.annualInsurance) ok = false;
+        toggleError(root, "#rent-error", !answers.rentcastMonthlyRent); if (!answers.rentcastMonthlyRent) ok = false;
         toggleError(root, "#expense-ratio-error", !answers.expenseRatio); if (!answers.expenseRatio) ok = false;
+        toggleError(root, "#str-revenue-error", !answers.strAnnualRevenue); if (!answers.strAnnualRevenue) ok = false;
         return ok;
       } else if (answers.assetType === "Commercial Property") {
         answers.commercialNOI = root.querySelector("#noi-input").value;
@@ -901,20 +880,17 @@ function buildAnswerRows() {
     rows.push(["Occupied Status", answers.residentialOccupied || "—"]);
     if (answers.residentialOccupied === "Vacant (no tenant)") {
       rows.push(
+        ["Annual Property Taxes", answers.annualPropertyTaxes || "—"],
+        ["Annual Insurance", answers.annualInsurance || "—"],
         ["Rentcast Monthly Rent", answers.rentcastMonthlyRent || "—"],
-        ["Annual Property Taxes", answers.annualPropertyTaxes || "—"],
-        ["Annual Insurance", answers.annualInsurance || "—"],
-        ["Expense Ratio %", answers.expenseRatio || "—"]
-      );
-    } else if (answers.residentialOccupied === "Vacant - Short-Term Rental (STR)") {
-      rows.push(
+        ["Expense Ratio %", answers.expenseRatio || "—"],
+        ["Long-Term Rental NOI", answers.residentialNOI || "—"],
         ["STR Annual Revenue (airdna.co)", answers.strAnnualRevenue || "—"],
-        ["Annual Property Taxes", answers.annualPropertyTaxes || "—"],
-        ["Annual Insurance", answers.annualInsurance || "—"],
-        ["Expense Ratio %", answers.expenseRatio || "—"]
+        ["Short-Term Rental NOI", answers.strNOI || "—"]
       );
+    } else {
+      rows.push(["NOI", answers.residentialNOI || "—"]);
     }
-    rows.push(["NOI", answers.residentialNOI || "—"]);
   } else if (answers.assetType === "Commercial Property") {
     rows.push(["NOI", answers.commercialNOI || "—"]);
   } else if (answers.assetType === "Business") {
@@ -1037,7 +1013,7 @@ async function submitLead(container) {
         assetType: answers.assetType, assetSubtype: answers.assetSubtype,
         beds: answers.beds, baths: answers.baths, sqft: answers.sqft,
         occupiedStatus: answers.residentialOccupied, monthlyRentEstimate: answers.rentcastMonthlyRent,
-        strAnnualRevenue: answers.strAnnualRevenue,
+        strAnnualRevenue: answers.strAnnualRevenue, strNOI: answers.strNOI,
         annualPropertyTaxes: answers.annualPropertyTaxes, annualInsurance: answers.annualInsurance,
         expenseRatio: answers.expenseRatio,
         noi: answers.residentialNOI || answers.commercialNOI,
@@ -1239,20 +1215,17 @@ function buildLeadFields(lead) {
     fields.push(["Occupied Status", lead["Occupied Status"] || "—"]);
     if (lead["Occupied Status"] === "Vacant (no tenant)") {
       fields.push(
+        ["Annual Property Taxes", lead["Annual Property Taxes"] || "—"],
+        ["Annual Insurance", lead["Annual Insurance"] || "—"],
         ["Rentcast Monthly Rent", lead["Monthly Rent Estimate"] || "—"],
-        ["Annual Property Taxes", lead["Annual Property Taxes"] || "—"],
-        ["Annual Insurance", lead["Annual Insurance"] || "—"],
-        ["Expense Ratio %", lead["Expense Ratio %"] || "—"]
-      );
-    } else if (lead["Occupied Status"] === "Vacant - Short-Term Rental (STR)") {
-      fields.push(
+        ["Expense Ratio %", lead["Expense Ratio %"] || "—"],
+        ["Long-Term Rental NOI", lead["NOI"] || "—"],
         ["STR Annual Revenue (airdna.co)", lead["STR Annual Revenue"] || "—"],
-        ["Annual Property Taxes", lead["Annual Property Taxes"] || "—"],
-        ["Annual Insurance", lead["Annual Insurance"] || "—"],
-        ["Expense Ratio %", lead["Expense Ratio %"] || "—"]
+        ["Short-Term Rental NOI", lead["STR NOI"] || "—"]
       );
+    } else {
+      fields.push(["NOI", lead["NOI"] || "—"]);
     }
-    fields.push(["NOI", lead["NOI"] || "—"]);
   } else if (lead["Asset Type"] === "Commercial Property") {
     fields.push(["NOI", lead["NOI"] || "—"]);
   } else if (lead["Asset Type"] === "Business") {
