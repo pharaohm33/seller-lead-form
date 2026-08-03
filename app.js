@@ -7,6 +7,12 @@ const COMMERCIAL_SUBTYPES = ["Multifamily","Office","Hotel/Motel","Mixed Use","I
 
 const ADMIN_CONTACT_PHONE = "+1 520 633 6437";
 
+// Fixed preset for the STR (short-term rental) income path -- unlike the
+// long-term-rental path, the submitter never types an expense ratio here;
+// this business-set 25% is applied silently on top of whatever taxes and
+// insurance they enter.
+const STR_EXPENSE_RATIO = 25;
+
 const LEAD_STATUSES = ["New", "Contacted", "Under Review", "Offer Sent", "Negotiation", "Verbally Accepted But Not Signed", "Offer Signed By Seller", "In Escrow To Close", "Closed", "Dead"];
 
 const STATUS_COLORS = {
@@ -445,7 +451,7 @@ const steps = [
           ${disclaimer}
           <label class="field-label">Is the property currently occupied by a paying tenant? <span class="req">*</span></label>
           <div class="choice-group" id="occupied-group">
-            ${["Occupied (has a landlord/tenant)", "Vacant (no tenant)"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
+            ${["Occupied (has a landlord/tenant)", "Vacant (no tenant)", "Vacant - Short-Term Rental (STR)"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
           </div>
           <div class="error-text" id="occupied-error">Please choose one.</div>
           <div id="income-sub"></div>
@@ -505,6 +511,52 @@ const steps = [
               sub.querySelector(sel).oninput = recompute;
             });
             recompute();
+          } else if (answers.residentialOccupied === "Vacant - Short-Term Rental (STR)") {
+            sub.innerHTML = `
+              <p class="hint">First, search Google for the typical annual property taxes and annual insurance
+              for a long-term rental ${answers.beds || "?"} bed / ${answers.baths || "?"} bath home in
+              ${answers.city || "this city"}${answers.state ? ", " + answers.state : ""}, and enter the
+              <strong>middle of the range</strong> you find for each below.</p>
+              <label class="field-label">Annual Property Taxes <span class="req">*</span></label>
+              <input type="number" id="str-taxes-input" placeholder="$">
+              <div class="error-text" id="str-taxes-error">Required.</div>
+              <label class="field-label">Annual Insurance <span class="req">*</span></label>
+              <input type="number" id="str-insurance-input" placeholder="$">
+              <div class="error-text" id="str-insurance-error">Required.</div>
+              <p class="hint" style="margin-top:16px;">Then look up this property's projected annual
+              short-term rental revenue on <strong>airdna.co</strong> by entering the address.</p>
+              <a href="https://www.airdna.co/" target="_blank" rel="noopener" class="link-btn">Open airdna.co &rarr;</a>
+              <label class="field-label">Projected Annual STR Revenue (airdna.co) <span class="req">*</span></label>
+              <input type="number" id="str-revenue-input" placeholder="$">
+              <div class="error-text" id="str-revenue-error">Required.</div>
+              <div class="banner info" id="computed-str-noi-banner"></div>
+            `;
+            sub.querySelector("#str-taxes-input").value = answers.annualPropertyTaxes || "";
+            sub.querySelector("#str-insurance-input").value = answers.annualInsurance || "";
+            sub.querySelector("#str-revenue-input").value = answers.strAnnualRevenue || "";
+            const recomputeStr = () => {
+              const revenue = Number(sub.querySelector("#str-revenue-input").value) || 0;
+              const taxes = Number(sub.querySelector("#str-taxes-input").value) || 0;
+              const insurance = Number(sub.querySelector("#str-insurance-input").value) || 0;
+              const grossBeforeExpenseRatio = revenue - taxes - insurance;
+              const otherExpenses = revenue * (STR_EXPENSE_RATIO / 100);
+              const noi = grossBeforeExpenseRatio - otherExpenses;
+              sub.querySelector("#computed-str-noi-banner").innerHTML = `
+                <div><strong>Gross STR Revenue Potential:</strong> $${grossBeforeExpenseRatio.toLocaleString(undefined, {maximumFractionDigits: 0})}
+                  <span class="small-muted">(airdna.co annual revenue minus taxes and insurance only — no expense ratio applied)</span></div>
+                <div style="margin-top:6px;"><strong>Likely Net Cashflow Per Year:</strong> $${noi.toLocaleString(undefined, {maximumFractionDigits: 0})}
+                  <span class="small-muted">(same as above, minus a preset ${STR_EXPENSE_RATIO}% expense ratio)</span></div>
+              `;
+              answers.residentialNOI = noi;
+              answers.strAnnualRevenue = revenue;
+              answers.annualPropertyTaxes = taxes;
+              answers.annualInsurance = insurance;
+              answers.expenseRatio = STR_EXPENSE_RATIO;
+            };
+            ["#str-revenue-input", "#str-taxes-input", "#str-insurance-input"].forEach(sel => {
+              sub.querySelector(sel).oninput = recomputeStr;
+            });
+            recomputeStr();
           } else {
             sub.innerHTML = "";
           }
@@ -572,6 +624,17 @@ const steps = [
           const ok = !!answers.residentialNOI;
           toggleError(root, "#noi-error", !ok);
           return ok;
+        }
+        if (answers.residentialOccupied === "Vacant - Short-Term Rental (STR)") {
+          answers.strAnnualRevenue = root.querySelector("#str-revenue-input").value;
+          answers.annualPropertyTaxes = root.querySelector("#str-taxes-input").value;
+          answers.annualInsurance = root.querySelector("#str-insurance-input").value;
+          answers.expenseRatio = STR_EXPENSE_RATIO;
+          let okStr = true;
+          toggleError(root, "#str-revenue-error", !answers.strAnnualRevenue); if (!answers.strAnnualRevenue) okStr = false;
+          toggleError(root, "#str-taxes-error", !answers.annualPropertyTaxes); if (!answers.annualPropertyTaxes) okStr = false;
+          toggleError(root, "#str-insurance-error", !answers.annualInsurance); if (!answers.annualInsurance) okStr = false;
+          return okStr;
         }
         answers.rentcastMonthlyRent = root.querySelector("#rent-input").value;
         answers.annualPropertyTaxes = root.querySelector("#taxes-input").value;
@@ -843,6 +906,13 @@ function buildAnswerRows() {
         ["Annual Insurance", answers.annualInsurance || "—"],
         ["Expense Ratio %", answers.expenseRatio || "—"]
       );
+    } else if (answers.residentialOccupied === "Vacant - Short-Term Rental (STR)") {
+      rows.push(
+        ["STR Annual Revenue (airdna.co)", answers.strAnnualRevenue || "—"],
+        ["Annual Property Taxes", answers.annualPropertyTaxes || "—"],
+        ["Annual Insurance", answers.annualInsurance || "—"],
+        ["Expense Ratio %", answers.expenseRatio || "—"]
+      );
     }
     rows.push(["NOI", answers.residentialNOI || "—"]);
   } else if (answers.assetType === "Commercial Property") {
@@ -967,6 +1037,7 @@ async function submitLead(container) {
         assetType: answers.assetType, assetSubtype: answers.assetSubtype,
         beds: answers.beds, baths: answers.baths, sqft: answers.sqft,
         occupiedStatus: answers.residentialOccupied, monthlyRentEstimate: answers.rentcastMonthlyRent,
+        strAnnualRevenue: answers.strAnnualRevenue,
         annualPropertyTaxes: answers.annualPropertyTaxes, annualInsurance: answers.annualInsurance,
         expenseRatio: answers.expenseRatio,
         noi: answers.residentialNOI || answers.commercialNOI,
@@ -1169,6 +1240,13 @@ function buildLeadFields(lead) {
     if (lead["Occupied Status"] === "Vacant (no tenant)") {
       fields.push(
         ["Rentcast Monthly Rent", lead["Monthly Rent Estimate"] || "—"],
+        ["Annual Property Taxes", lead["Annual Property Taxes"] || "—"],
+        ["Annual Insurance", lead["Annual Insurance"] || "—"],
+        ["Expense Ratio %", lead["Expense Ratio %"] || "—"]
+      );
+    } else if (lead["Occupied Status"] === "Vacant - Short-Term Rental (STR)") {
+      fields.push(
+        ["STR Annual Revenue (airdna.co)", lead["STR Annual Revenue"] || "—"],
         ["Annual Property Taxes", lead["Annual Property Taxes"] || "—"],
         ["Annual Insurance", lead["Annual Insurance"] || "—"],
         ["Expense Ratio %", lead["Expense Ratio %"] || "—"]
