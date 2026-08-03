@@ -490,9 +490,15 @@ const steps = [
               const insurance = Number(sub.querySelector("#insurance-input").value) || 0;
               const expenseRatio = Number(sub.querySelector("#expense-ratio-input").value) || 0;
               const grossAnnualRent = rent * 12;
+              const grossBeforeMaintenance = grossAnnualRent - taxes - insurance;
               const otherExpenses = grossAnnualRent * (expenseRatio / 100);
-              const noi = grossAnnualRent - taxes - insurance - otherExpenses;
-              sub.querySelector("#computed-noi-banner").textContent = `Computed Annual NOI: $${noi.toLocaleString(undefined, {maximumFractionDigits: 0})} (monthly rent × 12, minus taxes, insurance, and ${expenseRatio}% expense ratio)`;
+              const noi = grossBeforeMaintenance - otherExpenses;
+              sub.querySelector("#computed-noi-banner").innerHTML = `
+                <div><strong>Gross Rental Income Potential:</strong> $${grossBeforeMaintenance.toLocaleString(undefined, {maximumFractionDigits: 0})}
+                  <span class="small-muted">(monthly rent &times; 12, minus taxes and insurance only — no maintenance/expense ratio applied)</span></div>
+                <div style="margin-top:6px;"><strong>Likely Net Cashflow Per Year:</strong> $${noi.toLocaleString(undefined, {maximumFractionDigits: 0})}
+                  <span class="small-muted">(same as above, minus the ${expenseRatio}% expense ratio)</span></div>
+              `;
               answers.residentialNOI = noi;
             };
             ["#rent-input", "#taxes-input", "#insurance-input", "#expense-ratio-input"].forEach(sel => {
