@@ -287,6 +287,7 @@ const steps = [
         <label class="field-label">Number of units <span class="req">*</span></label>
         <input type="number" id="units-input" min="1" step="1" placeholder="e.g. 1 for a single-family home">
         <div class="error-text" id="units-error">Enter the number of units (1 or more).</div>
+        <p class="hint">If this property has more than 4 units, choose <strong>Commercial Property</strong> as the asset type on the next step instead of Residential.</p>
       `;
       root.querySelector("#street-input").value = answers.street || "";
       root.querySelector("#city-input").value = answers.city || "";
@@ -352,7 +353,7 @@ const steps = [
         </div>
         <label class="field-label">Type <span class="req">*</span></label>
         <div class="choice-group" id="top-type-group">
-          ${["Commercial Property","Business","Residential Property (1 unit)"]
+          ${["Commercial Property","Business","Residential Property (1-4 units)"]
             .map(t => `<button type="button" class="choice-btn" data-value="${t}">${t}</button>`).join("")}
         </div>
         <div class="error-text" id="top-type-error">Please select an asset type.</div>
@@ -378,26 +379,83 @@ const steps = [
             <div class="error-text" id="subtype-error">Please describe the business type.</div>
           `;
           subFields.querySelector("#subtype-input").value = answers.assetSubtype || "";
-        } else if (answers.assetType === "Residential Property (1 unit)") {
-          subFields.innerHTML = `
-            <div class="row2">
-              <div>
-                <label class="field-label">Beds <span class="req">*</span></label>
-                <input type="number" id="beds-input" min="0" step="1">
-                <div class="error-text" id="beds-error">Required.</div>
+        } else if (answers.assetType === "Residential Property (1-4 units)") {
+          const units = Number(answers.units) || 1;
+          const isMultiUnit = units >= 2 && units <= 4;
+          if (!isMultiUnit) {
+            subFields.innerHTML = `
+              <div class="row2">
+                <div>
+                  <label class="field-label">Beds <span class="req">*</span></label>
+                  <input type="number" id="beds-input" min="0" step="1">
+                  <div class="error-text" id="beds-error">Required.</div>
+                </div>
+                <div>
+                  <label class="field-label">Baths <span class="req">*</span></label>
+                  <input type="number" id="baths-input" min="0" step="0.5">
+                  <div class="error-text" id="baths-error">Required.</div>
+                </div>
               </div>
-              <div>
-                <label class="field-label">Baths <span class="req">*</span></label>
-                <input type="number" id="baths-input" min="0" step="0.5">
-                <div class="error-text" id="baths-error">Required.</div>
+              <label class="field-label">Square footage <span class="small-muted">(optional)</span></label>
+              <input type="number" id="sqft-input" min="0" step="1">
+            `;
+            subFields.querySelector("#beds-input").value = answers.beds || "";
+            subFields.querySelector("#baths-input").value = answers.baths || "";
+            subFields.querySelector("#sqft-input").value = answers.sqft || "";
+          } else {
+            subFields.innerHTML = `
+              <label class="field-label">Are all ${units} units the same layout (identical beds/baths)? <span class="req">*</span></label>
+              <div class="choice-group" id="units-uniform-group">
+                ${["Yes", "No"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
               </div>
-            </div>
-            <label class="field-label">Square footage <span class="small-muted">(optional)</span></label>
-            <input type="number" id="sqft-input" min="0" step="1">
-          `;
-          subFields.querySelector("#beds-input").value = answers.beds || "";
-          subFields.querySelector("#baths-input").value = answers.baths || "";
-          subFields.querySelector("#sqft-input").value = answers.sqft || "";
+              <div class="error-text" id="units-uniform-error">Please choose one.</div>
+              <div id="unit-mix-sub"></div>
+            `;
+            const mixSub = subFields.querySelector("#unit-mix-sub");
+            const renderMixSub = () => {
+              if (answers.unitsUniform === "Yes") {
+                mixSub.innerHTML = `
+                  <div class="row2">
+                    <div>
+                      <label class="field-label">Beds (per unit) <span class="req">*</span></label>
+                      <input type="number" id="beds-input" min="0" step="1">
+                      <div class="error-text" id="beds-error">Required.</div>
+                    </div>
+                    <div>
+                      <label class="field-label">Baths (per unit) <span class="req">*</span></label>
+                      <input type="number" id="baths-input" min="0" step="0.5">
+                      <div class="error-text" id="baths-error">Required.</div>
+                    </div>
+                  </div>
+                  <label class="field-label">Square footage per unit <span class="small-muted">(optional)</span></label>
+                  <input type="number" id="sqft-input" min="0" step="1">
+                `;
+                mixSub.querySelector("#beds-input").value = answers.beds || "";
+                mixSub.querySelector("#baths-input").value = answers.baths || "";
+                mixSub.querySelector("#sqft-input").value = answers.sqft || "";
+              } else if (answers.unitsUniform === "No") {
+                mixSub.innerHTML = `
+                  <label class="field-label">Describe each unit's beds/baths <span class="req">*</span></label>
+                  <input type="text" id="unit-mix-input" placeholder="e.g. Unit A: 2bd/1ba, Unit B: 3bd/2ba">
+                  <div class="error-text" id="unit-mix-error">Required.</div>
+                `;
+                mixSub.querySelector("#unit-mix-input").value = answers.assetSubtype || "";
+              } else {
+                mixSub.innerHTML = "";
+              }
+            };
+            renderMixSub();
+            subFields.querySelectorAll("#units-uniform-group .choice-btn").forEach(btn => {
+              if (btn.dataset.value === answers.unitsUniform) btn.classList.add("selected");
+              btn.onclick = () => {
+                subFields.querySelectorAll("#units-uniform-group .choice-btn").forEach(b => b.classList.remove("selected"));
+                btn.classList.add("selected");
+                answers.unitsUniform = btn.dataset.value;
+                toggleError(subFields, "#units-uniform-error", false);
+                renderMixSub();
+              };
+            });
+          }
         } else {
           subFields.innerHTML = "";
         }
@@ -410,7 +468,7 @@ const steps = [
           root.querySelectorAll("#top-type-group .choice-btn").forEach(b => b.classList.remove("selected"));
           btn.classList.add("selected");
           answers.assetType = btn.dataset.value;
-          answers.assetSubtype = ""; answers.beds = ""; answers.baths = ""; answers.sqft = "";
+          answers.assetSubtype = ""; answers.beds = ""; answers.baths = ""; answers.sqft = ""; answers.unitsUniform = "";
           renderSub();
         };
       });
@@ -424,12 +482,28 @@ const steps = [
       } else if (answers.assetType === "Business") {
         answers.assetSubtype = root.querySelector("#subtype-input").value.trim();
         toggleError(root, "#subtype-error", !answers.assetSubtype); if (!answers.assetSubtype) ok = false;
-      } else if (answers.assetType === "Residential Property (1 unit)") {
-        answers.beds = root.querySelector("#beds-input").value;
-        answers.baths = root.querySelector("#baths-input").value;
-        answers.sqft = root.querySelector("#sqft-input").value;
-        toggleError(root, "#beds-error", answers.beds === ""); if (answers.beds === "") ok = false;
-        toggleError(root, "#baths-error", answers.baths === ""); if (answers.baths === "") ok = false;
+      } else if (answers.assetType === "Residential Property (1-4 units)") {
+        const units = Number(answers.units) || 1;
+        const isMultiUnit = units >= 2 && units <= 4;
+        if (!isMultiUnit) {
+          answers.beds = root.querySelector("#beds-input").value;
+          answers.baths = root.querySelector("#baths-input").value;
+          answers.sqft = root.querySelector("#sqft-input").value;
+          toggleError(root, "#beds-error", answers.beds === ""); if (answers.beds === "") ok = false;
+          toggleError(root, "#baths-error", answers.baths === ""); if (answers.baths === "") ok = false;
+        } else {
+          toggleError(root, "#units-uniform-error", !answers.unitsUniform); if (!answers.unitsUniform) ok = false;
+          if (answers.unitsUniform === "Yes") {
+            answers.beds = root.querySelector("#beds-input").value;
+            answers.baths = root.querySelector("#baths-input").value;
+            answers.sqft = root.querySelector("#sqft-input").value;
+            toggleError(root, "#beds-error", answers.beds === ""); if (answers.beds === "") ok = false;
+            toggleError(root, "#baths-error", answers.baths === ""); if (answers.baths === "") ok = false;
+          } else if (answers.unitsUniform === "No") {
+            answers.assetSubtype = root.querySelector("#unit-mix-input").value.trim();
+            toggleError(root, "#unit-mix-error", !answers.assetSubtype); if (!answers.assetSubtype) ok = false;
+          }
+        }
       }
       return ok;
     }
@@ -445,7 +519,7 @@ const steps = [
           information readily accessible — we're not able to evaluate deals without it.
         </div>
       `;
-      if (answers.assetType === "Residential Property (1 unit)") {
+      if (answers.assetType === "Residential Property (1-4 units)") {
         root.innerHTML = `
           <h2 class="step-title">Property Income (NOI)</h2>
           ${disclaimer}
@@ -466,9 +540,23 @@ const steps = [
             `;
             sub.querySelector("#noi-input").value = answers.residentialNOI || "";
           } else if (answers.residentialOccupied === "Vacant (no tenant)") {
+            const units = Number(answers.units) || 1;
+            const isMultiUniform = units >= 2 && units <= 4 && answers.unitsUniform === "Yes";
+            const taxesInsuranceDesc = units > 1
+              ? `the full ${units}-unit property (not a single unit)`
+              : `a ${answers.beds || "?"} bed / ${answers.baths || "?"} bath home`;
+            const strHint = isMultiUniform
+              ? `Since all ${units} units are identical, search <strong>airdna.co</strong> for a comp matching
+                 <strong>ONE</strong> unit (a ${answers.beds || "?"} bed / ${answers.baths || "?"} bath single
+                 family/condo), and enter that <strong>one unit's</strong> projected annual revenue below — we'll
+                 multiply it by ${units} units automatically for the property total.`
+              : `Look up this property's projected annual short-term rental revenue on <strong>airdna.co</strong>
+                 by entering the address${units > 1 ? " (enter the TOTAL for all units combined)" : ""}.`;
+            const strLabel = isMultiUniform
+              ? "Projected Annual STR Revenue PER UNIT (airdna.co)"
+              : "Projected Annual STR Revenue (airdna.co)";
             sub.innerHTML = `
-              <p class="hint">Look up annual property taxes and insurance for a
-              ${answers.beds || "?"} bed / ${answers.baths || "?"} bath home in
+              <p class="hint">Look up annual property taxes and insurance for ${taxesInsuranceDesc} in
               ${answers.city || "this city"}${answers.state ? ", " + answers.state : ""}
               (search Google, or check the county assessor and an insurance quote, and use the
               middle of any range you find), and enter them below — these apply to both rental
@@ -492,9 +580,9 @@ const steps = [
               <div class="banner info" id="computed-ltr-noi-banner"></div>
 
               <h3 class="step-title" style="font-size:18px; margin-top:24px;">Short-Term Rental (STR)</h3>
-              <p class="hint">Look up this property's projected annual short-term rental revenue on <strong>airdna.co</strong> by entering the address.</p>
+              <p class="hint">${strHint}</p>
               <a href="https://www.airdna.co/" target="_blank" rel="noopener" class="link-btn">Open airdna.co &rarr;</a>
-              <label class="field-label">Projected Annual STR Revenue (airdna.co) <span class="req">*</span></label>
+              <label class="field-label">${strLabel} <span class="req">*</span></label>
               <input type="number" id="str-revenue-input" placeholder="$">
               <div class="error-text" id="str-revenue-error">Required.</div>
               <div class="banner info" id="computed-str-noi-banner"></div>
@@ -503,13 +591,16 @@ const steps = [
             sub.querySelector("#insurance-input").value = answers.annualInsurance || "";
             sub.querySelector("#rent-input").value = answers.rentcastMonthlyRent || "";
             sub.querySelector("#expense-ratio-input").value = answers.expenseRatio || "";
-            sub.querySelector("#str-revenue-input").value = answers.strAnnualRevenue || "";
+            sub.querySelector("#str-revenue-input").value = isMultiUniform && answers.strAnnualRevenue
+              ? (Number(answers.strAnnualRevenue) / units)
+              : (answers.strAnnualRevenue || "");
             const recompute = () => {
               const taxes = Number(sub.querySelector("#taxes-input").value) || 0;
               const insurance = Number(sub.querySelector("#insurance-input").value) || 0;
               const rent = Number(sub.querySelector("#rent-input").value) || 0;
               const expenseRatio = Number(sub.querySelector("#expense-ratio-input").value) || 0;
-              const strRevenue = Number(sub.querySelector("#str-revenue-input").value) || 0;
+              const strRevenueEntered = Number(sub.querySelector("#str-revenue-input").value) || 0;
+              const strRevenue = isMultiUniform ? strRevenueEntered * units : strRevenueEntered;
 
               const grossAnnualRent = rent * 12;
               const ltrGrossBeforeExpenses = grossAnnualRent - taxes - insurance;
@@ -526,8 +617,9 @@ const steps = [
               const strOtherExpenses = strRevenue * (STR_EXPENSE_RATIO / 100);
               const strNOI = strGrossBeforeExpenses - strOtherExpenses;
               sub.querySelector("#computed-str-noi-banner").innerHTML = `
-                <div><strong>Gross STR Revenue Potential:</strong> $${strGrossBeforeExpenses.toLocaleString(undefined, {maximumFractionDigits: 0})}
-                  <span class="small-muted">(airdna.co annual revenue minus taxes and insurance only — no expense ratio applied)</span></div>
+                ${isMultiUniform ? `<div><strong>Total STR Revenue (${units} units &times; $${strRevenueEntered.toLocaleString(undefined, {maximumFractionDigits: 0})}/unit):</strong> $${strRevenue.toLocaleString(undefined, {maximumFractionDigits: 0})}</div>` : ""}
+                <div${isMultiUniform ? ' style="margin-top:6px;"' : ""}><strong>Gross STR Revenue Potential:</strong> $${strGrossBeforeExpenses.toLocaleString(undefined, {maximumFractionDigits: 0})}
+                  <span class="small-muted">(annual revenue minus taxes and insurance only — no expense ratio applied)</span></div>
                 <div style="margin-top:6px;"><strong>Likely Net Cashflow Per Year:</strong> $${strNOI.toLocaleString(undefined, {maximumFractionDigits: 0})}
                   <span class="small-muted">(same as above, minus a preset ${STR_EXPENSE_RATIO}% expense ratio)</span></div>
               `;
@@ -602,7 +694,7 @@ const steps = [
       }
     },
     validate(root) {
-      if (answers.assetType === "Residential Property (1 unit)") {
+      if (answers.assetType === "Residential Property (1-4 units)") {
         const ok1 = !!answers.residentialOccupied;
         toggleError(root, "#occupied-error", !ok1);
         if (!ok1) return false;
@@ -613,17 +705,26 @@ const steps = [
           return ok;
         }
         // Vacant (no tenant) -- always computes both LTR and STR so admin can compare
+        const vacantUnits = Number(answers.units) || 1;
+        const vacantIsMultiUniform = vacantUnits >= 2 && vacantUnits <= 4 && answers.unitsUniform === "Yes";
         answers.annualPropertyTaxes = root.querySelector("#taxes-input").value;
         answers.annualInsurance = root.querySelector("#insurance-input").value;
         answers.rentcastMonthlyRent = root.querySelector("#rent-input").value;
         answers.expenseRatio = root.querySelector("#expense-ratio-input").value;
-        answers.strAnnualRevenue = root.querySelector("#str-revenue-input").value;
+        const strRevenueEntered = root.querySelector("#str-revenue-input").value;
+        // The input holds a PER-UNIT figure when units are uniform -- always store the
+        // multiplied TOTAL in answers.strAnnualRevenue, matching what recompute() already
+        // keeps in sync on every keystroke (redone here explicitly rather than relying on
+        // that timing, since this is also what actually gets submitted).
+        answers.strAnnualRevenue = vacantIsMultiUniform && strRevenueEntered
+          ? Number(strRevenueEntered) * vacantUnits
+          : strRevenueEntered;
         let ok = true;
         toggleError(root, "#taxes-error", !answers.annualPropertyTaxes); if (!answers.annualPropertyTaxes) ok = false;
         toggleError(root, "#insurance-error", !answers.annualInsurance); if (!answers.annualInsurance) ok = false;
         toggleError(root, "#rent-error", !answers.rentcastMonthlyRent); if (!answers.rentcastMonthlyRent) ok = false;
         toggleError(root, "#expense-ratio-error", !answers.expenseRatio); if (!answers.expenseRatio) ok = false;
-        toggleError(root, "#str-revenue-error", !answers.strAnnualRevenue); if (!answers.strAnnualRevenue) ok = false;
+        toggleError(root, "#str-revenue-error", !strRevenueEntered); if (!strRevenueEntered) ok = false;
         return ok;
       } else if (answers.assetType === "Commercial Property") {
         answers.commercialNOI = root.querySelector("#noi-input").value;
@@ -876,7 +977,7 @@ function buildAnswerRows() {
     ["Asset Type", answers.assetType],
     ["Subtype / Details", answers.assetSubtype || [answers.beds && `${answers.beds} bd`, answers.baths && `${answers.baths} ba`, answers.sqft && `${answers.sqft} sqft`].filter(Boolean).join(", ")]
   );
-  if (answers.assetType === "Residential Property (1 unit)") {
+  if (answers.assetType === "Residential Property (1-4 units)") {
     rows.push(["Occupied Status", answers.residentialOccupied || "—"]);
     if (answers.residentialOccupied === "Vacant (no tenant)") {
       rows.push(
@@ -1211,7 +1312,7 @@ function buildLeadFields(lead) {
     ["Asset Type", lead["Asset Type"]], ["Subtype", lead["Asset Subtype"] || "—"],
     ["Beds", lead["Beds"] || "—"], ["Baths", lead["Baths"] || "—"], ["Sq Ft", lead["Sq Ft"] || "—"]
   );
-  if (lead["Asset Type"] === "Residential Property (1 unit)") {
+  if (lead["Asset Type"] === "Residential Property (1-4 units)") {
     fields.push(["Occupied Status", lead["Occupied Status"] || "—"]);
     if (lead["Occupied Status"] === "Vacant (no tenant)") {
       fields.push(
