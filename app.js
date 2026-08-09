@@ -509,6 +509,32 @@ const steps = [
     }
   },
   {
+    key: "price",
+    progress: true,
+    render(root) {
+      root.innerHTML = `
+        <h2 class="step-title">Price</h2>
+        <label class="field-label">What price is the seller seeking? <span class="req">*</span></label>
+        <input type="number" id="price-input" placeholder="$">
+        <div class="error-text" id="price-error">Required.</div>
+
+        <label class="field-label">How did they arrive at that price? <span class="req">*</span></label>
+        <textarea id="reasoning-input" placeholder="e.g. recent appraisal, comparable sales, remaining loan balance plus profit, an offer they already turned down..."></textarea>
+        <div class="error-text" id="reasoning-error">Please describe how the price was determined.</div>
+      `;
+      root.querySelector("#price-input").value = answers.priceSought || "";
+      root.querySelector("#reasoning-input").value = answers.priceReasoning || "";
+    },
+    validate(root) {
+      answers.priceSought = root.querySelector("#price-input").value;
+      answers.priceReasoning = root.querySelector("#reasoning-input").value.trim();
+      let ok = true;
+      toggleError(root, "#price-error", !answers.priceSought); if (!answers.priceSought) ok = false;
+      toggleError(root, "#reasoning-error", !answers.priceReasoning); if (!answers.priceReasoning) ok = false;
+      return ok;
+    }
+  },
+  {
     key: "income",
     progress: true,
     render(root) {
@@ -533,12 +559,154 @@ const steps = [
         const sub = root.querySelector("#income-sub");
         const renderIncomeSub = () => {
           if (answers.residentialOccupied === "Occupied (has a landlord/tenant)") {
+            const occUnits = Number(answers.units) || 1;
+            const occIsMultiUniform = occUnits >= 2 && occUnits <= 4 && answers.unitsUniform === "Yes";
             sub.innerHTML = `
               <label class="field-label">Annual NOI <span class="req">*</span></label>
               <input type="number" id="noi-input" placeholder="$">
               <div class="error-text" id="noi-error">Required.</div>
+
+              <label class="field-label" style="margin-top:16px;">Does the seller have 12 months of rent rolls for this property? <span class="req">*</span></label>
+              <div class="choice-group" id="rent-rolls-group">
+                ${["Yes", "No"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
+              </div>
+              <div class="error-text" id="rent-rolls-error">Please choose one.</div>
+              <div id="pl-sub"></div>
+
+              <label class="field-label" style="margin-top:16px;">Can the property be delivered vacant upon sale? <span class="req">*</span></label>
+              <div class="choice-group" id="deliverable-vacant-group">
+                ${["Yes", "No"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
+              </div>
+              <div class="error-text" id="deliverable-vacant-error">Please choose one.</div>
+
+              <label class="field-label">Current tenant lease term <span class="small-muted">(e.g. month-to-month, or a 1-year lease just renewed)</span> <span class="req">*</span></label>
+              <input type="text" id="lease-term-input" placeholder="e.g. Month-to-month">
+              <div class="error-text" id="lease-term-error">Required.</div>
+
+              <div id="str-comparison-sub"></div>
             `;
             sub.querySelector("#noi-input").value = answers.residentialNOI || "";
+            sub.querySelector("#lease-term-input").value = answers.currentLeaseTerm || "";
+
+            const plSub = sub.querySelector("#pl-sub");
+            const renderPlSub = () => {
+              if (answers.hasRentRolls === "Yes") {
+                plSub.innerHTML = `
+                  <label class="field-label">Does the seller also have a profit &amp; loss statement for the last 12 months? <span class="req">*</span></label>
+                  <div class="choice-group" id="has-pl-group">
+                    ${["Yes", "No"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
+                  </div>
+                  <div class="error-text" id="has-pl-error">Please choose one.</div>
+                `;
+                plSub.querySelectorAll("#has-pl-group .choice-btn").forEach(btn => {
+                  if (btn.dataset.value === answers.hasProfitLoss) btn.classList.add("selected");
+                  btn.onclick = () => {
+                    plSub.querySelectorAll("#has-pl-group .choice-btn").forEach(b => b.classList.remove("selected"));
+                    btn.classList.add("selected");
+                    answers.hasProfitLoss = btn.dataset.value;
+                    toggleError(plSub, "#has-pl-error", false);
+                  };
+                });
+              } else {
+                plSub.innerHTML = "";
+                answers.hasProfitLoss = "";
+              }
+            };
+            renderPlSub();
+            sub.querySelectorAll("#rent-rolls-group .choice-btn").forEach(btn => {
+              if (btn.dataset.value === answers.hasRentRolls) btn.classList.add("selected");
+              btn.onclick = () => {
+                sub.querySelectorAll("#rent-rolls-group .choice-btn").forEach(b => b.classList.remove("selected"));
+                btn.classList.add("selected");
+                answers.hasRentRolls = btn.dataset.value;
+                toggleError(sub, "#rent-rolls-error", false);
+                renderPlSub();
+              };
+            });
+
+            // Only relevant if the property could actually transition to a different rental
+            // strategy soon -- if a long lease was just renewed, this comparison isn't useful,
+            // so skip it entirely rather than asking for vacancy-style info that won't apply.
+            const strSub = sub.querySelector("#str-comparison-sub");
+            const renderStrSub = () => {
+              if (answers.deliverableVacant === "Yes") {
+                const strHint = occIsMultiUniform
+                  ? `Since all ${occUnits} units are identical, search <strong>airdna.co</strong> for a comp
+                     matching <strong>ONE</strong> unit (a ${answers.beds || "?"} bed / ${answers.baths || "?"}
+                     bath single family/condo), and enter that <strong>one unit's</strong> projected annual
+                     revenue below — we'll multiply it by ${occUnits} units automatically for the property total.`
+                  : `Look up this property's projected annual short-term rental revenue on <strong>airdna.co</strong>
+                     by entering the address${occUnits > 1 ? " (enter the TOTAL for all units combined)" : ""}.`;
+                const strLabel = occIsMultiUniform
+                  ? "Projected Annual STR Revenue PER UNIT (airdna.co)"
+                  : "Projected Annual STR Revenue (airdna.co)";
+                strSub.innerHTML = `
+                  <h3 class="step-title" style="font-size:18px; margin-top:24px;">Short-Term Rental Comparison
+                    <span class="small-muted">(optional, but encouraged — speeds up admin's evaluation of the deal)</span></h3>
+                  <label class="field-label">Annual Property Taxes <span class="small-muted">(optional)</span></label>
+                  <input type="number" id="occ-taxes-input" placeholder="$">
+                  <label class="field-label">Annual Insurance <span class="small-muted">(optional)</span></label>
+                  <input type="number" id="occ-insurance-input" placeholder="$">
+                  <p class="hint">${strHint}</p>
+                  <a href="https://www.airdna.co/" target="_blank" rel="noopener" class="link-btn">Open airdna.co &rarr;</a>
+                  <label class="field-label">${strLabel} <span class="small-muted">(optional)</span></label>
+                  <input type="number" id="occ-str-revenue-input" placeholder="$">
+                  <div class="banner info" id="computed-occ-str-noi-banner" hidden></div>
+                `;
+                strSub.querySelector("#occ-taxes-input").value = answers.annualPropertyTaxes || "";
+                strSub.querySelector("#occ-insurance-input").value = answers.annualInsurance || "";
+                strSub.querySelector("#occ-str-revenue-input").value = occIsMultiUniform && answers.strAnnualRevenue
+                  ? (Number(answers.strAnnualRevenue) / occUnits)
+                  : (answers.strAnnualRevenue || "");
+                const recomputeOccStr = () => {
+                  const taxes = Number(strSub.querySelector("#occ-taxes-input").value) || 0;
+                  const insurance = Number(strSub.querySelector("#occ-insurance-input").value) || 0;
+                  const strRevenueEntered = Number(strSub.querySelector("#occ-str-revenue-input").value) || 0;
+                  const banner = strSub.querySelector("#computed-occ-str-noi-banner");
+                  if (!taxes && !insurance && !strRevenueEntered) {
+                    banner.hidden = true;
+                    answers.annualPropertyTaxes = ""; answers.annualInsurance = "";
+                    answers.strAnnualRevenue = ""; answers.strNOI = "";
+                    return;
+                  }
+                  const strRevenue = occIsMultiUniform ? strRevenueEntered * occUnits : strRevenueEntered;
+                  const strGrossBeforeExpenses = strRevenue - taxes - insurance;
+                  const strOtherExpenses = strRevenue * (STR_EXPENSE_RATIO / 100);
+                  const strNOI = strGrossBeforeExpenses - strOtherExpenses;
+                  banner.hidden = false;
+                  banner.innerHTML = `
+                    ${occIsMultiUniform ? `<div><strong>Total STR Revenue (${occUnits} units &times; $${strRevenueEntered.toLocaleString(undefined, {maximumFractionDigits: 0})}/unit):</strong> $${strRevenue.toLocaleString(undefined, {maximumFractionDigits: 0})}</div>` : ""}
+                    <div${occIsMultiUniform ? ' style="margin-top:6px;"' : ""}><strong>Gross STR Revenue Potential:</strong> $${strGrossBeforeExpenses.toLocaleString(undefined, {maximumFractionDigits: 0})}</div>
+                    <div style="margin-top:6px;"><strong>Likely Net Cashflow Per Year (STR):</strong> $${strNOI.toLocaleString(undefined, {maximumFractionDigits: 0})}
+                      <span class="small-muted">(minus taxes, insurance, and a preset ${STR_EXPENSE_RATIO}% expense ratio)</span></div>
+                    <div style="margin-top:6px;"><strong>Current Actual NOI (from rent rolls/P&amp;L):</strong> $${Number(answers.residentialNOI || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}</div>
+                  `;
+                  answers.annualPropertyTaxes = taxes;
+                  answers.annualInsurance = insurance;
+                  answers.strAnnualRevenue = strRevenue;
+                  answers.strNOI = strNOI;
+                };
+                ["#occ-taxes-input", "#occ-insurance-input", "#occ-str-revenue-input"].forEach(sel => {
+                  strSub.querySelector(sel).oninput = recomputeOccStr;
+                });
+                recomputeOccStr();
+              } else {
+                strSub.innerHTML = "";
+                answers.annualPropertyTaxes = ""; answers.annualInsurance = "";
+                answers.strAnnualRevenue = ""; answers.strNOI = "";
+              }
+            };
+            renderStrSub();
+            sub.querySelectorAll("#deliverable-vacant-group .choice-btn").forEach(btn => {
+              if (btn.dataset.value === answers.deliverableVacant) btn.classList.add("selected");
+              btn.onclick = () => {
+                sub.querySelectorAll("#deliverable-vacant-group .choice-btn").forEach(b => b.classList.remove("selected"));
+                btn.classList.add("selected");
+                answers.deliverableVacant = btn.dataset.value;
+                toggleError(sub, "#deliverable-vacant-error", false);
+                renderStrSub();
+              };
+            });
           } else if (answers.residentialOccupied === "Vacant (no tenant)") {
             const units = Number(answers.units) || 1;
             const isMultiUniform = units >= 2 && units <= 4 && answers.unitsUniform === "Yes";
@@ -574,9 +742,16 @@ const steps = [
               <label class="field-label">Estimated Monthly Rent (rentcast.io) <span class="req">*</span></label>
               <input type="number" id="rent-input" placeholder="$">
               <div class="error-text" id="rent-error">Required.</div>
-              <label class="field-label">Expense Ratio % <span class="small-muted">(other operating expenses — maintenance, vacancy, management, capex — as a % of gross rent)</span> <span class="req">*</span></label>
-              <input type="number" id="expense-ratio-input" placeholder="e.g. 35" min="0" max="100">
-              <div class="error-text" id="expense-ratio-error">Required.</div>
+              ${units === 1 ? `
+                <p class="hint">Since this is a single-family property, maintenance is estimated at
+                <strong>1.1% of the $${Number(answers.priceSought || 0).toLocaleString()} purchase price</strong>
+                (most DSCR lenders underwrite with maintenance included this way) — no separate expense ratio
+                needed. The comparison below shows the figure with and without that maintenance estimate.</p>
+              ` : `
+                <label class="field-label">Expense Ratio % <span class="small-muted">(other operating expenses — maintenance, vacancy, management, capex — as a % of gross rent)</span> <span class="req">*</span></label>
+                <input type="number" id="expense-ratio-input" placeholder="e.g. 35" min="0" max="100">
+                <div class="error-text" id="expense-ratio-error">Required.</div>
+              `}
               <div class="banner info" id="computed-ltr-noi-banner"></div>
 
               <h3 class="step-title" style="font-size:18px; margin-top:24px;">Short-Term Rental (STR)</h3>
@@ -590,7 +765,9 @@ const steps = [
             sub.querySelector("#taxes-input").value = answers.annualPropertyTaxes || "";
             sub.querySelector("#insurance-input").value = answers.annualInsurance || "";
             sub.querySelector("#rent-input").value = answers.rentcastMonthlyRent || "";
-            sub.querySelector("#expense-ratio-input").value = answers.expenseRatio || "";
+            if (units !== 1) {
+              sub.querySelector("#expense-ratio-input").value = typeof answers.expenseRatio === "number" || /^\d+$/.test(answers.expenseRatio || "") ? answers.expenseRatio : "";
+            }
             sub.querySelector("#str-revenue-input").value = isMultiUniform && answers.strAnnualRevenue
               ? (Number(answers.strAnnualRevenue) / units)
               : (answers.strAnnualRevenue || "");
@@ -598,19 +775,27 @@ const steps = [
               const taxes = Number(sub.querySelector("#taxes-input").value) || 0;
               const insurance = Number(sub.querySelector("#insurance-input").value) || 0;
               const rent = Number(sub.querySelector("#rent-input").value) || 0;
-              const expenseRatio = Number(sub.querySelector("#expense-ratio-input").value) || 0;
               const strRevenueEntered = Number(sub.querySelector("#str-revenue-input").value) || 0;
               const strRevenue = isMultiUniform ? strRevenueEntered * units : strRevenueEntered;
 
               const grossAnnualRent = rent * 12;
               const ltrGrossBeforeExpenses = grossAnnualRent - taxes - insurance;
-              const ltrOtherExpenses = grossAnnualRent * (expenseRatio / 100);
+              let ltrOtherExpenses, expenseRatio;
+              if (units === 1) {
+                ltrOtherExpenses = Number(answers.priceSought || 0) * 0.011;
+                expenseRatio = "1.1% of price";
+              } else {
+                expenseRatio = Number(sub.querySelector("#expense-ratio-input").value) || 0;
+                ltrOtherExpenses = grossAnnualRent * (expenseRatio / 100);
+              }
               const ltrNOI = ltrGrossBeforeExpenses - ltrOtherExpenses;
               sub.querySelector("#computed-ltr-noi-banner").innerHTML = `
-                <div><strong>Gross Rental Income Potential:</strong> $${ltrGrossBeforeExpenses.toLocaleString(undefined, {maximumFractionDigits: 0})}
-                  <span class="small-muted">(monthly rent &times; 12, minus taxes and insurance only — no maintenance/expense ratio applied)</span></div>
-                <div style="margin-top:6px;"><strong>Likely Net Cashflow Per Year:</strong> $${ltrNOI.toLocaleString(undefined, {maximumFractionDigits: 0})}
-                  <span class="small-muted">(same as above, minus the ${expenseRatio}% expense ratio)</span></div>
+                <div><strong>Without Maintenance (Gross Rental Income Potential):</strong> $${ltrGrossBeforeExpenses.toLocaleString(undefined, {maximumFractionDigits: 0})}
+                  <span class="small-muted">(monthly rent &times; 12, minus taxes and insurance only — no maintenance applied)</span></div>
+                <div style="margin-top:6px;"><strong>With Maintenance (Likely Net Cashflow Per Year):</strong> $${ltrNOI.toLocaleString(undefined, {maximumFractionDigits: 0})}
+                  <span class="small-muted">${units === 1
+                    ? `(same as above, minus 1.1% of the $${Number(answers.priceSought || 0).toLocaleString()} purchase price: $${ltrOtherExpenses.toLocaleString(undefined, {maximumFractionDigits: 0})})`
+                    : `(same as above, minus the ${expenseRatio}% expense ratio)`}</span></div>
               `;
 
               const strGrossBeforeExpenses = strRevenue - taxes - insurance;
@@ -632,7 +817,7 @@ const steps = [
               answers.strAnnualRevenue = strRevenue;
               answers.strNOI = strNOI;
             };
-            ["#taxes-input", "#insurance-input", "#rent-input", "#expense-ratio-input", "#str-revenue-input"].forEach(sel => {
+            ["#taxes-input", "#insurance-input", "#rent-input", "#str-revenue-input"].concat(units !== 1 ? ["#expense-ratio-input"] : []).forEach(sel => {
               sub.querySelector(sel).oninput = recompute;
             });
             recompute();
@@ -700,9 +885,16 @@ const steps = [
         if (!ok1) return false;
         if (answers.residentialOccupied === "Occupied (has a landlord/tenant)") {
           answers.residentialNOI = root.querySelector("#noi-input").value;
-          const ok = !!answers.residentialNOI;
-          toggleError(root, "#noi-error", !ok);
-          return ok;
+          answers.currentLeaseTerm = root.querySelector("#lease-term-input").value.trim();
+          let okOcc = true;
+          toggleError(root, "#noi-error", !answers.residentialNOI); if (!answers.residentialNOI) okOcc = false;
+          toggleError(root, "#rent-rolls-error", !answers.hasRentRolls); if (!answers.hasRentRolls) okOcc = false;
+          if (answers.hasRentRolls === "Yes") {
+            toggleError(root, "#has-pl-error", !answers.hasProfitLoss); if (!answers.hasProfitLoss) okOcc = false;
+          }
+          toggleError(root, "#deliverable-vacant-error", !answers.deliverableVacant); if (!answers.deliverableVacant) okOcc = false;
+          toggleError(root, "#lease-term-error", !answers.currentLeaseTerm); if (!answers.currentLeaseTerm) okOcc = false;
+          return okOcc;
         }
         // Vacant (no tenant) -- always computes both LTR and STR so admin can compare
         const vacantUnits = Number(answers.units) || 1;
@@ -710,7 +902,14 @@ const steps = [
         answers.annualPropertyTaxes = root.querySelector("#taxes-input").value;
         answers.annualInsurance = root.querySelector("#insurance-input").value;
         answers.rentcastMonthlyRent = root.querySelector("#rent-input").value;
-        answers.expenseRatio = root.querySelector("#expense-ratio-input").value;
+        // For single-family (units===1), expenseRatio/residentialNOI are already kept current
+        // by recompute() (1.1%-of-price formula, no manual input to re-read here). Multi-unit
+        // still has a manual Expense Ratio % input to validate.
+        let ok = true;
+        if (vacantUnits !== 1) {
+          answers.expenseRatio = root.querySelector("#expense-ratio-input").value;
+          toggleError(root, "#expense-ratio-error", !answers.expenseRatio); if (!answers.expenseRatio) ok = false;
+        }
         const strRevenueEntered = root.querySelector("#str-revenue-input").value;
         // The input holds a PER-UNIT figure when units are uniform -- always store the
         // multiplied TOTAL in answers.strAnnualRevenue, matching what recompute() already
@@ -719,11 +918,9 @@ const steps = [
         answers.strAnnualRevenue = vacantIsMultiUniform && strRevenueEntered
           ? Number(strRevenueEntered) * vacantUnits
           : strRevenueEntered;
-        let ok = true;
         toggleError(root, "#taxes-error", !answers.annualPropertyTaxes); if (!answers.annualPropertyTaxes) ok = false;
         toggleError(root, "#insurance-error", !answers.annualInsurance); if (!answers.annualInsurance) ok = false;
         toggleError(root, "#rent-error", !answers.rentcastMonthlyRent); if (!answers.rentcastMonthlyRent) ok = false;
-        toggleError(root, "#expense-ratio-error", !answers.expenseRatio); if (!answers.expenseRatio) ok = false;
         toggleError(root, "#str-revenue-error", !strRevenueEntered); if (!strRevenueEntered) ok = false;
         return ok;
       } else if (answers.assetType === "Commercial Property") {
@@ -835,32 +1032,6 @@ const steps = [
       const ok = !!answers.paymentStructureWilling;
       toggleError(root, "#structure-error", !ok);
       return ok && answers.paymentStructureWilling === "Yes";
-    }
-  },
-  {
-    key: "price",
-    progress: true,
-    render(root) {
-      root.innerHTML = `
-        <h2 class="step-title">Price</h2>
-        <label class="field-label">What price is the seller seeking? <span class="req">*</span></label>
-        <input type="number" id="price-input" placeholder="$">
-        <div class="error-text" id="price-error">Required.</div>
-
-        <label class="field-label">How did they arrive at that price? <span class="req">*</span></label>
-        <textarea id="reasoning-input" placeholder="e.g. recent appraisal, comparable sales, remaining loan balance plus profit, an offer they already turned down..."></textarea>
-        <div class="error-text" id="reasoning-error">Please describe how the price was determined.</div>
-      `;
-      root.querySelector("#price-input").value = answers.priceSought || "";
-      root.querySelector("#reasoning-input").value = answers.priceReasoning || "";
-    },
-    validate(root) {
-      answers.priceSought = root.querySelector("#price-input").value;
-      answers.priceReasoning = root.querySelector("#reasoning-input").value.trim();
-      let ok = true;
-      toggleError(root, "#price-error", !answers.priceSought); if (!answers.priceSought) ok = false;
-      toggleError(root, "#reasoning-error", !answers.priceReasoning); if (!answers.priceReasoning) ok = false;
-      return ok;
     }
   },
   {
@@ -989,8 +1160,22 @@ function buildAnswerRows() {
         ["STR Annual Revenue (airdna.co)", answers.strAnnualRevenue || "—"],
         ["Short-Term Rental NOI", answers.strNOI || "—"]
       );
-    } else {
-      rows.push(["NOI", answers.residentialNOI || "—"]);
+    } else if (answers.residentialOccupied === "Occupied (has a landlord/tenant)") {
+      rows.push(
+        ["NOI", answers.residentialNOI || "—"],
+        ["Has 12mo Rent Rolls", answers.hasRentRolls || "—"],
+        ["Has 12mo P&L", answers.hasRentRolls === "Yes" ? (answers.hasProfitLoss || "—") : "N/A"],
+        ["Deliverable Vacant", answers.deliverableVacant || "—"],
+        ["Current Lease Term", answers.currentLeaseTerm || "—"]
+      );
+      if (answers.deliverableVacant === "Yes" && answers.strAnnualRevenue) {
+        rows.push(
+          ["Annual Property Taxes", answers.annualPropertyTaxes || "—"],
+          ["Annual Insurance", answers.annualInsurance || "—"],
+          ["STR Annual Revenue (airdna.co)", answers.strAnnualRevenue || "—"],
+          ["Short-Term Rental NOI", answers.strNOI || "—"]
+        );
+      }
     }
   } else if (answers.assetType === "Commercial Property") {
     rows.push(["NOI", answers.commercialNOI || "—"]);
@@ -1117,6 +1302,8 @@ async function submitLead(container) {
         strAnnualRevenue: answers.strAnnualRevenue, strNOI: answers.strNOI,
         annualPropertyTaxes: answers.annualPropertyTaxes, annualInsurance: answers.annualInsurance,
         expenseRatio: answers.expenseRatio,
+        hasRentRolls: answers.hasRentRolls, hasProfitLoss: answers.hasProfitLoss,
+        deliverableVacant: answers.deliverableVacant, currentLeaseTerm: answers.currentLeaseTerm,
         noi: answers.residentialNOI || answers.commercialNOI,
         businessRevenue: answers.businessRevenue, businessEarningsType: answers.businessEarningsType,
         businessEarnings: answers.businessEarnings,
@@ -1324,8 +1511,22 @@ function buildLeadFields(lead) {
         ["STR Annual Revenue (airdna.co)", lead["STR Annual Revenue"] || "—"],
         ["Short-Term Rental NOI", lead["STR NOI"] || "—"]
       );
-    } else {
-      fields.push(["NOI", lead["NOI"] || "—"]);
+    } else if (lead["Occupied Status"] === "Occupied (has a landlord/tenant)") {
+      fields.push(
+        ["NOI", lead["NOI"] || "—"],
+        ["Has 12mo Rent Rolls", lead["Has Rent Rolls"] || "—"],
+        ["Has 12mo P&L", lead["Has Rent Rolls"] === "Yes" ? (lead["Has P&L"] || "—") : "N/A"],
+        ["Deliverable Vacant", lead["Deliverable Vacant"] || "—"],
+        ["Current Lease Term", lead["Current Lease Term"] || "—"]
+      );
+      if (lead["Deliverable Vacant"] === "Yes" && lead["STR Annual Revenue"]) {
+        fields.push(
+          ["Annual Property Taxes", lead["Annual Property Taxes"] || "—"],
+          ["Annual Insurance", lead["Annual Insurance"] || "—"],
+          ["STR Annual Revenue (airdna.co)", lead["STR Annual Revenue"] || "—"],
+          ["Short-Term Rental NOI", lead["STR NOI"] || "—"]
+        );
+      }
     }
   } else if (lead["Asset Type"] === "Commercial Property") {
     fields.push(["NOI", lead["NOI"] || "—"]);
