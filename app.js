@@ -696,16 +696,27 @@ const steps = [
         if (!arv) {
           maxOfferBanner.hidden = true;
         } else {
-          // Assignment fee floor is the greater of a flat $20k or 3% of ARV, regardless of
-          // on/off-market -- this doesn't change based on where the deal was sourced.
-          const assignmentFee = Math.max(20000, 0.03 * arv);
-          const maxOffer = (0.70 * arv) - rehab - assignmentFee;
+          // MAO = (ARV - Rehab - Closing Costs) / (1 + Target ROC) - Wholesale Fee. Closing Costs
+          // are the customary buyer/seller split: 3% purchase-side + 6% resale-side, both taken as
+          // % of ARV (not purchase price, to avoid a circular dependency on the number we're
+          // solving for). Target ROC slides down as ARV climbs -- see targetRocForArv. Wholesale
+          // Fee is the same greater-of-$20k-or-3%-of-ARV floor used elsewhere, applies regardless
+          // of on/off-market.
+          const purchaseClosingCosts = 0.03 * arv;
+          const resaleClosingCosts = 0.06 * arv;
+          const closingCosts = purchaseClosingCosts + resaleClosingCosts;
+          const targetRoc = targetRocForArv(arv);
+          const wholesaleFee = Math.max(20000, 0.03 * arv);
+          const maxOffer = ((arv - rehab - closingCosts) / (1 + targetRoc)) - wholesaleFee;
           maxOfferBanner.hidden = false;
           maxOfferBanner.innerHTML = `
-            <strong>Max Offer to Seller (70% Rule):</strong> $${maxOffer.toLocaleString(undefined, {maximumFractionDigits: 0})}
-            <span class="small-muted">(70% of $${arv.toLocaleString()} ARV, minus $${rehab.toLocaleString()} repairs,
-            minus a $${assignmentFee.toLocaleString(undefined, {maximumFractionDigits: 0})} assignment fee — the
-            greater of $20,000 or 3% of ARV)</span>
+            <strong>Maximum Allowable Offer (MAO):</strong> $${maxOffer.toLocaleString(undefined, {maximumFractionDigits: 0})}
+            <span class="small-muted">($${arv.toLocaleString()} ARV, minus $${rehab.toLocaleString()} repairs,
+            minus $${closingCosts.toLocaleString(undefined, {maximumFractionDigits: 0})} closing costs (3% purchase-side
+            + 6% resale-side of ARV — buyer and seller customarily split closing costs this way), divided by
+            1 + a ${(targetRoc * 100).toFixed(1)}% target return on capital for this price point, minus a
+            $${wholesaleFee.toLocaleString(undefined, {maximumFractionDigits: 0})} wholesale fee — the greater of
+            $20,000 or 3% of ARV)</span>
             <br><strong>Start well below this number and try to close there in negotiation.</strong>
             <br><span class="small-muted">This can take a while — use "Save My Progress" at the top of the page
             to pause here and come back once the seller has agreed to a number.</span>
@@ -1492,6 +1503,34 @@ function toggleError(root, selector, show) {
 
 function escapeHtml(str) {
   return String(str ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+}
+
+// Sliding-scale Target ROC for the MAO formula: smaller/riskier deals need a higher percentage
+// yield to be worth the sweat equity, big-ticket deals can work on a thinner percentage since the
+// absolute dollar profit is still large. Anchor points come from the given ranges (Low-End/High-Risk
+// 15-18% at $100k-$200k ARV, Mid-Range 12-15% at $250k-$450k, High-End 10-12% at $500k+); ROC tapers
+// linearly within each band and holds flat across the $200k-$250k and $450k-$500k gaps where the
+// bands already meet at the same value. Beyond $500k it keeps tapering down to a 10% floor by $1M ARV
+// (that exact taper-to-10% point isn't specified, so $1M was chosen as a reasonable continuation).
+function targetRocForArv(arv) {
+  const points = [
+    [100000, 0.18],
+    [200000, 0.15],
+    [250000, 0.15],
+    [450000, 0.12],
+    [500000, 0.12],
+    [1000000, 0.10]
+  ];
+  if (arv <= points[0][0]) return points[0][1];
+  if (arv >= points[points.length - 1][0]) return points[points.length - 1][1];
+  for (let i = 0; i < points.length - 1; i++) {
+    const [x0, y0] = points[i];
+    const [x1, y1] = points[i + 1];
+    if (arv >= x0 && arv <= x1) {
+      return x1 === x0 ? y0 : y0 + ((arv - x0) / (x1 - x0)) * (y1 - y0);
+    }
+  }
+  return points[points.length - 1][1];
 }
 
 function shouldSkip(step) {
