@@ -642,7 +642,9 @@ const steps = [
 
         <label class="field-label">Rehab Estimate <span class="small-muted">(optional, if known)</span></label>
         <input type="number" id="rehab-input" placeholder="$">
-        <p class="hint">To estimate this, ${googleAiHow}, then ask:
+        <p class="hint">To estimate this, ${googleAiHow}. It's important to also give it the for-sale listing
+        link or a link to pictures of the property (the Pictures Link above works) so it can actually see the
+        property's condition — a repair estimate without pictures is just a guess. Then ask:
         <br><span class="small-muted">"${repairPrompt}"</span></p>
 
         ${isResidential ? `<div class="banner info" id="as-is-value-banner" hidden></div>` : ""}
