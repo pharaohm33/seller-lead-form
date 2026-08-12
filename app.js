@@ -2249,7 +2249,7 @@ document.getElementById("admin-logout-btn").onclick = () => {
   document.getElementById("public-view").hidden = false;
 };
 
-document.getElementById("mao-calc-btn").onclick = openMaoCalculator;
+document.getElementById("mao-calc-public-btn").onclick = openMaoCalculator;
 
 document.getElementById("crm-search-input").oninput = (e) => {
   crmSearchQuery = e.target.value.trim();
@@ -2336,22 +2336,35 @@ function renderCrmTable() {
 // numbers directly (e.g. a seller countered with a different rehab estimate) and, optionally, save
 // the recalculated MAO suite onto an existing lead without having the associate re-run the wizard.
 // Built on the same computeMaoSuite() the wizard step uses, so the math never drifts between the two.
+// Available everywhere -- a header button open to anyone (bird dogs/connectors, wholesalers,
+// admin, even a seller poking around) -- not just admin. It's independent of the lead wizard: no
+// login or in-progress submission required, just plug in numbers and see the math. The "save
+// straight onto an existing lead" section only appears when an admin session is active, since that
+// needs full CRM access to pick from every lead on file; non-admins can still always use the
+// calculator itself, they just email/text the numbers over instead of writing them to the sheet
+// directly. Whenever someone actually submits a Cash Deal lead through the wizard (not this
+// calculator), the same computeMaoSuite() math is already captured on that submission automatically
+// (see cashDealDetails' validate()) -- this panel doesn't change that.
 function openMaoCalculator() {
   const overlay = document.getElementById("mao-calc-overlay");
   const panel = document.getElementById("mao-calc-panel");
+  const isAdmin = !!sessionToken;
   overlay.hidden = false;
 
   panel.innerHTML = `
     <button class="link-btn" id="close-mao-calc-btn" style="float:right;">Close ✕</button>
     <h2>MAO Calculator</h2>
-    <p class="small-muted">Uses the same Maximum Allowable Offer math as the Cash Deal Details wizard step.
-    Enter numbers directly, or pick an existing lead below to pre-fill from what's already on file.</p>
+    <p class="small-muted">Uses the same Maximum Allowable Offer math as the Cash Deal Details wizard step --
+    open to bird dogs/connectors, wholesalers, and admin alike. Plug in numbers any time, independent of
+    submitting a lead.</p>
 
-    <label class="field-label">Save to an existing lead <span class="small-muted">(optional -- pre-fills ARV/Rehab/Asset Type below)</span></label>
-    <select id="mao-calc-lead-select">
-      <option value="">-- Select a lead --</option>
-      ${currentLeads.map(l => `<option value="${escapeHtml(l["Lead ID"])}">${escapeHtml(l["Street Address"] || "(no address)")}, ${escapeHtml(l["City"] || "")} — ${escapeHtml(l["Contact Name"] || "")}</option>`).join("")}
-    </select>
+    ${isAdmin ? `
+      <label class="field-label">Save to an existing lead <span class="small-muted">(optional -- pre-fills ARV/Rehab/Asset Type below)</span></label>
+      <select id="mao-calc-lead-select">
+        <option value="">-- Select a lead --</option>
+        ${currentLeads.map(l => `<option value="${escapeHtml(l["Lead ID"])}">${escapeHtml(l["Street Address"] || "(no address)")}, ${escapeHtml(l["City"] || "")} — ${escapeHtml(l["Contact Name"] || "")}</option>`).join("")}
+      </select>
+    ` : ""}
 
     <label class="field-label">ARV <span class="small-muted">(After Repair Value)</span></label>
     <input type="number" id="mao-calc-arv" placeholder="$">
@@ -2368,10 +2381,12 @@ function openMaoCalculator() {
 
     <div class="banner warn" id="mao-calc-output" hidden style="margin-top:16px;"></div>
 
-    <div style="margin-top:20px; padding-top:16px; border-top:1px solid var(--border);">
-      <button class="btn primary" id="mao-calc-save-btn" disabled>Save MAO to Selected Lead</button>
-      <div id="mao-calc-save-message" class="small-muted" style="margin-top:8px;"></div>
-    </div>
+    ${isAdmin ? `
+      <div style="margin-top:20px; padding-top:16px; border-top:1px solid var(--border);">
+        <button class="btn primary" id="mao-calc-save-btn" disabled>Save MAO to Selected Lead</button>
+        <div id="mao-calc-save-message" class="small-muted" style="margin-top:8px;"></div>
+      </div>
+    ` : ""}
   `;
 
   panel.querySelector("#close-mao-calc-btn").onclick = () => overlay.hidden = true;
@@ -2382,12 +2397,12 @@ function openMaoCalculator() {
     const assetType = panel.querySelector("#mao-calc-asset-type").value;
     const output = panel.querySelector("#mao-calc-output");
     const saveBtn = panel.querySelector("#mao-calc-save-btn");
-    const leadSelected = !!panel.querySelector("#mao-calc-lead-select").value;
+    const leadSelected = isAdmin && !!panel.querySelector("#mao-calc-lead-select").value;
 
     lastMaoCalcSuite = computeMaoSuite(arv, rehab, assetType);
     if (!lastMaoCalcSuite) {
       output.hidden = true;
-      saveBtn.disabled = true;
+      if (saveBtn) saveBtn.disabled = true;
       return;
     }
     const fmt = n => "$" + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
@@ -2402,47 +2417,51 @@ function openMaoCalculator() {
       <strong>Hard Money Buyer MAO (20% Down):</strong> ${fmt(lastMaoCalcSuite.maoHardMoney20)}
       <br><span class="small-muted">(${lastMaoCalcSuite.hm20Explanation})</span>
     `;
-    saveBtn.disabled = !leadSelected;
+    if (saveBtn) saveBtn.disabled = !leadSelected;
   };
 
-  panel.querySelector("#mao-calc-lead-select").onchange = (e) => {
-    const lead = currentLeads.find(l => l["Lead ID"] === e.target.value);
-    if (lead) {
-      if (lead["ARV"]) panel.querySelector("#mao-calc-arv").value = lead["ARV"];
-      if (lead["Rehab Estimate"]) panel.querySelector("#mao-calc-rehab").value = lead["Rehab Estimate"];
-      if (lead["Asset Type"]) panel.querySelector("#mao-calc-asset-type").value = lead["Asset Type"];
-    }
-    panel.querySelector("#mao-calc-save-message").textContent = "";
-    recompute();
-  };
+  if (isAdmin) {
+    panel.querySelector("#mao-calc-lead-select").onchange = (e) => {
+      const lead = currentLeads.find(l => l["Lead ID"] === e.target.value);
+      if (lead) {
+        if (lead["ARV"]) panel.querySelector("#mao-calc-arv").value = lead["ARV"];
+        if (lead["Rehab Estimate"]) panel.querySelector("#mao-calc-rehab").value = lead["Rehab Estimate"];
+        if (lead["Asset Type"]) panel.querySelector("#mao-calc-asset-type").value = lead["Asset Type"];
+      }
+      panel.querySelector("#mao-calc-save-message").textContent = "";
+      recompute();
+    };
+  }
   ["#mao-calc-arv", "#mao-calc-rehab"].forEach(sel => { panel.querySelector(sel).oninput = recompute; });
   panel.querySelector("#mao-calc-asset-type").onchange = recompute;
 
-  panel.querySelector("#mao-calc-save-btn").onclick = async () => {
-    const leadId = panel.querySelector("#mao-calc-lead-select").value;
-    const msgEl = panel.querySelector("#mao-calc-save-message");
-    if (!leadId || !lastMaoCalcSuite) return;
-    msgEl.textContent = "Saving...";
-    const res = await api("updateMaoForLead", {
-      token: sessionToken, leadId,
-      maoCash: Math.round(lastMaoCalcSuite.maoCash),
-      maoHardMoney10: Math.round(lastMaoCalcSuite.maoHardMoney10),
-      maoHardMoney20: Math.round(lastMaoCalcSuite.maoHardMoney20),
-      maoBreakdown: lastMaoCalcSuite.fullBreakdown
-    });
-    if (res.ok) {
-      msgEl.textContent = "Saved to the lead sheet.";
-      const lead = currentLeads.find(l => l["Lead ID"] === leadId);
-      if (lead) {
-        lead["MAO Cash"] = Math.round(lastMaoCalcSuite.maoCash);
-        lead["MAO Hard Money (10% Down)"] = Math.round(lastMaoCalcSuite.maoHardMoney10);
-        lead["MAO Hard Money (20% Down)"] = Math.round(lastMaoCalcSuite.maoHardMoney20);
-        lead["MAO Breakdown"] = lastMaoCalcSuite.fullBreakdown;
+  if (isAdmin) {
+    panel.querySelector("#mao-calc-save-btn").onclick = async () => {
+      const leadId = panel.querySelector("#mao-calc-lead-select").value;
+      const msgEl = panel.querySelector("#mao-calc-save-message");
+      if (!leadId || !lastMaoCalcSuite) return;
+      msgEl.textContent = "Saving...";
+      const res = await api("updateMaoForLead", {
+        token: sessionToken, leadId,
+        maoCash: Math.round(lastMaoCalcSuite.maoCash),
+        maoHardMoney10: Math.round(lastMaoCalcSuite.maoHardMoney10),
+        maoHardMoney20: Math.round(lastMaoCalcSuite.maoHardMoney20),
+        maoBreakdown: lastMaoCalcSuite.fullBreakdown
+      });
+      if (res.ok) {
+        msgEl.textContent = "Saved to the lead sheet.";
+        const lead = currentLeads.find(l => l["Lead ID"] === leadId);
+        if (lead) {
+          lead["MAO Cash"] = Math.round(lastMaoCalcSuite.maoCash);
+          lead["MAO Hard Money (10% Down)"] = Math.round(lastMaoCalcSuite.maoHardMoney10);
+          lead["MAO Hard Money (20% Down)"] = Math.round(lastMaoCalcSuite.maoHardMoney20);
+          lead["MAO Breakdown"] = lastMaoCalcSuite.fullBreakdown;
+        }
+      } else {
+        msgEl.textContent = "Failed to save: " + (res.error || "unknown error");
       }
-    } else {
-      msgEl.textContent = "Failed to save: " + (res.error || "unknown error");
-    }
-  };
+    };
+  }
 }
 
 function formatDate(iso) {
