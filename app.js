@@ -618,7 +618,9 @@ const steps = [
       const arvPrompt = `how much is this worth at full market value (ARV): ${addressLine}`;
       const repairPrompt = `how much repair is needed as an investment flip for this property: ${addressLine}`;
       const assessedValuePrompt = `what is the county assessed value for this property: ${addressLine}`;
-      const googleAiHow = `go to <strong>google.com</strong>, search "ai", and click the "AI Mode" button near the top`;
+      const googleAiHow = `go to <strong>google.com</strong> and search anything (typing "ai" works fine, or just the
+        address) — once results load, look at the row of tabs near the top of the page (next to "All", "Images",
+        "News", "Shopping") and click <strong>"AI Mode"</strong>`;
       root.innerHTML = `
         <h2 class="step-title">Cash Deal Details</h2>
 
