@@ -1507,32 +1507,28 @@ function escapeHtml(str) {
   return String(str ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
 }
 
-// Full MAO suite: Cash Buyer, Hard Money Buyer (10% down), Hard Money Buyer (20% down) -- all
-// three are the SAME leveraged formula, just with different financing terms, so the comparison is
-// apples-to-apples and leverage always shows up as a higher MAO (see note below):
+// Full MAO suite: Cash Buyer, Hard Money Buyer (10% down), Hard Money Buyer (20% down).
 //
+// Hard Money (10%/20% down) uses the given leveraged formula as-is:
 //   MAO = (ARV - Rehab - Selling Costs - [Upfront Cash x (1+Target ROI)])
 //         / (1 + [Down Payment% x (1+Target ROI)] + Financing Cost%) - Wholesale Fee
 //
-// Cash Buyer = the zero-leverage case of this same formula: Down Payment% = 100% (the whole price
-// is the buyer's own cash), Upfront Cash = $0 and Financing Cost% = 0% (no loan, so no loan fees or
-// interest). An earlier version of this used a separate, simpler formula for Cash
-// ((ARV-Rehab-Selling Costs)/(1+ROI)-Fee) copied over from a prior turn -- testing it against the
-// Hard Money variants showed Cash coming out *higher* than both Hard Money numbers in every example,
-// which is backwards: leverage is supposed to let you pay more, since a leveraged buyer's own cash
-// on the line (just the down payment) is much smaller than an all-cash buyer's (the full price), so
-// the same target ROI% translates into a much smaller required profit and therefore a higher
-// affordable price. That's exactly what this single-formula version produces -- verified Cash <
-// Hard Money (20% Down) < Hard Money (10% Down) in every test case.
+// Cash Buyer is NOT the "100% down payment" case of that same formula -- an earlier version plugged
+// DP%=100% into it directly, which double counts return-of-capital (the leading "1" in the
+// denominator already represents repaying the full price; adding another full "+100%" on top repays
+// it a second time), understating Cash Buyer MAO by roughly half. Solving the same target-return-on-
+// cash-invested equation with no debt at all collapses cleanly to the simpler, debt-free formula:
+//   MAO = (ARV - Rehab - Selling Costs) / (1 + Target ROC) - Wholesale Fee
+// with no Upfront Cash or Financing Cost terms, since an all-cash purchase has no loan to originate
+// or pay interest on.
 //
 // Selling Costs are a flat 6% of ARV. Upfront Cash (hard-money loan points/fees) is 2% of ARV for
 // residential 1-4 units, 3% for anything else (commercial/business) -- only charged on the Hard
-// Money variants, since there's no loan (and no loan fee) on an all-cash deal. Financing Cost% = a
-// flat 12% approximate hard money annual rate x (estimated hold months / 12); hold months come from
-// a rehab-severity tier bucketed by rehab as a % of ARV (<10% light, 10-25% moderate, >=25% heavy)
-// -- the exact ratio cutoffs aren't specified by the given timeline matrices (which bucket by scope
-// of work, not a number we collect), so this is the closest quantitative proxy available and should
-// be tuned if it doesn't match real deals.
+// Money variants. Financing Cost% = a flat 12% approximate hard money annual rate x (estimated hold
+// months / 12); hold months come from a rehab-severity tier bucketed by rehab as a % of ARV (<10%
+// light, 10-25% moderate, >=25% heavy) -- the exact ratio cutoffs aren't specified by the given
+// timeline matrices (which bucket by scope of work, not a number we collect), so this is the closest
+// quantitative proxy available and should be tuned if it doesn't match real deals.
 //
 // Target ROI/ROC differs by variant and asset type:
 // - Hard Money (10%/20% down), any asset type, and Cash Buyer on commercial/business: a floor that
@@ -1544,6 +1540,15 @@ function escapeHtml(str) {
 //   rental income data this flow doesn't collect), keyed to the same rehab-severity tier: 8-11%
 //   Cosmetic Refresh, 12-15% Moderate Value-Add, 16-20%+ Heavy Gut/Structural, using the midpoint of
 //   each range (9.5%/13.5%/18%).
+//
+// With these parameters (12% hard money rate, 2-15% financing cost depending on hold length, 2-3%
+// upfront loan fees, 20-25% Hard Money ROI vs 9.5-22% Cash ROC), Cash Buyer MAO comes out HIGHER
+// than both Hard Money variants in every case tested -- residential and commercial, light and heavy
+// rehab. That's not a bug: the given Hard Money formula's financing cost and upfront loan fees are
+// real dollar drags that a cash buyer never pays, and on top of that Cash Buyer's target return here
+// is usually well below Hard Money's, so the two effects compound instead of leverage winning out.
+// If the goal is for Hard Money to show as more competitive than Cash, the fix is to tune Hard
+// Money's ROI down and/or its financing-cost assumptions down, not the Cash formula.
 //
 // Wholesale Fee is unchanged from the rest of the app: the greater of $20,000 or 3% of ARV, applied
 // to every variant.
@@ -1573,25 +1578,36 @@ function computeMaoSuite(arv, rehab, assetType) {
   const pct1 = n => (n * 100).toFixed(1) + "%";
   const pct0 = n => (n * 100).toFixed(0) + "%";
 
-  function variant(downPaymentPct, downPaymentLabel, financed, roi, roiLabel) {
-    const variantUpfrontCash = financed ? upfrontCash : 0;
-    const variantFinancingCostPct = financed ? financingCostPct : 0;
-    const numerator = arv - rehab - sellingCosts - (variantUpfrontCash * (1 + roi));
-    const denominator = 1 + (downPaymentPct * (1 + roi)) + variantFinancingCostPct;
+  // Cash Buyer has no loan at all, so it isn't the "100% down payment" case of the leveraged
+  // formula below -- plugging DP%=100% into that formula's "1 + [DP%x(1+ROI)]" denominator double
+  // counts return-of-capital (the leading "1" already represents repaying the full price; adding
+  // "+100%" on top repays it a second time), which understates Cash Buyer MAO by roughly half.
+  // Solving the same target-ROI-on-cash-invested equation with no debt at all collapses cleanly to:
+  //   MAO = (ARV - Rehab - Selling Costs) / (1 + Target ROC) - Wholesale Fee
+  // matching the fee-subtracted-after-division convention the leveraged formula also uses.
+  const cashMao = ((arv - rehab - sellingCosts) / (1 + cashTargetRoc)) - wholesaleFee;
+  const cashExplanation = `${money(arv)} ARV, minus ${money(rehab)} repairs, minus ${money(sellingCosts)} selling `
+    + `costs (6% of ARV), divided by 1 + a ${pct1(cashTargetRoc)} target ROC for this deal profile `
+    + `(${tierName}) -- no financing cost or upfront loan fees, since an all-cash purchase has no loan -- `
+    + `minus a ${money(wholesaleFee)} wholesale fee — the greater of $20,000 or 3% of ARV`;
+  const cash = { mao: cashMao, explanation: cashExplanation };
+
+  function variant(downPaymentPct, downPaymentLabel, roi, roiLabel) {
+    const numerator = arv - rehab - sellingCosts - (upfrontCash * (1 + roi));
+    const denominator = 1 + (downPaymentPct * (1 + roi)) + financingCostPct;
     const mao = (numerator / denominator) - wholesaleFee;
     const explanation = `${money(arv)} ARV, minus ${money(rehab)} repairs, minus ${money(sellingCosts)} selling `
-      + `costs (6% of ARV)` + (financed ? `, minus ${money(variantUpfrontCash)} upfront hard money loan fees `
-        + `(${pct0(upfrontCashPct)} of ARV) grossed up by the target ${roiLabel}` : "")
-      + `, all divided by 1 + [${downPaymentLabel} down payment x (1 + ${pct1(roi)} target ${roiLabel})]`
-      + (financed ? ` + ${pct1(variantFinancingCostPct)} financing cost (a 12% approximate hard money rate over `
-        + `an estimated ${months}-month ${tierName.toLowerCase()} hold)` : " (no financing cost -- an all-cash purchase)")
-      + `, minus a ${money(wholesaleFee)} wholesale fee — the greater of $20,000 or 3% of ARV`;
+      + `costs (6% of ARV), minus ${money(upfrontCash)} upfront hard money loan fees `
+      + `(${pct0(upfrontCashPct)} of ARV) grossed up by the target ${roiLabel}, all divided by `
+      + `1 + [${downPaymentLabel} down payment x (1 + ${pct1(roi)} target ${roiLabel})] + `
+      + `${pct1(financingCostPct)} financing cost (a 12% approximate hard money rate over an estimated `
+      + `${months}-month ${tierName.toLowerCase()} hold), minus a ${money(wholesaleFee)} wholesale fee — `
+      + `the greater of $20,000 or 3% of ARV`;
     return { mao, explanation };
   }
 
-  const cash = variant(1.0, "100%", false, cashTargetRoc, "ROC");
-  const hm10 = variant(0.10, "10%", true, targetRoi, "ROI");
-  const hm20 = variant(0.20, "20%", true, targetRoi, "ROI");
+  const hm10 = variant(0.10, "10%", targetRoi, "ROI");
+  const hm20 = variant(0.20, "20%", targetRoi, "ROI");
 
   const sheetBlurb = (label, mao, explanation) =>
     `Maximum Allowable Offer — ${label}: ${money(mao)}\n(${explanation}) = ${money(mao)}`;
