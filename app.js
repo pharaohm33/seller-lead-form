@@ -1766,8 +1766,18 @@ async function submitLead(container) {
 
 /* ---------- Save/resume progress via URL (client-side only, no backend) ---------- */
 
+// These are all recomputed automatically from other saved answers (arv, rehabEstimate, assetType,
+// countyAssessedValue) whenever the relevant step renders or validates -- leaving them out of the
+// save/resume link keeps it shorter (maoBreakdown especially, a multi-paragraph blurb) without
+// losing anything, since they're never a source of truth themselves.
+const DERIVED_ANSWER_KEYS = ["asIsValue", "maoCash", "maoHardMoney10", "maoHardMoney20", "maoBreakdown"];
+
 function buildShareUrl() {
-  const payload = JSON.stringify({ a: answers, s: stepIndex });
+  const trimmedAnswers = {};
+  Object.keys(answers).forEach(k => {
+    if (!DERIVED_ANSWER_KEYS.includes(k)) trimmedAnswers[k] = answers[k];
+  });
+  const payload = JSON.stringify({ a: trimmedAnswers, s: stepIndex });
   const url = new URL(window.location.href);
   url.search = "";
   url.searchParams.set("resume", payload); // URLSearchParams handles encoding
@@ -1802,6 +1812,17 @@ document.getElementById("restart-btn").onclick = restartWizard;
 document.getElementById("status-followup-reminder").innerHTML = FOLLOWUP_REMINDER;
 
 document.getElementById("save-progress-btn").onclick = () => {
+  // Every step only writes its fields into `answers` inside validate() (normally triggered by the
+  // Next button) -- so without this, anything typed into the CURRENT step but not yet advanced past
+  // was silently missing from the saved link. Run validate() here purely for that side effect (sync
+  // DOM -> answers), ignore its pass/fail, and clear any error highlights it triggers, since saving
+  // progress with required fields still blank is explicitly allowed.
+  const stepContainer = document.getElementById("step-container");
+  const currentStep = steps[stepIndex];
+  if (currentStep.validate) {
+    currentStep.validate(stepContainer);
+    stepContainer.querySelectorAll(".error-text.show").forEach(el => el.classList.remove("show"));
+  }
   const url = buildShareUrl();
   window.history.replaceState(null, "", url);
   const message = "This saved link lets you pick up exactly where you left off. It's for your own use — anyone who has this link can see and resume this data, so don't share it with anyone else.";
