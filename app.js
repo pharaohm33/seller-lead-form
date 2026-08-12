@@ -1532,24 +1532,35 @@ function escapeHtml(str) {
 // a rehab-severity tier bucketed by rehab as a % of ARV (<10% light, 10-25% moderate, >=25% heavy)
 // -- the exact ratio cutoffs aren't specified by the given timeline matrices (which bucket by scope
 // of work, not a number we collect), so this is the closest quantitative proxy available and should
-// be tuned if it doesn't match real deals. Target ROI is a floor: for residential it steps down as
-// ARV grows (25% under $250k, 20% from $250k-$500k, 15% at $500k+); for commercial/business it's
-// keyed to the same rehab-severity tier instead (18% light TI, 22% heavy adaptive reuse, 25%
-// ground-up). Wholesale Fee is unchanged from the rest of the app: the greater of $20,000 or 3% of
-// ARV, applied to every variant.
+// be tuned if it doesn't match real deals.
+//
+// Target ROI/ROC differs by variant and asset type:
+// - Hard Money (10%/20% down), any asset type, and Cash Buyer on commercial/business: a floor that
+//   steps down as ARV grows for residential (25% under $250k, 20% from $250k-$500k, 15% at $500k+),
+//   or is keyed to the rehab-severity tier for commercial/business (18% light TI, 22% heavy adaptive
+//   reuse, 25% ground-up).
+// - Cash Buyer on residential: a separate "Target ROC by Strategy & Scope" scale specifically for an
+//   all-cash fix-and-flip exit (buy, rehab, resell -- not a buy-and-hold cap rate, which would need
+//   rental income data this flow doesn't collect), keyed to the same rehab-severity tier: 8-11%
+//   Cosmetic Refresh, 12-15% Moderate Value-Add, 16-20%+ Heavy Gut/Structural, using the midpoint of
+//   each range (9.5%/13.5%/18%).
+//
+// Wholesale Fee is unchanged from the rest of the app: the greater of $20,000 or 3% of ARV, applied
+// to every variant.
 function computeMaoSuite(arv, rehab, assetType) {
   if (!arv) return null;
   const isCommercial = assetType !== "Residential Property (1-4 units)";
   const ratio = rehab / arv;
-  let tierName, months, targetRoi;
+  let tierName, months, targetRoi, cashTargetRoc;
   if (isCommercial) {
     if (ratio < 0.10) { tierName = "Light Tenant Improvement"; months = 3.5; targetRoi = 0.18; }
     else if (ratio < 0.25) { tierName = "Heavy Adaptive Reuse / Value-Add"; months = 9; targetRoi = 0.22; }
     else { tierName = "Ground-Up / Major Expansion"; months = 15; targetRoi = 0.25; }
+    cashTargetRoc = targetRoi;
   } else {
-    if (ratio < 0.10) { tierName = "Cosmetic Refresh"; months = 2.5; }
-    else if (ratio < 0.25) { tierName = "Moderate Rehab"; months = 5; }
-    else { tierName = "Full Gut / Structural"; months = 8.5; }
+    if (ratio < 0.10) { tierName = "Cosmetic Refresh"; months = 2.5; cashTargetRoc = 0.095; }
+    else if (ratio < 0.25) { tierName = "Moderate Rehab"; months = 5; cashTargetRoc = 0.135; }
+    else { tierName = "Full Gut / Structural"; months = 8.5; cashTargetRoc = 0.18; }
     targetRoi = arv < 250000 ? 0.25 : (arv < 500000 ? 0.20 : 0.15);
   }
   const financingCostPct = 0.12 * (months / 12);
@@ -1562,25 +1573,25 @@ function computeMaoSuite(arv, rehab, assetType) {
   const pct1 = n => (n * 100).toFixed(1) + "%";
   const pct0 = n => (n * 100).toFixed(0) + "%";
 
-  function variant(downPaymentPct, downPaymentLabel, financed) {
+  function variant(downPaymentPct, downPaymentLabel, financed, roi, roiLabel) {
     const variantUpfrontCash = financed ? upfrontCash : 0;
     const variantFinancingCostPct = financed ? financingCostPct : 0;
-    const numerator = arv - rehab - sellingCosts - (variantUpfrontCash * (1 + targetRoi));
-    const denominator = 1 + (downPaymentPct * (1 + targetRoi)) + variantFinancingCostPct;
+    const numerator = arv - rehab - sellingCosts - (variantUpfrontCash * (1 + roi));
+    const denominator = 1 + (downPaymentPct * (1 + roi)) + variantFinancingCostPct;
     const mao = (numerator / denominator) - wholesaleFee;
     const explanation = `${money(arv)} ARV, minus ${money(rehab)} repairs, minus ${money(sellingCosts)} selling `
       + `costs (6% of ARV)` + (financed ? `, minus ${money(variantUpfrontCash)} upfront hard money loan fees `
-        + `(${pct0(upfrontCashPct)} of ARV) grossed up by the target ROI` : "")
-      + `, all divided by 1 + [${downPaymentLabel} down payment x (1 + ${pct1(targetRoi)} target ROI)]`
+        + `(${pct0(upfrontCashPct)} of ARV) grossed up by the target ${roiLabel}` : "")
+      + `, all divided by 1 + [${downPaymentLabel} down payment x (1 + ${pct1(roi)} target ${roiLabel})]`
       + (financed ? ` + ${pct1(variantFinancingCostPct)} financing cost (a 12% approximate hard money rate over `
         + `an estimated ${months}-month ${tierName.toLowerCase()} hold)` : " (no financing cost -- an all-cash purchase)")
       + `, minus a ${money(wholesaleFee)} wholesale fee — the greater of $20,000 or 3% of ARV`;
     return { mao, explanation };
   }
 
-  const cash = variant(1.0, "100%", false);
-  const hm10 = variant(0.10, "10%", true);
-  const hm20 = variant(0.20, "20%", true);
+  const cash = variant(1.0, "100%", false, cashTargetRoc, "ROC");
+  const hm10 = variant(0.10, "10%", true, targetRoi, "ROI");
+  const hm20 = variant(0.20, "20%", true, targetRoi, "ROI");
 
   const sheetBlurb = (label, mao, explanation) =>
     `Maximum Allowable Offer — ${label}: ${money(mao)}\n(${explanation}) = ${money(mao)}`;
