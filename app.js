@@ -1524,9 +1524,13 @@ function escapeHtml(str) {
 //
 // Selling Costs are a flat 8% of ARV: realtor commission (~6%) plus title/escrow fees (~2%) on the
 // resale side -- bumped up from a commission-only 6% since that left out real closing costs a seller
-// pays at resale. Upfront Cash (hard-money loan points/fees) is 2% of ARV for residential 1-4 units,
-// 3% for anything else (commercial/business) -- only charged on the Hard Money variants. Financing
-// Cost% = a flat 12% approximate hard money annual rate x (estimated hold
+// pays at resale. Purchase Closing Costs are a separate, additional 1% of ARV on the BUY side: no
+// commission (buyers don't typically pay realtor commission at purchase), just the buyer's customary
+// share of title/escrow fees, applied to every variant (Cash and Hard Money alike, since purchase
+// closing costs are paid regardless of financing method -- this is distinct from Upfront Cash, which
+// is a hard-money-loan-specific fee). Upfront Cash (hard-money loan points/fees) is 2% of ARV for
+// residential 1-4 units, 3% for anything else (commercial/business) -- only charged on the Hard
+// Money variants. Financing Cost% = a flat 12% approximate hard money annual rate x (estimated hold
 // months / 12); hold months come from a rehab-severity tier bucketed by rehab as a % of ARV (<10%
 // light, 10-25% moderate, >=25% heavy) -- the exact ratio cutoffs aren't specified by the given
 // timeline matrices (which bucket by scope of work, not a number we collect), so this is the closest
@@ -1572,6 +1576,7 @@ function computeMaoSuite(arv, rehab, assetType) {
   }
   const financingCostPct = 0.12 * (months / 12);
   const sellingCosts = 0.08 * arv;
+  const purchaseClosingCosts = 0.01 * arv;
   const upfrontCashPct = isCommercial ? 0.03 : 0.02;
   const upfrontCash = upfrontCashPct * arv;
   const wholesaleFee = Math.max(20000, 0.03 * arv);
@@ -1587,20 +1592,24 @@ function computeMaoSuite(arv, rehab, assetType) {
   // Solving the same target-ROI-on-cash-invested equation with no debt at all collapses cleanly to:
   //   MAO = (ARV - Rehab - Selling Costs) / (1 + Target ROC) - Wholesale Fee
   // matching the fee-subtracted-after-division convention the leveraged formula also uses.
-  const cashMao = ((arv - rehab - sellingCosts) / (1 + cashTargetRoc)) - wholesaleFee;
+  const cashMao = ((arv - rehab - sellingCosts - purchaseClosingCosts) / (1 + cashTargetRoc)) - wholesaleFee;
   const cashExplanation = `${money(arv)} ARV, minus ${money(rehab)} repairs, minus ${money(sellingCosts)} selling `
-    + `costs (8% of ARV -- realtor commission plus title/escrow fees), divided by 1 + a ${pct1(cashTargetRoc)} target ROC for this deal profile `
-    + `(${tierName}) -- no financing cost or upfront loan fees, since an all-cash purchase has no loan -- `
-    + `minus a ${money(wholesaleFee)} wholesale fee — the greater of $20,000 or 3% of ARV`;
+    + `costs (8% of ARV -- realtor commission plus title/escrow fees), minus ${money(purchaseClosingCosts)} `
+    + `purchase-side closing costs (1% of ARV -- title/escrow only, no commission on the buy side; buyer and `
+    + `seller customarily split closing costs this way), divided by 1 + a ${pct1(cashTargetRoc)} target ROC `
+    + `for this deal profile (${tierName}) -- no financing cost or upfront loan fees, since an all-cash `
+    + `purchase has no loan -- minus a ${money(wholesaleFee)} wholesale fee — the greater of $20,000 or 3% of ARV`;
   const cash = { mao: cashMao, explanation: cashExplanation };
 
   function variant(downPaymentPct, downPaymentLabel, roi, roiLabel) {
-    const numerator = arv - rehab - sellingCosts - (upfrontCash * (1 + roi));
+    const numerator = arv - rehab - sellingCosts - purchaseClosingCosts - (upfrontCash * (1 + roi));
     const denominator = 1 + (downPaymentPct * (1 + roi)) + financingCostPct;
     const mao = (numerator / denominator) - wholesaleFee;
     const explanation = `${money(arv)} ARV, minus ${money(rehab)} repairs, minus ${money(sellingCosts)} selling `
-      + `costs (8% of ARV -- realtor commission plus title/escrow fees), minus ${money(upfrontCash)} upfront hard money loan fees `
-      + `(${pct0(upfrontCashPct)} of ARV) grossed up by the target ${roiLabel}, all divided by `
+      + `costs (8% of ARV -- realtor commission plus title/escrow fees), minus ${money(purchaseClosingCosts)} `
+      + `purchase-side closing costs (1% of ARV -- title/escrow only, no commission on the buy side; buyer `
+      + `and seller customarily split closing costs this way), minus ${money(upfrontCash)} upfront hard money `
+      + `loan fees (${pct0(upfrontCashPct)} of ARV) grossed up by the target ${roiLabel}, all divided by `
       + `1 + [${downPaymentLabel} down payment x (1 + ${pct1(roi)} target ${roiLabel})] + `
       + `${pct1(financingCostPct)} financing cost (a 12% approximate hard money rate over an estimated `
       + `${months}-month ${tierName.toLowerCase()} hold), minus a ${money(wholesaleFee)} wholesale fee — `
