@@ -115,6 +115,8 @@ function doPost(e) {
         return jsonOut(withSession(body, updateClosingLikelihood));
       case 'updateTeam':
         return jsonOut(withSession(body, updateTeam));
+      case 'updateMaoForLead':
+        return jsonOut(withSession(body, updateMaoForLead));
       case 'exportToSheet':
         return jsonOut(withSession(body, exportToSheet));
       case 'deleteAllLeads':
@@ -726,6 +728,29 @@ function updateTeam(body) {
   });
 
   return { ok: true, updatedCount: sameEmailLeads.length };
+}
+
+// Lets admin write a freshly-recalculated MAO suite (from the standalone MAO
+// Calculator panel) onto an existing lead -- e.g. after the seller countered
+// with a different rehab number, without having the associate re-run the
+// whole wizard. Overwrites whatever MAO values that lead already had.
+function updateMaoForLead(body) {
+  if (!body.leadId) return { ok: false, error: 'Missing leadId.' };
+  const sheet = getSheet(LEADS_SHEET, LEAD_COLUMNS);
+  const leads = sheetToObjects(sheet);
+  const match = leads.find(function (l) { return l['Lead ID'] === body.leadId; });
+  if (!match) return { ok: false, error: 'Lead not found.' };
+  const fields = {
+    'MAO Cash': body.maoCash || '',
+    'MAO Hard Money (10% Down)': body.maoHardMoney10 || '',
+    'MAO Hard Money (20% Down)': body.maoHardMoney20 || '',
+    'MAO Breakdown': body.maoBreakdown || ''
+  };
+  Object.keys(fields).forEach(function (key) {
+    const col = getColumnIndex(sheet, key);
+    if (col) sheet.getRange(match._row, col).setValue(fields[key]);
+  });
+  return { ok: true };
 }
 
 // ---------- Admin: export + gated delete ----------
