@@ -1522,9 +1522,11 @@ function escapeHtml(str) {
 // with no Upfront Cash or Financing Cost terms, since an all-cash purchase has no loan to originate
 // or pay interest on.
 //
-// Selling Costs are a flat 6% of ARV. Upfront Cash (hard-money loan points/fees) is 2% of ARV for
-// residential 1-4 units, 3% for anything else (commercial/business) -- only charged on the Hard
-// Money variants. Financing Cost% = a flat 12% approximate hard money annual rate x (estimated hold
+// Selling Costs are a flat 8% of ARV: realtor commission (~6%) plus title/escrow fees (~2%) on the
+// resale side -- bumped up from a commission-only 6% since that left out real closing costs a seller
+// pays at resale. Upfront Cash (hard-money loan points/fees) is 2% of ARV for residential 1-4 units,
+// 3% for anything else (commercial/business) -- only charged on the Hard Money variants. Financing
+// Cost% = a flat 12% approximate hard money annual rate x (estimated hold
 // months / 12); hold months come from a rehab-severity tier bucketed by rehab as a % of ARV (<10%
 // light, 10-25% moderate, >=25% heavy) -- the exact ratio cutoffs aren't specified by the given
 // timeline matrices (which bucket by scope of work, not a number we collect), so this is the closest
@@ -1569,7 +1571,7 @@ function computeMaoSuite(arv, rehab, assetType) {
     targetRoi = arv < 250000 ? 0.25 : (arv < 500000 ? 0.20 : 0.15);
   }
   const financingCostPct = 0.12 * (months / 12);
-  const sellingCosts = 0.06 * arv;
+  const sellingCosts = 0.08 * arv;
   const upfrontCashPct = isCommercial ? 0.03 : 0.02;
   const upfrontCash = upfrontCashPct * arv;
   const wholesaleFee = Math.max(20000, 0.03 * arv);
@@ -1587,7 +1589,7 @@ function computeMaoSuite(arv, rehab, assetType) {
   // matching the fee-subtracted-after-division convention the leveraged formula also uses.
   const cashMao = ((arv - rehab - sellingCosts) / (1 + cashTargetRoc)) - wholesaleFee;
   const cashExplanation = `${money(arv)} ARV, minus ${money(rehab)} repairs, minus ${money(sellingCosts)} selling `
-    + `costs (6% of ARV), divided by 1 + a ${pct1(cashTargetRoc)} target ROC for this deal profile `
+    + `costs (8% of ARV -- realtor commission plus title/escrow fees), divided by 1 + a ${pct1(cashTargetRoc)} target ROC for this deal profile `
     + `(${tierName}) -- no financing cost or upfront loan fees, since an all-cash purchase has no loan -- `
     + `minus a ${money(wholesaleFee)} wholesale fee — the greater of $20,000 or 3% of ARV`;
   const cash = { mao: cashMao, explanation: cashExplanation };
@@ -1597,7 +1599,7 @@ function computeMaoSuite(arv, rehab, assetType) {
     const denominator = 1 + (downPaymentPct * (1 + roi)) + financingCostPct;
     const mao = (numerator / denominator) - wholesaleFee;
     const explanation = `${money(arv)} ARV, minus ${money(rehab)} repairs, minus ${money(sellingCosts)} selling `
-      + `costs (6% of ARV), minus ${money(upfrontCash)} upfront hard money loan fees `
+      + `costs (8% of ARV -- realtor commission plus title/escrow fees), minus ${money(upfrontCash)} upfront hard money loan fees `
       + `(${pct0(upfrontCashPct)} of ARV) grossed up by the target ${roiLabel}, all divided by `
       + `1 + [${downPaymentLabel} down payment x (1 + ${pct1(roi)} target ${roiLabel})] + `
       + `${pct1(financingCostPct)} financing cost (a 12% approximate hard money rate over an estimated `
