@@ -537,6 +537,31 @@ const steps = [
     }
   },
   {
+    key: "sourcing",
+    progress: true,
+    render(root) {
+      root.innerHTML = `
+        <h2 class="step-title">Deal Sourcing</h2>
+        <label class="field-label">Is this on-market or off-market? <span class="req">*</span></label>
+        <div class="choice-group" id="market-group">
+          ${["On-Market", "Off-Market"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
+        </div>
+        <div class="error-text" id="market-error">Please choose one.</div>
+
+        <label class="field-label">Link to where you found this listing <span class="small-muted">(optional)</span></label>
+        <input type="text" id="source-link-input" placeholder="https://...">
+      `;
+      root.querySelector("#source-link-input").value = answers.sourceLink || "";
+      bindChoiceGroup(root, "#market-group", "marketStatus");
+    },
+    validate(root) {
+      answers.sourceLink = root.querySelector("#source-link-input").value.trim();
+      const ok = !!answers.marketStatus;
+      toggleError(root, "#market-error", !ok);
+      return ok;
+    }
+  },
+  {
     key: "price",
     progress: true,
     render(root) {
@@ -687,21 +712,23 @@ const steps = [
           `;
         }
 
-        // Negotiation anchor: county assessed value if we have it, otherwise fall back to
-        // As-Is Value (ARV minus repairs) as the alternative base. This is a talking-point
-        // number for working the seller down, not the internal ceiling -- county/as-is values
-        // are usually higher than a true ARV-based max offer, so cite the high end of the repair
-        // estimate against this bigger, official-sounding number to justify why the price needs
-        // to land near it. County assessed value is a raw pre-repair-style figure (repairs get
-        // subtracted below); As-Is Value already has repairs baked in, so it doesn't get
-        // subtracted again.
+        // Off-market negotiating strategy: county assessed value if we have it, otherwise fall
+        // back to As-Is Value (ARV minus repairs) as the alternative base. This is a
+        // talking-point number for working an off-market seller down, not the internal ceiling
+        // -- county/as-is values are usually higher than a true ARV-based max offer, so cite the
+        // high end of the repair estimate against this bigger, official-sounding number to
+        // justify why the price needs to land near it. Only relevant off-market: on-market deals
+        // already have a real listing/comps to negotiate against, so this trick doesn't apply.
+        // County assessed value is a raw pre-repair-style figure (repairs get subtracted below);
+        // As-Is Value already has repairs baked in, so it doesn't get subtracted again.
+        const isOffMarket = answers.marketStatus === "Off-Market";
         const assessedValue = Number(root.querySelector("#assessed-value-input").value) || 0;
         const asIsValue = arv ? Math.max(arv - rehab, 0) : 0;
         const usingAssessed = assessedValue > 0;
         const negotiationBase = usingAssessed ? assessedValue : asIsValue;
         const negotiationLabel = usingAssessed ? "county assessed value" : "As-Is Value (ARV minus repairs)";
         const assessedMaxOfferBanner = root.querySelector("#assessed-max-offer-banner");
-        if (!negotiationBase) {
+        if (!isOffMarket || !negotiationBase) {
           assessedMaxOfferBanner.hidden = true;
         } else {
           const discountedBase = 0.90 * negotiationBase;
@@ -711,15 +738,14 @@ const steps = [
             : (discountedBase - negotiationFee);
           assessedMaxOfferBanner.hidden = false;
           assessedMaxOfferBanner.innerHTML = `
-            <strong>Negotiating Anchor:</strong> $${negotiationOffer.toLocaleString(undefined, {maximumFractionDigits: 0})}
+            <strong>Off-Market Negotiating Anchor:</strong> $${negotiationOffer.toLocaleString(undefined, {maximumFractionDigits: 0})}
             <span class="small-muted">(90% of $${negotiationBase.toLocaleString()} ${negotiationLabel},
             ${usingAssessed ? `minus $${rehab.toLocaleString()} repairs, ` : ""}minus a
             $${negotiationFee.toLocaleString(undefined, {maximumFractionDigits: 0})} assignment fee — the
             greater of $20,000 or 3% of that adjusted value)</span>
-            <br><span class="small-muted">This is a negotiating tool, not a hard cap like the Max Offer above.
-            Use the ${negotiationLabel} as your anchor with the seller and cite the high end of your repair
-            estimate to make the case for why the price needs to come down near here. Not applicable if you're
-            the seller filling this out about your own property.</span>
+            <br><span class="small-muted">This is a negotiating tool for off-market deals, not a hard cap like
+            the Max Offer above. Use the ${negotiationLabel} as your anchor with the seller and cite the high end
+            of your repair estimate to make the case for why the price needs to come down near here.</span>
           `;
         }
       };
@@ -900,31 +926,6 @@ const steps = [
       if (!answers.downPaymentNeeded) return true; // treated as skipped
       const ok = !!answers.downPaymentNonNegotiable;
       toggleError(root, "#nonneg-error", !ok);
-      return ok;
-    }
-  },
-  {
-    key: "sourcing",
-    progress: true,
-    render(root) {
-      root.innerHTML = `
-        <h2 class="step-title">Deal Sourcing</h2>
-        <label class="field-label">Is this on-market or off-market? <span class="req">*</span></label>
-        <div class="choice-group" id="market-group">
-          ${["On-Market", "Off-Market"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
-        </div>
-        <div class="error-text" id="market-error">Please choose one.</div>
-
-        <label class="field-label">Link to where you found this listing <span class="small-muted">(optional)</span></label>
-        <input type="text" id="source-link-input" placeholder="https://...">
-      `;
-      root.querySelector("#source-link-input").value = answers.sourceLink || "";
-      bindChoiceGroup(root, "#market-group", "marketStatus");
-    },
-    validate(root) {
-      answers.sourceLink = root.querySelector("#source-link-input").value.trim();
-      const ok = !!answers.marketStatus;
-      toggleError(root, "#market-error", !ok);
       return ok;
     }
   },
