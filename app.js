@@ -592,6 +592,7 @@ const steps = [
       const addressLine = `${answers.street || ""}, ${answers.city || ""}, ${answers.state || ""} ${answers.zip || ""}`.trim();
       const arvPrompt = `how much is this worth at full market value (ARV): ${addressLine}`;
       const repairPrompt = `how much repair is needed as an investment flip for this property: ${addressLine}`;
+      const assessedValuePrompt = `what is the county assessed value for this property: ${addressLine}`;
       const googleAiHow = `go to <strong>google.com</strong>, search "ai", and click the "AI Mode" button near the top`;
       root.innerHTML = `
         <h2 class="step-title">Cash Deal Details</h2>
@@ -623,6 +624,8 @@ const steps = [
 
         <label class="field-label">County Assessed Value <span class="small-muted">(optional, if known)</span></label>
         <input type="number" id="assessed-value-input" placeholder="$">
+        <p class="hint">Don't have this handy? ${googleAiHow}, then ask:
+        <br><span class="small-muted">"${assessedValuePrompt}"</span></p>
 
         <label class="field-label">Price they'd accept to close quickly <span class="small-muted">(their bottom dollar — we'll see if we can make that work, optional)</span></label>
         <input type="number" id="bottom-dollar-input" placeholder="$">
@@ -633,6 +636,7 @@ const steps = [
         <div class="error-text" id="cash-notes-error">Since pictures, rehab estimate, and assessed value are all blank, please describe why this is a good lead.</div>
 
         <div class="banner warn" id="max-offer-banner" hidden style="margin-top:16px;"></div>
+        <div class="banner warn" id="assessed-max-offer-banner" hidden style="margin-top:16px;"></div>
       `;
       root.querySelector("#arv-input").value = answers.arv || "";
       root.querySelector("#pictures-link-input").value = answers.picturesLink || "";
@@ -680,6 +684,28 @@ const steps = [
             <br><strong>Start well below this number and try to close there in negotiation.</strong>
             <br><span class="small-muted">This can take a while — use "Save My Progress" at the top of the page
             to pause here and come back once the seller has agreed to a number.</span>
+          `;
+        }
+
+        const assessedValue = Number(root.querySelector("#assessed-value-input").value) || 0;
+        const assessedMaxOfferBanner = root.querySelector("#assessed-max-offer-banner");
+        if (!assessedValue) {
+          assessedMaxOfferBanner.hidden = true;
+        } else {
+          // Backup math for properties you can't find listed anywhere online (no Chase estimate,
+          // no comps) to get a real ARV from -- use the county assessed value instead, at a
+          // lighter 90% discount since assessed values already tend to run under market value.
+          const assessedArv = 0.90 * assessedValue;
+          const assessedAssignmentFee = Math.max(20000, 0.03 * assessedArv);
+          const assessedMaxOffer = assessedArv - rehab - assessedAssignmentFee;
+          assessedMaxOfferBanner.hidden = false;
+          assessedMaxOfferBanner.innerHTML = `
+            <strong>Alternate Max Offer (if not listed online anywhere):</strong> $${assessedMaxOffer.toLocaleString(undefined, {maximumFractionDigits: 0})}
+            <span class="small-muted">(90% of $${assessedValue.toLocaleString()} county assessed value, minus $${rehab.toLocaleString()} repairs,
+            minus a $${assessedAssignmentFee.toLocaleString(undefined, {maximumFractionDigits: 0})} assignment fee — the
+            greater of $20,000 or 3% of that adjusted value)</span>
+            <br><span class="small-muted">Only use this if you truly can't find the property listed anywhere online
+            to get a real ARV. Not applicable if you're the seller filling this out about your own property.</span>
           `;
         }
       };
