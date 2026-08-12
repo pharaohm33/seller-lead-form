@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MAO Calculator</title>
+<style>
+  :root {
+    --border: #d8dee5;
+    --text: #1c2733;
+    --muted: #5b6b7a;
+    --bg: #f4f6f8;
+    --card: #ffffff;
+    --primary: #1f6feb;
+    --primary-text: #ffffff;
+    --warn-bg: #fff6e5;
+    --warn-border: #f0d38a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    margin: 0;
+    padding: 24px 16px;
+  }
+  .wrap { max-width: 640px; margin: 0 auto; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px;
+  }
+  h1 { font-size: 20px; margin: 0 0 6px; }
+  p.sub { color: var(--muted); font-size: 14px; margin: 0 0 20px; }
+  label.field-label { display: block; font-weight: 600; font-size: 14px; margin: 16px 0 6px; }
+  input, select {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 15px;
+    background: var(--card);
+    color: var(--text);
+  }
+  .banner {
+    background: var(--warn-bg);
+    border: 1px solid var(--warn-border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin-top: 20px;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .banner strong { display: block; margin-bottom: 2px; }
+  .small-muted { color: var(--muted); font-size: 13px; }
+  hr.sep { border: none; border-top: 1px solid var(--border); opacity: 0.6; margin: 12px 0; }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <div class="card">
+    <h1>MAO Calculator</h1>
+    <p class="sub">Maximum Allowable Offer for a wholesale/fix-and-flip deal — Cash Buyer plus Hard Money
+    (10% and 20% down), each with a full math breakdown.</p>
+
+    <label class="field-label">ARV <span class="small-muted">(After Repair Value)</span></label>
+    <input type="number" id="mao-arv" placeholder="$">
+
+    <label class="field-label">Rehab Estimate</label>
+    <input type="number" id="mao-rehab" placeholder="$">
+
+    <label class="field-label">Asset Type</label>
+    <select id="mao-asset-type">
+      <option value="Residential Property (1-4 units)">Residential Property (1-4 units)</option>
+      <option value="Commercial Property">Commercial Property</option>
+      <option value="Business">Business</option>
+    </select>
+
+    <div class="banner" id="mao-output" style="display:none;"></div>
+  </div>
+</div>
+
+<script>
+// Full MAO suite: Cash Buyer, Hard Money Buyer (10% down), Hard Money Buyer (20% down).
+//
+// Hard Money (10%/20% down) uses the given leveraged formula as-is:
+//   MAO = (ARV - Rehab - Selling Costs - Purchase Closing Costs - [Upfront Cash x (1+Target ROI)])
+//         / (1 + [Down Payment% x (1+Target ROI)] + Financing Cost%) - Wholesale Fee
+//
+// Cash Buyer is NOT the "100% down payment" case of that same formula -- plugging DP%=100% into it
+// directly double counts return-of-capital (the leading "1" in the denominator already represents
+// repaying the full price; adding another full "+100%" on top repays it a second time), understating
+// Cash Buyer MAO by roughly half. Solving the same target-return-on-cash-invested equation with no
+// debt at all collapses cleanly to the simpler, debt-free formula:
+//   MAO = (ARV - Rehab - Selling Costs - Purchase Closing Costs) / (1 + Target ROC) - Wholesale Fee
+// with no Upfront Cash or Financing Cost terms, since an all-cash purchase has no loan.
+//
+// Selling Costs are a flat 8% of ARV: realtor commission (~6%) plus title/escrow fees (~2%) on the
+// resale side. Purchase Closing Costs are a separate, additional 1% of ARV on the BUY side: no
+// commission (buyers don't typically pay realtor commission at purchase), just the buyer's customary
+// share of title/escrow fees, applied to every variant (Cash and Hard Money alike, since purchase
+// closing costs are paid regardless of financing method -- distinct from Upfront Cash, which is a
+// hard-money-loan-specific fee). Upfront Cash (hard-money loan points/fees) is 2% of ARV for
+// residential 1-4 units, 3% for anything else (commercial/business) -- only charged on the Hard
+// Money variants. Financing Cost% = a flat 12% approximate hard money annual rate x (estimated hold
+// months / 12); hold months come from a rehab-severity tier bucketed by rehab as a % of ARV (<10%
+// light, 10-25% moderate, >=25% heavy) -- these ratio cutoffs are a proxy, tune them if they don't
+// match your real deals.
+//
+// Target ROI/ROC differs by variant and asset type:
+// - Hard Money (10%/20% down), any asset type, and Cash Buyer on commercial/business: a floor that
+//   steps down as ARV grows for residential (25% under $250k, 20% from $250k-$500k, 15% at $500k+),
+//   or is keyed to the rehab-severity tier for commercial/business (18% light TI, 22% heavy adaptive
+//   reuse, 25% ground-up).
+// - Cash Buyer on residential: a separate "Target ROC by Strategy & Scope" scale for an all-cash
+//   fix-and-flip exit (buy, rehab, resell -- not a buy-and-hold cap rate, which would need rental
+//   income data this calculator doesn't collect), keyed to the same rehab-severity tier: 8-11%
+//   Cosmetic Refresh, 12-15% Moderate Value-Add, 16-20%+ Heavy Gut/Structural, using the midpoint of
+//   each range (9.5%/13.5%/18%).
+//
+// With these parameters, Cash Buyer MAO tends to come out HIGHER than both Hard Money variants: the
+// given Hard Money formula's financing cost and upfront loan fees are real dollar drags a cash buyer
+// never pays, and Cash Buyer's target return here is usually below Hard Money's flat 20-25% ROI, so
+// the two effects compound instead of leverage winning out. That's not a bug -- it's a consequence of
+// these specific rate/ROI assumptions. Tune Target ROI/ROC or the financing-cost assumptions below if
+// you want a different relationship between the three numbers.
+//
+// Wholesale Fee is the greater of $20,000 or 3% of ARV, applied to every variant.
+function computeMaoSuite(arv, rehab, assetType) {
+  if (!arv) return null;
+  const isCommercial = assetType !== "Residential Property (1-4 units)";
+  const ratio = rehab / arv;
+  let tierName, months, targetRoi, cashTargetRoc;
+  if (isCommercial) {
+    if (ratio < 0.10) { tierName = "Light Tenant Improvement"; months = 3.5; targetRoi = 0.18; }
+    else if (ratio < 0.25) { tierName = "Heavy Adaptive Reuse / Value-Add"; months = 9; targetRoi = 0.22; }
+    else { tierName = "Ground-Up / Major Expansion"; months = 15; targetRoi = 0.25; }
+    cashTargetRoc = targetRoi;
+  } else {
+    if (ratio < 0.10) { tierName = "Cosmetic Refresh"; months = 2.5; cashTargetRoc = 0.095; }
+    else if (ratio < 0.25) { tierName = "Moderate Rehab"; months = 5; cashTargetRoc = 0.135; }
+    else { tierName = "Full Gut / Structural"; months = 8.5; cashTargetRoc = 0.18; }
+    targetRoi = arv < 250000 ? 0.25 : (arv < 500000 ? 0.20 : 0.15);
+  }
+  const financingCostPct = 0.12 * (months / 12);
+  const sellingCosts = 0.08 * arv;
+  const purchaseClosingCosts = 0.01 * arv;
+  const upfrontCashPct = isCommercial ? 0.03 : 0.02;
+  const upfrontCash = upfrontCashPct * arv;
+  const wholesaleFee = Math.max(20000, 0.03 * arv);
+
+  const money = n => "$" + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  const pct1 = n => (n * 100).toFixed(1) + "%";
+  const pct0 = n => (n * 100).toFixed(0) + "%";
+
+  // Cash Buyer has no loan at all, so it isn't the "100% down payment" case of the leveraged
+  // formula below -- see the top-of-file note for why that substitution is wrong.
+  const cashMao = ((arv - rehab - sellingCosts - purchaseClosingCosts) / (1 + cashTargetRoc)) - wholesaleFee;
+  const cashExplanation = `${money(arv)} ARV, minus ${money(rehab)} repairs, minus ${money(sellingCosts)} selling `
+    + `costs (8% of ARV -- realtor commission plus title/escrow fees), minus ${money(purchaseClosingCosts)} `
+    + `purchase-side closing costs (1% of ARV -- title/escrow only, no commission on the buy side; buyer and `
+    + `seller customarily split closing costs this way), divided by 1 + a ${pct1(cashTargetRoc)} target ROC `
+    + `for this deal profile (${tierName}) -- no financing cost or upfront loan fees, since an all-cash `
+    + `purchase has no loan -- minus a ${money(wholesaleFee)} wholesale fee — the greater of $20,000 or 3% of ARV`;
+  const cash = { mao: cashMao, explanation: cashExplanation };
+
+  function variant(downPaymentPct, downPaymentLabel, roi, roiLabel) {
+    const numerator = arv - rehab - sellingCosts - purchaseClosingCosts - (upfrontCash * (1 + roi));
+    const denominator = 1 + (downPaymentPct * (1 + roi)) + financingCostPct;
+    const mao = (numerator / denominator) - wholesaleFee;
+    const explanation = `${money(arv)} ARV, minus ${money(rehab)} repairs, minus ${money(sellingCosts)} selling `
+      + `costs (8% of ARV -- realtor commission plus title/escrow fees), minus ${money(purchaseClosingCosts)} `
+      + `purchase-side closing costs (1% of ARV -- title/escrow only, no commission on the buy side; buyer `
+      + `and seller customarily split closing costs this way), minus ${money(upfrontCash)} upfront hard money `
+      + `loan fees (${pct0(upfrontCashPct)} of ARV) grossed up by the target ${roiLabel}, all divided by `
+      + `1 + [${downPaymentLabel} down payment x (1 + ${pct1(roi)} target ${roiLabel})] + `
+      + `${pct1(financingCostPct)} financing cost (a 12% approximate hard money rate over an estimated `
+      + `${months}-month ${tierName.toLowerCase()} hold), minus a ${money(wholesaleFee)} wholesale fee — `
+      + `the greater of $20,000 or 3% of ARV`;
+    return { mao, explanation };
+  }
+
+  const hm10 = variant(0.10, "10%", targetRoi, "ROI");
+  const hm20 = variant(0.20, "20%", targetRoi, "ROI");
+
+  const sheetBlurb = (label, mao, explanation) =>
+    `Maximum Allowable Offer — ${label}: ${money(mao)}\n(${explanation}) = ${money(mao)}`;
+  const fullBreakdown = [
+    sheetBlurb("Cash Buyer", cash.mao, cash.explanation),
+    sheetBlurb("Hard Money Buyer (10% Down)", hm10.mao, hm10.explanation),
+    sheetBlurb("Hard Money Buyer (20% Down)", hm20.mao, hm20.explanation)
+  ].join("\n\n");
+
+  return {
+    maoCash: cash.mao, maoHardMoney10: hm10.mao, maoHardMoney20: hm20.mao,
+    cashExplanation: cash.explanation, hm10Explanation: hm10.explanation, hm20Explanation: hm20.explanation,
+    fullBreakdown, tierName, targetRoi
+  };
+}
+
+// ---- UI wiring (everything below is just glue -- computeMaoSuite() above is the reusable part) ----
+const arvInput = document.getElementById("mao-arv");
+const rehabInput = document.getElementById("mao-rehab");
+const assetTypeSelect = document.getElementById("mao-asset-type");
+const output = document.getElementById("mao-output");
+
+function recompute() {
+  const arv = Number(arvInput.value) || 0;
+  const rehab = Number(rehabInput.value) || 0;
+  const assetType = assetTypeSelect.value;
+  const suite = computeMaoSuite(arv, rehab, assetType);
+  if (!suite) {
+    output.style.display = "none";
+    return;
+  }
+  const fmt = n => "$" + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  output.style.display = "block";
+  output.innerHTML = `
+    <strong>Cash Buyer MAO: ${fmt(suite.maoCash)}</strong>
+    <span class="small-muted">(${suite.cashExplanation})</span>
+    <hr class="sep">
+    <strong>Hard Money Buyer MAO (10% Down): ${fmt(suite.maoHardMoney10)}</strong>
+    <span class="small-muted">(${suite.hm10Explanation})</span>
+    <hr class="sep">
+    <strong>Hard Money Buyer MAO (20% Down): ${fmt(suite.maoHardMoney20)}</strong>
+    <span class="small-muted">(${suite.hm20Explanation})</span>
+  `;
+}
+
+[arvInput, rehabInput].forEach(el => el.addEventListener("input", recompute));
+assetTypeSelect.addEventListener("change", recompute);
+</script>
+
+</body>
+</html>
