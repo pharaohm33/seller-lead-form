@@ -567,20 +567,43 @@ const steps = [
     progress: true,
     skip() { return answers.dealType !== "Cash Deal"; },
     render(root) {
+      const isResidential = answers.assetType === "Residential Property (1-4 units)";
+      const addressLine = `${answers.street || ""}, ${answers.city || ""}, ${answers.state || ""} ${answers.zip || ""}`.trim();
+      const arvPrompt = `how much is this worth at full market value (ARV): ${addressLine}`;
+      const repairPrompt = `how much repair is needed as an investment flip for this property: ${addressLine}`;
       root.innerHTML = `
         <h2 class="step-title">Cash Deal Details</h2>
+
+        ${isResidential ? `
+          <p class="hint">Check <a href="https://www.chase.com/personal/mortgage/calculators-resources/home-value-estimator" target="_blank" rel="noopener">Chase's Home Value Estimator</a>
+          for this address. If a value comes up: if <strong>no repairs are needed</strong>, that's your As-Is
+          Value (enter it as the ARV below too, since they're the same with nothing to repair). If
+          <strong>repairs are needed</strong>, use that value as the <strong>ARV</strong> instead — As-Is Value
+          will be computed below by subtracting your repair estimate.</p>
+        ` : ""}
+
         <label class="field-label">ARV <span class="small-muted">(After Repair Value)</span> <span class="req">*</span></label>
         <input type="number" id="arv-input" placeholder="$">
         <div class="error-text" id="arv-error">Required.</div>
+        <p class="hint">No value on Chase, or want a second opinion? Go to <strong>Google AI Mode</strong> and copy
+        a listing link if you have one (or just use the address), then ask:
+        <br><span class="small-muted">"${arvPrompt}"</span></p>
 
         <label class="field-label">Pictures Link <span class="small-muted">(optional, if available)</span></label>
         <input type="text" id="pictures-link-input" placeholder="https://...">
 
         <label class="field-label">Rehab Estimate <span class="small-muted">(optional, if known)</span></label>
         <input type="number" id="rehab-input" placeholder="$">
+        <p class="hint">To estimate this, go to <strong>Google AI Mode</strong> and ask:
+        <br><span class="small-muted">"${repairPrompt}"</span></p>
+
+        ${isResidential ? `<div class="banner info" id="as-is-value-banner" hidden></div>` : ""}
 
         <label class="field-label">County Assessed Value <span class="small-muted">(optional, if known)</span></label>
         <input type="number" id="assessed-value-input" placeholder="$">
+
+        <label class="field-label">Price they'd accept to close quickly <span class="small-muted">(their bottom dollar — we'll see if we can make that work, optional)</span></label>
+        <input type="number" id="bottom-dollar-input" placeholder="$">
 
         <label class="field-label">Notes: why does the seller want to sell / what makes this a good lead?
           <span class="small-muted" id="cash-notes-hint"></span></label>
@@ -591,27 +614,45 @@ const steps = [
       root.querySelector("#pictures-link-input").value = answers.picturesLink || "";
       root.querySelector("#rehab-input").value = answers.rehabEstimate || "";
       root.querySelector("#assessed-value-input").value = answers.countyAssessedValue || "";
+      root.querySelector("#bottom-dollar-input").value = answers.bottomDollarPrice || "";
       root.querySelector("#cash-notes-input").value = answers.cashDealNotes || "";
 
-      const updateNotesHint = () => {
+      const recomputeCashDeal = () => {
         const hasSupplementary = !!(root.querySelector("#pictures-link-input").value.trim()
           || root.querySelector("#rehab-input").value
           || root.querySelector("#assessed-value-input").value);
         root.querySelector("#cash-notes-hint").textContent = hasSupplementary
           ? "(optional)"
           : "(required since pictures/rehab estimate/assessed value are all blank)";
+
+        if (isResidential) {
+          const arv = Number(root.querySelector("#arv-input").value) || 0;
+          const rehab = Number(root.querySelector("#rehab-input").value) || 0;
+          const banner = root.querySelector("#as-is-value-banner");
+          if (!arv) {
+            banner.hidden = true;
+          } else {
+            banner.hidden = false;
+            banner.innerHTML = `<strong>As-Is Value:</strong> $${(arv - rehab).toLocaleString(undefined, {maximumFractionDigits: 0})}
+              <span class="small-muted">(ARV minus the repair estimate)</span>`;
+          }
+        }
       };
-      ["#pictures-link-input", "#rehab-input", "#assessed-value-input"].forEach(sel => {
-        root.querySelector(sel).oninput = updateNotesHint;
+      ["#arv-input", "#pictures-link-input", "#rehab-input", "#assessed-value-input"].forEach(sel => {
+        root.querySelector(sel).oninput = recomputeCashDeal;
       });
-      updateNotesHint();
+      recomputeCashDeal();
     },
     validate(root) {
       answers.arv = root.querySelector("#arv-input").value;
       answers.picturesLink = root.querySelector("#pictures-link-input").value.trim();
       answers.rehabEstimate = root.querySelector("#rehab-input").value;
       answers.countyAssessedValue = root.querySelector("#assessed-value-input").value;
+      answers.bottomDollarPrice = root.querySelector("#bottom-dollar-input").value;
       answers.cashDealNotes = root.querySelector("#cash-notes-input").value.trim();
+      if (answers.assetType === "Residential Property (1-4 units)" && answers.arv) {
+        answers.asIsValue = Number(answers.arv) - (Number(answers.rehabEstimate) || 0);
+      }
       let ok = true;
       toggleError(root, "#arv-error", !answers.arv); if (!answers.arv) ok = false;
       const hasSupplementary = !!(answers.picturesLink || answers.rehabEstimate || answers.countyAssessedValue);
@@ -652,6 +693,7 @@ const steps = [
   {
     key: "seniorLoan",
     progress: true,
+    skip() { return answers.dealType === "Cash Deal"; },
     render(root) {
       root.innerHTML = `
         <h2 class="step-title">New Senior Financing</h2>
@@ -661,7 +703,7 @@ const steps = [
           ${["Yes","No"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
         </div>
         <div class="error-text" id="senior-error">Please choose Yes or No.</div>
-        <div class="banner danger" id="senior-block-banner" ${answers.seniorLoanWilling === "No" && answers.dealType !== "Cash Deal" ? "" : "hidden"}>
+        <div class="banner danger" id="senior-block-banner" ${answers.seniorLoanWilling === "No" ? "" : "hidden"}>
           We currently do not accept leads where the seller isn't willing to allow a buyer to take out a new
           senior (1st position) mortgage on the property.
         </div>
@@ -672,7 +714,7 @@ const steps = [
           root.querySelectorAll("#senior-group .choice-btn").forEach(b => b.classList.remove("selected"));
           btn.classList.add("selected");
           answers.seniorLoanWilling = btn.dataset.value;
-          root.querySelector("#senior-block-banner").hidden = !(btn.dataset.value === "No" && answers.dealType !== "Cash Deal");
+          root.querySelector("#senior-block-banner").hidden = btn.dataset.value !== "No";
           toggleError(root, "#senior-error", false);
         };
       });
@@ -680,15 +722,13 @@ const steps = [
     validate(root) {
       const ok = !!answers.seniorLoanWilling;
       toggleError(root, "#senior-error", !ok);
-      // Cash deals don't involve the buyer placing any new financing, so the seller's
-      // willingness to allow one is moot -- a "No" here is fine and shouldn't block them.
-      if (answers.dealType === "Cash Deal") return ok;
       return ok && answers.seniorLoanWilling === "Yes";
     }
   },
   {
     key: "paymentStructure",
     progress: true,
+    skip() { return answers.dealType === "Cash Deal"; },
     render(root) {
       root.innerHTML = `
         <h2 class="step-title">Payment Structure</h2>
@@ -699,7 +739,7 @@ const steps = [
           ${["Yes","No"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
         </div>
         <div class="error-text" id="structure-error">Please choose Yes or No.</div>
-        <div class="banner danger" id="structure-block-banner" ${answers.paymentStructureWilling === "No" && answers.dealType !== "Cash Deal" ? "" : "hidden"}>
+        <div class="banner danger" id="structure-block-banner" ${answers.paymentStructureWilling === "No" ? "" : "hidden"}>
           We currently don't accept leads where the seller isn't willing to consider seller carry / seller
           financing (a down payment now, monthly payments, and the remainder paid over an agreed timeframe).
         </div>
@@ -710,7 +750,7 @@ const steps = [
           root.querySelectorAll("#structure-group .choice-btn").forEach(b => b.classList.remove("selected"));
           btn.classList.add("selected");
           answers.paymentStructureWilling = btn.dataset.value;
-          root.querySelector("#structure-block-banner").hidden = !(btn.dataset.value === "No" && answers.dealType !== "Cash Deal");
+          root.querySelector("#structure-block-banner").hidden = btn.dataset.value !== "No";
           toggleError(root, "#structure-error", false);
         };
       });
@@ -718,14 +758,12 @@ const steps = [
     validate(root) {
       const ok = !!answers.paymentStructureWilling;
       toggleError(root, "#structure-error", !ok);
-      // Same exception as the senior-financing question -- an all-cash buyer doesn't need
-      // seller carry, so the seller's willingness (or lack thereof) shouldn't block the lead.
-      if (answers.dealType === "Cash Deal") return ok;
       return ok && answers.paymentStructureWilling === "Yes";
     }
   },
   {
     key: "downPayment",
+    skip() { return answers.dealType === "Cash Deal"; },
     progress: true,
     render(root) {
       root.innerHTML = `
@@ -778,6 +816,7 @@ const steps = [
     key: "sourcing",
     progress: true,
     render(root) {
+      const isCashDeal = answers.dealType === "Cash Deal";
       root.innerHTML = `
         <h2 class="step-title">Deal Sourcing</h2>
         <label class="field-label">Is this on-market or off-market? <span class="req">*</span></label>
@@ -788,9 +827,36 @@ const steps = [
 
         <label class="field-label">Link to where you found this listing <span class="small-muted">(optional)</span></label>
         <input type="text" id="source-link-input" placeholder="https://...">
+        ${isCashDeal ? `<div class="banner info" id="max-offer-banner" hidden style="margin-top:16px;"></div>` : ""}
       `;
       root.querySelector("#source-link-input").value = answers.sourceLink || "";
-      bindChoiceGroup(root, "#market-group", "marketStatus");
+
+      const recomputeMaxOffer = () => {
+        if (!isCashDeal) return;
+        const banner = root.querySelector("#max-offer-banner");
+        const arv = Number(answers.arv) || 0;
+        if (!arv) { banner.hidden = true; return; }
+        const rehab = Number(answers.rehabEstimate) || 0;
+        const assignmentFee = answers.marketStatus === "On-Market" ? 20000 : 0;
+        const maxOffer = (0.70 * arv) - rehab - assignmentFee;
+        banner.hidden = false;
+        banner.innerHTML = `
+          <strong>Max Offer to Seller (70% Rule):</strong> $${maxOffer.toLocaleString(undefined, {maximumFractionDigits: 0})}
+          <span class="small-muted">(70% of $${arv.toLocaleString()} ARV, minus $${rehab.toLocaleString()} repairs${assignmentFee ? `, minus a $${assignmentFee.toLocaleString()} assignment fee since this is on-market` : ""})</span>
+          <br><strong>Start well below this number and try to close there in negotiation.</strong>
+        `;
+      };
+      root.querySelectorAll("#market-group .choice-btn").forEach(btn => {
+        if (btn.dataset.value === answers.marketStatus) btn.classList.add("selected");
+        btn.onclick = () => {
+          root.querySelectorAll("#market-group .choice-btn").forEach(b => b.classList.remove("selected"));
+          btn.classList.add("selected");
+          answers.marketStatus = btn.dataset.value;
+          toggleError(root, "#market-error", false);
+          recomputeMaxOffer();
+        };
+      });
+      recomputeMaxOffer();
     },
     validate(root) {
       answers.sourceLink = root.querySelector("#source-link-input").value.trim();
@@ -1248,9 +1314,11 @@ function buildAnswerRows() {
   if (answers.dealType === "Cash Deal") {
     rows.push(
       ["ARV", answers.arv || "—"],
+      ["As-Is Value", answers.asIsValue || "—"],
       ["Pictures Link", answers.picturesLink || "—"],
       ["Rehab Estimate", answers.rehabEstimate || "—"],
       ["County Assessed Value", answers.countyAssessedValue || "—"],
+      ["Bottom Dollar Price", answers.bottomDollarPrice || "—"],
       ["Notes (Why Sell / Good Lead)", answers.cashDealNotes || "—"]
     );
   } else if (answers.assetType === "Residential Property (1-4 units)") {
@@ -1404,8 +1472,9 @@ async function submitLead(container) {
         assetType: answers.assetType, assetSubtype: answers.assetSubtype,
         beds: answers.beds, baths: answers.baths, sqft: answers.sqft,
         dealType: answers.dealType,
-        arv: answers.arv, picturesLink: answers.picturesLink, rehabEstimate: answers.rehabEstimate,
-        countyAssessedValue: answers.countyAssessedValue, cashDealNotes: answers.cashDealNotes,
+        arv: answers.arv, asIsValue: answers.asIsValue, picturesLink: answers.picturesLink, rehabEstimate: answers.rehabEstimate,
+        countyAssessedValue: answers.countyAssessedValue, bottomDollarPrice: answers.bottomDollarPrice,
+        cashDealNotes: answers.cashDealNotes,
         occupiedStatus: answers.residentialOccupied, monthlyRentEstimate: answers.rentcastMonthlyRent,
         strAnnualRevenue: answers.strAnnualRevenue, strNOI: answers.strNOI,
         annualPropertyTaxes: answers.annualPropertyTaxes, annualInsurance: answers.annualInsurance,
@@ -1611,9 +1680,11 @@ function buildLeadFields(lead) {
   if (lead["Deal Type"] === "Cash Deal") {
     fields.push(
       ["ARV", lead["ARV"] || "—"],
+      ["As-Is Value", lead["As-Is Value"] || "—"],
       ["Pictures Link", lead["Pictures Link"] || "—"],
       ["Rehab Estimate", lead["Rehab Estimate"] || "—"],
       ["County Assessed Value", lead["County Assessed Value"] || "—"],
+      ["Bottom Dollar Price", lead["Bottom Dollar Price"] || "—"],
       ["Notes (Why Sell / Good Lead)", lead["Cash Deal Notes"] || "—"]
     );
   } else if (lead["Asset Type"] === "Residential Property (1-4 units)") {
