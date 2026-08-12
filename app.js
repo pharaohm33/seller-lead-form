@@ -563,6 +563,243 @@ const steps = [
     }
   },
   {
+    key: "cashDealDetails",
+    progress: true,
+    skip() { return answers.dealType !== "Cash Deal"; },
+    render(root) {
+      root.innerHTML = `
+        <h2 class="step-title">Cash Deal Details</h2>
+        <label class="field-label">ARV <span class="small-muted">(After Repair Value)</span> <span class="req">*</span></label>
+        <input type="number" id="arv-input" placeholder="$">
+        <div class="error-text" id="arv-error">Required.</div>
+
+        <label class="field-label">Pictures Link <span class="small-muted">(optional, if available)</span></label>
+        <input type="text" id="pictures-link-input" placeholder="https://...">
+
+        <label class="field-label">Rehab Estimate <span class="small-muted">(optional, if known)</span></label>
+        <input type="number" id="rehab-input" placeholder="$">
+
+        <label class="field-label">County Assessed Value <span class="small-muted">(optional, if known)</span></label>
+        <input type="number" id="assessed-value-input" placeholder="$">
+
+        <label class="field-label">Notes: why does the seller want to sell / what makes this a good lead?
+          <span class="small-muted" id="cash-notes-hint"></span></label>
+        <textarea id="cash-notes-input" placeholder="e.g. motivated seller, inherited property, tired landlord, needs to relocate..."></textarea>
+        <div class="error-text" id="cash-notes-error">Since pictures, rehab estimate, and assessed value are all blank, please describe why this is a good lead.</div>
+      `;
+      root.querySelector("#arv-input").value = answers.arv || "";
+      root.querySelector("#pictures-link-input").value = answers.picturesLink || "";
+      root.querySelector("#rehab-input").value = answers.rehabEstimate || "";
+      root.querySelector("#assessed-value-input").value = answers.countyAssessedValue || "";
+      root.querySelector("#cash-notes-input").value = answers.cashDealNotes || "";
+
+      const updateNotesHint = () => {
+        const hasSupplementary = !!(root.querySelector("#pictures-link-input").value.trim()
+          || root.querySelector("#rehab-input").value
+          || root.querySelector("#assessed-value-input").value);
+        root.querySelector("#cash-notes-hint").textContent = hasSupplementary
+          ? "(optional)"
+          : "(required since pictures/rehab estimate/assessed value are all blank)";
+      };
+      ["#pictures-link-input", "#rehab-input", "#assessed-value-input"].forEach(sel => {
+        root.querySelector(sel).oninput = updateNotesHint;
+      });
+      updateNotesHint();
+    },
+    validate(root) {
+      answers.arv = root.querySelector("#arv-input").value;
+      answers.picturesLink = root.querySelector("#pictures-link-input").value.trim();
+      answers.rehabEstimate = root.querySelector("#rehab-input").value;
+      answers.countyAssessedValue = root.querySelector("#assessed-value-input").value;
+      answers.cashDealNotes = root.querySelector("#cash-notes-input").value.trim();
+      let ok = true;
+      toggleError(root, "#arv-error", !answers.arv); if (!answers.arv) ok = false;
+      const hasSupplementary = !!(answers.picturesLink || answers.rehabEstimate || answers.countyAssessedValue);
+      if (!hasSupplementary) {
+        toggleError(root, "#cash-notes-error", !answers.cashDealNotes); if (!answers.cashDealNotes) ok = false;
+      } else {
+        toggleError(root, "#cash-notes-error", false);
+      }
+      return ok;
+    }
+  },
+  {
+    key: "debt",
+    progress: true,
+    render(root) {
+      root.innerHTML = `
+        <h2 class="step-title">Existing Debt</h2>
+        <p class="step-sub">What is the total debt currently on the property?</p>
+        <input type="number" id="debt-input" placeholder="Total debt amount" ${answers.debtUnknown ? "disabled" : ""}>
+        <div style="margin-top:10px;">
+          <button type="button" class="btn ghost-small ${answers.debtUnknown ? "active" : ""}" id="unknown-debt-btn">
+            I don't know
+          </button>
+        </div>
+      `;
+      root.querySelector("#debt-input").value = answers.totalDebt || "";
+      root.querySelector("#unknown-debt-btn").onclick = () => {
+        answers.debtUnknown = !answers.debtUnknown;
+        if (answers.debtUnknown) answers.totalDebt = "";
+        renderStep();
+      };
+    },
+    validate(root) {
+      if (!answers.debtUnknown) answers.totalDebt = root.querySelector("#debt-input").value;
+      return true; // optional either way
+    }
+  },
+  {
+    key: "seniorLoan",
+    progress: true,
+    render(root) {
+      root.innerHTML = `
+        <h2 class="step-title">New Senior Financing</h2>
+        <p class="step-sub">Would the seller be willing to let a buyer place a new senior (1st position)
+        mortgage on the property? We need a yes or a no here to accept the lead.</p>
+        <div class="choice-group" id="senior-group">
+          ${["Yes","No"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
+        </div>
+        <div class="error-text" id="senior-error">Please choose Yes or No.</div>
+        <div class="banner danger" id="senior-block-banner" ${answers.seniorLoanWilling === "No" && answers.dealType !== "Cash Deal" ? "" : "hidden"}>
+          We currently do not accept leads where the seller isn't willing to allow a buyer to take out a new
+          senior (1st position) mortgage on the property.
+        </div>
+      `;
+      root.querySelectorAll("#senior-group .choice-btn").forEach(btn => {
+        if (btn.dataset.value === answers.seniorLoanWilling) btn.classList.add("selected");
+        btn.onclick = () => {
+          root.querySelectorAll("#senior-group .choice-btn").forEach(b => b.classList.remove("selected"));
+          btn.classList.add("selected");
+          answers.seniorLoanWilling = btn.dataset.value;
+          root.querySelector("#senior-block-banner").hidden = !(btn.dataset.value === "No" && answers.dealType !== "Cash Deal");
+          toggleError(root, "#senior-error", false);
+        };
+      });
+    },
+    validate(root) {
+      const ok = !!answers.seniorLoanWilling;
+      toggleError(root, "#senior-error", !ok);
+      // Cash deals don't involve the buyer placing any new financing, so the seller's
+      // willingness to allow one is moot -- a "No" here is fine and shouldn't block them.
+      if (answers.dealType === "Cash Deal") return ok;
+      return ok && answers.seniorLoanWilling === "Yes";
+    }
+  },
+  {
+    key: "paymentStructure",
+    progress: true,
+    render(root) {
+      root.innerHTML = `
+        <h2 class="step-title">Payment Structure</h2>
+        <p class="step-sub">Would the seller accept: some down payment now, some paid monthly, and the
+        remainder between the agreed purchase price and the down payment paid within a specific timeframe
+        agreed by both parties? We need a yes or a no here to accept the lead.</p>
+        <div class="choice-group" id="structure-group">
+          ${["Yes","No"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
+        </div>
+        <div class="error-text" id="structure-error">Please choose Yes or No.</div>
+        <div class="banner danger" id="structure-block-banner" ${answers.paymentStructureWilling === "No" && answers.dealType !== "Cash Deal" ? "" : "hidden"}>
+          We currently don't accept leads where the seller isn't willing to consider seller carry / seller
+          financing (a down payment now, monthly payments, and the remainder paid over an agreed timeframe).
+        </div>
+      `;
+      root.querySelectorAll("#structure-group .choice-btn").forEach(btn => {
+        if (btn.dataset.value === answers.paymentStructureWilling) btn.classList.add("selected");
+        btn.onclick = () => {
+          root.querySelectorAll("#structure-group .choice-btn").forEach(b => b.classList.remove("selected"));
+          btn.classList.add("selected");
+          answers.paymentStructureWilling = btn.dataset.value;
+          root.querySelector("#structure-block-banner").hidden = !(btn.dataset.value === "No" && answers.dealType !== "Cash Deal");
+          toggleError(root, "#structure-error", false);
+        };
+      });
+    },
+    validate(root) {
+      const ok = !!answers.paymentStructureWilling;
+      toggleError(root, "#structure-error", !ok);
+      // Same exception as the senior-financing question -- an all-cash buyer doesn't need
+      // seller carry, so the seller's willingness (or lack thereof) shouldn't block the lead.
+      if (answers.dealType === "Cash Deal") return ok;
+      return ok && answers.paymentStructureWilling === "Yes";
+    }
+  },
+  {
+    key: "downPayment",
+    progress: true,
+    render(root) {
+      root.innerHTML = `
+        <h2 class="step-title">Down Payment</h2>
+        <p class="step-sub">How much down payment does the seller need to move into their next stage?
+        It's okay to skip this if they're not sure yet.</p>
+        <input type="number" id="dp-input" placeholder="Down payment amount" ${answers.dpSkipped ? "disabled" : ""}>
+        <div style="margin-top:10px;">
+          <button type="button" class="btn ghost-small ${answers.dpSkipped ? "active" : ""}" id="skip-dp-btn">Skip / not sure</button>
+        </div>
+        <div id="nonneg-wrap"></div>
+      `;
+      root.querySelector("#dp-input").value = answers.downPaymentNeeded || "";
+      const nonnegWrap = root.querySelector("#nonneg-wrap");
+      function renderNonNeg() {
+        if (!answers.dpSkipped && answers.downPaymentNeeded) {
+          nonnegWrap.innerHTML = `
+            <label class="field-label">Is the seller willing to accept less down if we're unable to give them their requested down? <span class="req">*</span></label>
+            <div class="choice-group" id="nonneg-group">
+              ${["Yes","No","Not Sure"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
+            </div>
+            <div class="error-text" id="nonneg-error">Please choose one.</div>
+          `;
+          bindChoiceGroup(root, "#nonneg-group", "downPaymentNonNegotiable");
+        } else {
+          nonnegWrap.innerHTML = "";
+        }
+      }
+      renderNonNeg();
+      root.querySelector("#dp-input").oninput = (e) => {
+        answers.downPaymentNeeded = e.target.value;
+        renderNonNeg();
+      };
+      root.querySelector("#skip-dp-btn").onclick = () => {
+        answers.dpSkipped = !answers.dpSkipped;
+        if (answers.dpSkipped) { answers.downPaymentNeeded = ""; answers.downPaymentNonNegotiable = ""; }
+        renderStep();
+      };
+    },
+    validate(root) {
+      if (answers.dpSkipped) return true;
+      answers.downPaymentNeeded = root.querySelector("#dp-input").value;
+      if (!answers.downPaymentNeeded) return true; // treated as skipped
+      const ok = !!answers.downPaymentNonNegotiable;
+      toggleError(root, "#nonneg-error", !ok);
+      return ok;
+    }
+  },
+  {
+    key: "sourcing",
+    progress: true,
+    render(root) {
+      root.innerHTML = `
+        <h2 class="step-title">Deal Sourcing</h2>
+        <label class="field-label">Is this on-market or off-market? <span class="req">*</span></label>
+        <div class="choice-group" id="market-group">
+          ${["On-Market", "Off-Market"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
+        </div>
+        <div class="error-text" id="market-error">Please choose one.</div>
+
+        <label class="field-label">Link to where you found this listing <span class="small-muted">(optional)</span></label>
+        <input type="text" id="source-link-input" placeholder="https://...">
+      `;
+      root.querySelector("#source-link-input").value = answers.sourceLink || "";
+      bindChoiceGroup(root, "#market-group", "marketStatus");
+    },
+    validate(root) {
+      answers.sourceLink = root.querySelector("#source-link-input").value.trim();
+      const ok = !!answers.marketStatus;
+      toggleError(root, "#market-error", !ok);
+      return ok;
+    }
+  },
+  {
     key: "income",
     progress: true,
     skip() { return answers.dealType === "Cash Deal"; },
@@ -966,243 +1203,6 @@ const steps = [
         return ok;
       }
       return true;
-    }
-  },
-  {
-    key: "cashDealDetails",
-    progress: true,
-    skip() { return answers.dealType !== "Cash Deal"; },
-    render(root) {
-      root.innerHTML = `
-        <h2 class="step-title">Cash Deal Details</h2>
-        <label class="field-label">ARV <span class="small-muted">(After Repair Value)</span> <span class="req">*</span></label>
-        <input type="number" id="arv-input" placeholder="$">
-        <div class="error-text" id="arv-error">Required.</div>
-
-        <label class="field-label">Pictures Link <span class="small-muted">(optional, if available)</span></label>
-        <input type="text" id="pictures-link-input" placeholder="https://...">
-
-        <label class="field-label">Rehab Estimate <span class="small-muted">(optional, if known)</span></label>
-        <input type="number" id="rehab-input" placeholder="$">
-
-        <label class="field-label">County Assessed Value <span class="small-muted">(optional, if known)</span></label>
-        <input type="number" id="assessed-value-input" placeholder="$">
-
-        <label class="field-label">Notes: why does the seller want to sell / what makes this a good lead?
-          <span class="small-muted" id="cash-notes-hint"></span></label>
-        <textarea id="cash-notes-input" placeholder="e.g. motivated seller, inherited property, tired landlord, needs to relocate..."></textarea>
-        <div class="error-text" id="cash-notes-error">Since pictures, rehab estimate, and assessed value are all blank, please describe why this is a good lead.</div>
-      `;
-      root.querySelector("#arv-input").value = answers.arv || "";
-      root.querySelector("#pictures-link-input").value = answers.picturesLink || "";
-      root.querySelector("#rehab-input").value = answers.rehabEstimate || "";
-      root.querySelector("#assessed-value-input").value = answers.countyAssessedValue || "";
-      root.querySelector("#cash-notes-input").value = answers.cashDealNotes || "";
-
-      const updateNotesHint = () => {
-        const hasSupplementary = !!(root.querySelector("#pictures-link-input").value.trim()
-          || root.querySelector("#rehab-input").value
-          || root.querySelector("#assessed-value-input").value);
-        root.querySelector("#cash-notes-hint").textContent = hasSupplementary
-          ? "(optional)"
-          : "(required since pictures/rehab estimate/assessed value are all blank)";
-      };
-      ["#pictures-link-input", "#rehab-input", "#assessed-value-input"].forEach(sel => {
-        root.querySelector(sel).oninput = updateNotesHint;
-      });
-      updateNotesHint();
-    },
-    validate(root) {
-      answers.arv = root.querySelector("#arv-input").value;
-      answers.picturesLink = root.querySelector("#pictures-link-input").value.trim();
-      answers.rehabEstimate = root.querySelector("#rehab-input").value;
-      answers.countyAssessedValue = root.querySelector("#assessed-value-input").value;
-      answers.cashDealNotes = root.querySelector("#cash-notes-input").value.trim();
-      let ok = true;
-      toggleError(root, "#arv-error", !answers.arv); if (!answers.arv) ok = false;
-      const hasSupplementary = !!(answers.picturesLink || answers.rehabEstimate || answers.countyAssessedValue);
-      if (!hasSupplementary) {
-        toggleError(root, "#cash-notes-error", !answers.cashDealNotes); if (!answers.cashDealNotes) ok = false;
-      } else {
-        toggleError(root, "#cash-notes-error", false);
-      }
-      return ok;
-    }
-  },
-  {
-    key: "debt",
-    progress: true,
-    render(root) {
-      root.innerHTML = `
-        <h2 class="step-title">Existing Debt</h2>
-        <p class="step-sub">What is the total debt currently on the property?</p>
-        <input type="number" id="debt-input" placeholder="Total debt amount" ${answers.debtUnknown ? "disabled" : ""}>
-        <div style="margin-top:10px;">
-          <button type="button" class="btn ghost-small ${answers.debtUnknown ? "active" : ""}" id="unknown-debt-btn">
-            I don't know
-          </button>
-        </div>
-      `;
-      root.querySelector("#debt-input").value = answers.totalDebt || "";
-      root.querySelector("#unknown-debt-btn").onclick = () => {
-        answers.debtUnknown = !answers.debtUnknown;
-        if (answers.debtUnknown) answers.totalDebt = "";
-        renderStep();
-      };
-    },
-    validate(root) {
-      if (!answers.debtUnknown) answers.totalDebt = root.querySelector("#debt-input").value;
-      return true; // optional either way
-    }
-  },
-  {
-    key: "seniorLoan",
-    progress: true,
-    render(root) {
-      root.innerHTML = `
-        <h2 class="step-title">New Senior Financing</h2>
-        <p class="step-sub">Would the seller be willing to let a buyer place a new senior (1st position)
-        mortgage on the property? We need a yes or a no here to accept the lead.</p>
-        <div class="choice-group" id="senior-group">
-          ${["Yes","No"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
-        </div>
-        <div class="error-text" id="senior-error">Please choose Yes or No.</div>
-        <div class="banner danger" id="senior-block-banner" ${answers.seniorLoanWilling === "No" && answers.dealType !== "Cash Deal" ? "" : "hidden"}>
-          We currently do not accept leads where the seller isn't willing to allow a buyer to take out a new
-          senior (1st position) mortgage on the property.
-        </div>
-      `;
-      root.querySelectorAll("#senior-group .choice-btn").forEach(btn => {
-        if (btn.dataset.value === answers.seniorLoanWilling) btn.classList.add("selected");
-        btn.onclick = () => {
-          root.querySelectorAll("#senior-group .choice-btn").forEach(b => b.classList.remove("selected"));
-          btn.classList.add("selected");
-          answers.seniorLoanWilling = btn.dataset.value;
-          root.querySelector("#senior-block-banner").hidden = !(btn.dataset.value === "No" && answers.dealType !== "Cash Deal");
-          toggleError(root, "#senior-error", false);
-        };
-      });
-    },
-    validate(root) {
-      const ok = !!answers.seniorLoanWilling;
-      toggleError(root, "#senior-error", !ok);
-      // Cash deals don't involve the buyer placing any new financing, so the seller's
-      // willingness to allow one is moot -- a "No" here is fine and shouldn't block them.
-      if (answers.dealType === "Cash Deal") return ok;
-      return ok && answers.seniorLoanWilling === "Yes";
-    }
-  },
-  {
-    key: "paymentStructure",
-    progress: true,
-    render(root) {
-      root.innerHTML = `
-        <h2 class="step-title">Payment Structure</h2>
-        <p class="step-sub">Would the seller accept: some down payment now, some paid monthly, and the
-        remainder between the agreed purchase price and the down payment paid within a specific timeframe
-        agreed by both parties? We need a yes or a no here to accept the lead.</p>
-        <div class="choice-group" id="structure-group">
-          ${["Yes","No"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
-        </div>
-        <div class="error-text" id="structure-error">Please choose Yes or No.</div>
-        <div class="banner danger" id="structure-block-banner" ${answers.paymentStructureWilling === "No" && answers.dealType !== "Cash Deal" ? "" : "hidden"}>
-          We currently don't accept leads where the seller isn't willing to consider seller carry / seller
-          financing (a down payment now, monthly payments, and the remainder paid over an agreed timeframe).
-        </div>
-      `;
-      root.querySelectorAll("#structure-group .choice-btn").forEach(btn => {
-        if (btn.dataset.value === answers.paymentStructureWilling) btn.classList.add("selected");
-        btn.onclick = () => {
-          root.querySelectorAll("#structure-group .choice-btn").forEach(b => b.classList.remove("selected"));
-          btn.classList.add("selected");
-          answers.paymentStructureWilling = btn.dataset.value;
-          root.querySelector("#structure-block-banner").hidden = !(btn.dataset.value === "No" && answers.dealType !== "Cash Deal");
-          toggleError(root, "#structure-error", false);
-        };
-      });
-    },
-    validate(root) {
-      const ok = !!answers.paymentStructureWilling;
-      toggleError(root, "#structure-error", !ok);
-      // Same exception as the senior-financing question -- an all-cash buyer doesn't need
-      // seller carry, so the seller's willingness (or lack thereof) shouldn't block the lead.
-      if (answers.dealType === "Cash Deal") return ok;
-      return ok && answers.paymentStructureWilling === "Yes";
-    }
-  },
-  {
-    key: "downPayment",
-    progress: true,
-    render(root) {
-      root.innerHTML = `
-        <h2 class="step-title">Down Payment</h2>
-        <p class="step-sub">How much down payment does the seller need to move into their next stage?
-        It's okay to skip this if they're not sure yet.</p>
-        <input type="number" id="dp-input" placeholder="Down payment amount" ${answers.dpSkipped ? "disabled" : ""}>
-        <div style="margin-top:10px;">
-          <button type="button" class="btn ghost-small ${answers.dpSkipped ? "active" : ""}" id="skip-dp-btn">Skip / not sure</button>
-        </div>
-        <div id="nonneg-wrap"></div>
-      `;
-      root.querySelector("#dp-input").value = answers.downPaymentNeeded || "";
-      const nonnegWrap = root.querySelector("#nonneg-wrap");
-      function renderNonNeg() {
-        if (!answers.dpSkipped && answers.downPaymentNeeded) {
-          nonnegWrap.innerHTML = `
-            <label class="field-label">Is the seller willing to accept less down if we're unable to give them their requested down? <span class="req">*</span></label>
-            <div class="choice-group" id="nonneg-group">
-              ${["Yes","No","Not Sure"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
-            </div>
-            <div class="error-text" id="nonneg-error">Please choose one.</div>
-          `;
-          bindChoiceGroup(root, "#nonneg-group", "downPaymentNonNegotiable");
-        } else {
-          nonnegWrap.innerHTML = "";
-        }
-      }
-      renderNonNeg();
-      root.querySelector("#dp-input").oninput = (e) => {
-        answers.downPaymentNeeded = e.target.value;
-        renderNonNeg();
-      };
-      root.querySelector("#skip-dp-btn").onclick = () => {
-        answers.dpSkipped = !answers.dpSkipped;
-        if (answers.dpSkipped) { answers.downPaymentNeeded = ""; answers.downPaymentNonNegotiable = ""; }
-        renderStep();
-      };
-    },
-    validate(root) {
-      if (answers.dpSkipped) return true;
-      answers.downPaymentNeeded = root.querySelector("#dp-input").value;
-      if (!answers.downPaymentNeeded) return true; // treated as skipped
-      const ok = !!answers.downPaymentNonNegotiable;
-      toggleError(root, "#nonneg-error", !ok);
-      return ok;
-    }
-  },
-  {
-    key: "sourcing",
-    progress: true,
-    render(root) {
-      root.innerHTML = `
-        <h2 class="step-title">Deal Sourcing</h2>
-        <label class="field-label">Is this on-market or off-market? <span class="req">*</span></label>
-        <div class="choice-group" id="market-group">
-          ${["On-Market", "Off-Market"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
-        </div>
-        <div class="error-text" id="market-error">Please choose one.</div>
-
-        <label class="field-label">Link to where you found this listing <span class="small-muted">(optional)</span></label>
-        <input type="text" id="source-link-input" placeholder="https://...">
-      `;
-      root.querySelector("#source-link-input").value = answers.sourceLink || "";
-      bindChoiceGroup(root, "#market-group", "marketStatus");
-    },
-    validate(root) {
-      answers.sourceLink = root.querySelector("#source-link-input").value.trim();
-      const ok = !!answers.marketStatus;
-      toggleError(root, "#market-error", !ok);
-      return ok;
     }
   },
   {
