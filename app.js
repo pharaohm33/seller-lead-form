@@ -687,25 +687,39 @@ const steps = [
           `;
         }
 
+        // Negotiation anchor: county assessed value if we have it, otherwise fall back to
+        // As-Is Value (ARV minus repairs) as the alternative base. This is a talking-point
+        // number for working the seller down, not the internal ceiling -- county/as-is values
+        // are usually higher than a true ARV-based max offer, so cite the high end of the repair
+        // estimate against this bigger, official-sounding number to justify why the price needs
+        // to land near it. County assessed value is a raw pre-repair-style figure (repairs get
+        // subtracted below); As-Is Value already has repairs baked in, so it doesn't get
+        // subtracted again.
         const assessedValue = Number(root.querySelector("#assessed-value-input").value) || 0;
+        const asIsValue = arv ? Math.max(arv - rehab, 0) : 0;
+        const usingAssessed = assessedValue > 0;
+        const negotiationBase = usingAssessed ? assessedValue : asIsValue;
+        const negotiationLabel = usingAssessed ? "county assessed value" : "As-Is Value (ARV minus repairs)";
         const assessedMaxOfferBanner = root.querySelector("#assessed-max-offer-banner");
-        if (!assessedValue) {
+        if (!negotiationBase) {
           assessedMaxOfferBanner.hidden = true;
         } else {
-          // Backup math for properties you can't find listed anywhere online (no Chase estimate,
-          // no comps) to get a real ARV from -- use the county assessed value instead, at a
-          // lighter 90% discount since assessed values already tend to run under market value.
-          const assessedArv = 0.90 * assessedValue;
-          const assessedAssignmentFee = Math.max(20000, 0.03 * assessedArv);
-          const assessedMaxOffer = assessedArv - rehab - assessedAssignmentFee;
+          const discountedBase = 0.90 * negotiationBase;
+          const negotiationFee = Math.max(20000, 0.03 * discountedBase);
+          const negotiationOffer = usingAssessed
+            ? (discountedBase - rehab - negotiationFee)
+            : (discountedBase - negotiationFee);
           assessedMaxOfferBanner.hidden = false;
           assessedMaxOfferBanner.innerHTML = `
-            <strong>Alternate Max Offer (if not listed online anywhere):</strong> $${assessedMaxOffer.toLocaleString(undefined, {maximumFractionDigits: 0})}
-            <span class="small-muted">(90% of $${assessedValue.toLocaleString()} county assessed value, minus $${rehab.toLocaleString()} repairs,
-            minus a $${assessedAssignmentFee.toLocaleString(undefined, {maximumFractionDigits: 0})} assignment fee — the
+            <strong>Negotiating Anchor:</strong> $${negotiationOffer.toLocaleString(undefined, {maximumFractionDigits: 0})}
+            <span class="small-muted">(90% of $${negotiationBase.toLocaleString()} ${negotiationLabel},
+            ${usingAssessed ? `minus $${rehab.toLocaleString()} repairs, ` : ""}minus a
+            $${negotiationFee.toLocaleString(undefined, {maximumFractionDigits: 0})} assignment fee — the
             greater of $20,000 or 3% of that adjusted value)</span>
-            <br><span class="small-muted">Only use this if you truly can't find the property listed anywhere online
-            to get a real ARV. Not applicable if you're the seller filling this out about your own property.</span>
+            <br><span class="small-muted">This is a negotiating tool, not a hard cap like the Max Offer above.
+            Use the ${negotiationLabel} as your anchor with the seller and cite the high end of your repair
+            estimate to make the case for why the price needs to come down near here. Not applicable if you're
+            the seller filling this out about your own property.</span>
           `;
         }
       };
