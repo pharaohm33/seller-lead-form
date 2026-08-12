@@ -24,7 +24,9 @@ const LEAD_COLUMNS = [
   'Street Address', 'City', 'State', 'Zip', 'Units',
   'Asset Type', 'Asset Subtype', 'Beds', 'Baths', 'Sq Ft',
   'Deal Type', 'ARV', 'As-Is Value', 'Pictures Link', 'Rehab Estimate', 'County Assessed Value',
-  'Bottom Dollar Price', 'Cash Deal Notes', 'Under Contract', 'Seller Accepted Price',
+  'Bottom Dollar Price', 'Cash Deal Notes',
+  'MAO Cash', 'MAO Hard Money (10% Down)', 'MAO Hard Money (20% Down)', 'MAO Breakdown',
+  'Under Contract', 'Seller Accepted Price',
   'Occupied Status', 'Has Rent Rolls', 'Has P&L', 'Deliverable Vacant', 'Current Lease Term',
   'Monthly Rent Estimate', 'STR Annual Revenue', 'Annual Property Taxes', 'Annual Insurance', 'Expense Ratio %',
   'NOI', 'STR NOI', 'Business Revenue', 'Business Earnings Type', 'Business Earnings',
@@ -71,7 +73,9 @@ function getSortPriority(status) {
 // to that endpoint by default, not just unrendered by the front-end. Add a
 // column here deliberately if you ever want it exposed to submitters.
 const PUBLIC_LEAD_FIELDS = LEAD_COLUMNS.filter(function (c) {
-  return c !== 'Closing Likelihood' && c !== 'Sort Priority' && c !== 'Team';
+  return c !== 'Closing Likelihood' && c !== 'Sort Priority' && c !== 'Team'
+    && c !== 'MAO Cash' && c !== 'MAO Hard Money (10% Down)' && c !== 'MAO Hard Money (20% Down)'
+    && c !== 'MAO Breakdown';
 });
 
 function doGet(e) {
@@ -272,6 +276,8 @@ function submitLead(body) {
     'Rehab Estimate': d.rehabEstimate || '', 'County Assessed Value': d.countyAssessedValue || '',
     'Bottom Dollar Price': d.bottomDollarPrice || '',
     'Cash Deal Notes': d.cashDealNotes || '',
+    'MAO Cash': d.maoCash || '', 'MAO Hard Money (10% Down)': d.maoHardMoney10 || '',
+    'MAO Hard Money (20% Down)': d.maoHardMoney20 || '', 'MAO Breakdown': d.maoBreakdown || '',
     'Under Contract': d.underContract || '', 'Seller Accepted Price': d.sellerAcceptedPrice || '',
     'Occupied Status': d.occupiedStatus || '',
     'Has Rent Rolls': d.hasRentRolls || '', 'Has P&L': d.hasProfitLoss || '',

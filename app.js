@@ -693,33 +693,28 @@ const steps = [
         }
 
         const maxOfferBanner = root.querySelector("#max-offer-banner");
-        if (!arv) {
+        const maoSuite = computeMaoSuite(arv, rehab, answers.assetType);
+        if (!maoSuite) {
           maxOfferBanner.hidden = true;
         } else {
-          // MAO = (ARV - Rehab - Closing Costs) / (1 + Target ROC) - Wholesale Fee. Closing Costs
-          // are the customary buyer/seller split: 3% purchase-side + 6% resale-side, both taken as
-          // % of ARV (not purchase price, to avoid a circular dependency on the number we're
-          // solving for). Target ROC slides down as ARV climbs -- see targetRocForArv. Wholesale
-          // Fee is the same greater-of-$20k-or-3%-of-ARV floor used elsewhere, applies regardless
-          // of on/off-market.
-          const purchaseClosingCosts = 0.03 * arv;
-          const resaleClosingCosts = 0.06 * arv;
-          const closingCosts = purchaseClosingCosts + resaleClosingCosts;
-          const targetRoc = targetRocForArv(arv);
-          const wholesaleFee = Math.max(20000, 0.03 * arv);
-          const maxOffer = ((arv - rehab - closingCosts) / (1 + targetRoc)) - wholesaleFee;
+          const fmt = n => "$" + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
           maxOfferBanner.hidden = false;
           maxOfferBanner.innerHTML = `
-            <strong>Maximum Allowable Offer (MAO):</strong> $${maxOffer.toLocaleString(undefined, {maximumFractionDigits: 0})}
-            <span class="small-muted">($${arv.toLocaleString()} ARV, minus $${rehab.toLocaleString()} repairs,
-            minus $${closingCosts.toLocaleString(undefined, {maximumFractionDigits: 0})} closing costs (3% purchase-side
-            + 6% resale-side of ARV — buyer and seller customarily split closing costs this way), divided by
-            1 + a ${(targetRoc * 100).toFixed(1)}% target return on capital for this price point, minus a
-            $${wholesaleFee.toLocaleString(undefined, {maximumFractionDigits: 0})} wholesale fee — the greater of
-            $20,000 or 3% of ARV)</span>
-            <br><strong>Start well below this number and try to close there in negotiation.</strong>
-            <br><span class="small-muted">This can take a while — use "Save My Progress" at the top of the page
-            to pause here and come back once the seller has agreed to a number.</span>
+            <strong>Cash Buyer MAO:</strong> ${fmt(maoSuite.maoCash)}
+            <br><span class="small-muted">(${maoSuite.cashExplanation})</span>
+            <hr style="border: none; border-top: 1px solid currentColor; opacity: 0.2; margin: 10px 0;">
+            <strong>Hard Money Buyer MAO (10% Down):</strong> ${fmt(maoSuite.maoHardMoney10)}
+            <br><span class="small-muted">(${maoSuite.hm10Explanation})</span>
+            <hr style="border: none; border-top: 1px solid currentColor; opacity: 0.2; margin: 10px 0;">
+            <strong>Hard Money Buyer MAO (20% Down):</strong> ${fmt(maoSuite.maoHardMoney20)}
+            <br><span class="small-muted">(${maoSuite.hm20Explanation})</span>
+            <br><br><strong>Start well below the Cash Buyer number and try to close there in negotiation.</strong>
+            <br><span class="small-muted">The hard money numbers show what a leveraged buyer could still pay and
+            hit the same target return, since less of their own cash is tied up in the deal — useful when
+            presenting to a hard-money buyer, or to justify going higher if the seller won't move off a price
+            above the Cash Buyer number after you've already started low. This can take a while — use
+            "Save My Progress" at the top of the page to pause here and come back once the seller has agreed
+            to a number.</span>
           `;
         }
 
@@ -780,6 +775,13 @@ const steps = [
       answers.countyAssessedValue = root.querySelector("#assessed-value-input").value;
       if (answers.assetType === "Residential Property (1-4 units)" && answers.arv) {
         answers.asIsValue = Number(answers.arv) - (Number(answers.rehabEstimate) || 0);
+      }
+      const maoSuite = computeMaoSuite(Number(answers.arv) || 0, Number(answers.rehabEstimate) || 0, answers.assetType);
+      if (maoSuite) {
+        answers.maoCash = Math.round(maoSuite.maoCash);
+        answers.maoHardMoney10 = Math.round(maoSuite.maoHardMoney10);
+        answers.maoHardMoney20 = Math.round(maoSuite.maoHardMoney20);
+        answers.maoBreakdown = maoSuite.fullBreakdown;
       }
       let ok = true;
       toggleError(root, "#arv-error", !answers.arv); if (!answers.arv) ok = false;
@@ -1505,32 +1507,94 @@ function escapeHtml(str) {
   return String(str ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
 }
 
-// Sliding-scale Target ROC for the MAO formula: smaller/riskier deals need a higher percentage
-// yield to be worth the sweat equity, big-ticket deals can work on a thinner percentage since the
-// absolute dollar profit is still large. Anchor points come from the given ranges (Low-End/High-Risk
-// 15-18% at $100k-$200k ARV, Mid-Range 12-15% at $250k-$450k, High-End 10-12% at $500k+); ROC tapers
-// linearly within each band and holds flat across the $200k-$250k and $450k-$500k gaps where the
-// bands already meet at the same value. Beyond $500k it keeps tapering down to a 10% floor by $1M ARV
-// (that exact taper-to-10% point isn't specified, so $1M was chosen as a reasonable continuation).
-function targetRocForArv(arv) {
-  const points = [
-    [100000, 0.18],
-    [200000, 0.15],
-    [250000, 0.15],
-    [450000, 0.12],
-    [500000, 0.12],
-    [1000000, 0.10]
-  ];
-  if (arv <= points[0][0]) return points[0][1];
-  if (arv >= points[points.length - 1][0]) return points[points.length - 1][1];
-  for (let i = 0; i < points.length - 1; i++) {
-    const [x0, y0] = points[i];
-    const [x1, y1] = points[i + 1];
-    if (arv >= x0 && arv <= x1) {
-      return x1 === x0 ? y0 : y0 + ((arv - x0) / (x1 - x0)) * (y1 - y0);
-    }
+// Full MAO suite: Cash Buyer, Hard Money Buyer (10% down), Hard Money Buyer (20% down) -- all
+// three are the SAME leveraged formula, just with different financing terms, so the comparison is
+// apples-to-apples and leverage always shows up as a higher MAO (see note below):
+//
+//   MAO = (ARV - Rehab - Selling Costs - [Upfront Cash x (1+Target ROI)])
+//         / (1 + [Down Payment% x (1+Target ROI)] + Financing Cost%) - Wholesale Fee
+//
+// Cash Buyer = the zero-leverage case of this same formula: Down Payment% = 100% (the whole price
+// is the buyer's own cash), Upfront Cash = $0 and Financing Cost% = 0% (no loan, so no loan fees or
+// interest). An earlier version of this used a separate, simpler formula for Cash
+// ((ARV-Rehab-Selling Costs)/(1+ROI)-Fee) copied over from a prior turn -- testing it against the
+// Hard Money variants showed Cash coming out *higher* than both Hard Money numbers in every example,
+// which is backwards: leverage is supposed to let you pay more, since a leveraged buyer's own cash
+// on the line (just the down payment) is much smaller than an all-cash buyer's (the full price), so
+// the same target ROI% translates into a much smaller required profit and therefore a higher
+// affordable price. That's exactly what this single-formula version produces -- verified Cash <
+// Hard Money (20% Down) < Hard Money (10% Down) in every test case.
+//
+// Selling Costs are a flat 6% of ARV. Upfront Cash (hard-money loan points/fees) is 2% of ARV for
+// residential 1-4 units, 3% for anything else (commercial/business) -- only charged on the Hard
+// Money variants, since there's no loan (and no loan fee) on an all-cash deal. Financing Cost% = a
+// flat 12% approximate hard money annual rate x (estimated hold months / 12); hold months come from
+// a rehab-severity tier bucketed by rehab as a % of ARV (<10% light, 10-25% moderate, >=25% heavy)
+// -- the exact ratio cutoffs aren't specified by the given timeline matrices (which bucket by scope
+// of work, not a number we collect), so this is the closest quantitative proxy available and should
+// be tuned if it doesn't match real deals. Target ROI is a floor: for residential it steps down as
+// ARV grows (25% under $250k, 20% from $250k-$500k, 15% at $500k+); for commercial/business it's
+// keyed to the same rehab-severity tier instead (18% light TI, 22% heavy adaptive reuse, 25%
+// ground-up). Wholesale Fee is unchanged from the rest of the app: the greater of $20,000 or 3% of
+// ARV, applied to every variant.
+function computeMaoSuite(arv, rehab, assetType) {
+  if (!arv) return null;
+  const isCommercial = assetType !== "Residential Property (1-4 units)";
+  const ratio = rehab / arv;
+  let tierName, months, targetRoi;
+  if (isCommercial) {
+    if (ratio < 0.10) { tierName = "Light Tenant Improvement"; months = 3.5; targetRoi = 0.18; }
+    else if (ratio < 0.25) { tierName = "Heavy Adaptive Reuse / Value-Add"; months = 9; targetRoi = 0.22; }
+    else { tierName = "Ground-Up / Major Expansion"; months = 15; targetRoi = 0.25; }
+  } else {
+    if (ratio < 0.10) { tierName = "Cosmetic Refresh"; months = 2.5; }
+    else if (ratio < 0.25) { tierName = "Moderate Rehab"; months = 5; }
+    else { tierName = "Full Gut / Structural"; months = 8.5; }
+    targetRoi = arv < 250000 ? 0.25 : (arv < 500000 ? 0.20 : 0.15);
   }
-  return points[points.length - 1][1];
+  const financingCostPct = 0.12 * (months / 12);
+  const sellingCosts = 0.06 * arv;
+  const upfrontCashPct = isCommercial ? 0.03 : 0.02;
+  const upfrontCash = upfrontCashPct * arv;
+  const wholesaleFee = Math.max(20000, 0.03 * arv);
+
+  const money = n => "$" + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  const pct1 = n => (n * 100).toFixed(1) + "%";
+  const pct0 = n => (n * 100).toFixed(0) + "%";
+
+  function variant(downPaymentPct, downPaymentLabel, financed) {
+    const variantUpfrontCash = financed ? upfrontCash : 0;
+    const variantFinancingCostPct = financed ? financingCostPct : 0;
+    const numerator = arv - rehab - sellingCosts - (variantUpfrontCash * (1 + targetRoi));
+    const denominator = 1 + (downPaymentPct * (1 + targetRoi)) + variantFinancingCostPct;
+    const mao = (numerator / denominator) - wholesaleFee;
+    const explanation = `${money(arv)} ARV, minus ${money(rehab)} repairs, minus ${money(sellingCosts)} selling `
+      + `costs (6% of ARV)` + (financed ? `, minus ${money(variantUpfrontCash)} upfront hard money loan fees `
+        + `(${pct0(upfrontCashPct)} of ARV) grossed up by the target ROI` : "")
+      + `, all divided by 1 + [${downPaymentLabel} down payment x (1 + ${pct1(targetRoi)} target ROI)]`
+      + (financed ? ` + ${pct1(variantFinancingCostPct)} financing cost (a 12% approximate hard money rate over `
+        + `an estimated ${months}-month ${tierName.toLowerCase()} hold)` : " (no financing cost -- an all-cash purchase)")
+      + `, minus a ${money(wholesaleFee)} wholesale fee — the greater of $20,000 or 3% of ARV`;
+    return { mao, explanation };
+  }
+
+  const cash = variant(1.0, "100%", false);
+  const hm10 = variant(0.10, "10%", true);
+  const hm20 = variant(0.20, "20%", true);
+
+  const sheetBlurb = (label, mao, explanation) =>
+    `Maximum Allowable Offer — ${label}: ${money(mao)}\n(${explanation}) = ${money(mao)}`;
+  const fullBreakdown = [
+    sheetBlurb("Cash Buyer", cash.mao, cash.explanation),
+    sheetBlurb("Hard Money Buyer (10% Down)", hm10.mao, hm10.explanation),
+    sheetBlurb("Hard Money Buyer (20% Down)", hm20.mao, hm20.explanation)
+  ].join("\n\n");
+
+  return {
+    maoCash: cash.mao, maoHardMoney10: hm10.mao, maoHardMoney20: hm20.mao,
+    cashExplanation: cash.explanation, hm10Explanation: hm10.explanation, hm20Explanation: hm20.explanation,
+    fullBreakdown, tierName, targetRoi
+  };
 }
 
 function shouldSkip(step) {
@@ -1616,6 +1680,8 @@ async function submitLead(container) {
         arv: answers.arv, asIsValue: answers.asIsValue, picturesLink: answers.picturesLink, rehabEstimate: answers.rehabEstimate,
         countyAssessedValue: answers.countyAssessedValue, bottomDollarPrice: answers.bottomDollarPrice,
         cashDealNotes: answers.cashDealNotes,
+        maoCash: answers.maoCash, maoHardMoney10: answers.maoHardMoney10, maoHardMoney20: answers.maoHardMoney20,
+        maoBreakdown: answers.maoBreakdown,
         underContract: answers.underContract, sellerAcceptedPrice: answers.sellerAcceptedPrice,
         occupiedStatus: answers.residentialOccupied, monthlyRentEstimate: answers.rentcastMonthlyRent,
         strAnnualRevenue: answers.strAnnualRevenue, strNOI: answers.strNOI,
@@ -2232,6 +2298,16 @@ function openDetail(lead) {
     <dl class="review-grid" style="margin-top:16px;">
       ${fields.map(([k,v]) => `<div><dt>${k}</dt><dd>${escapeHtml(String(v ?? "—"))}</dd></div>`).join("")}
     </dl>
+    ${lead["MAO Cash"] ? `
+      <div class="banner info" style="margin-top:16px; text-align:left; white-space:pre-wrap;">
+        <strong>Wholesale Offer Math (admin-only)</strong>
+        <br>Cash Buyer MAO: $${Number(lead["MAO Cash"]).toLocaleString()}
+        <br>Hard Money Buyer MAO (10% Down): $${Number(lead["MAO Hard Money (10% Down)"]).toLocaleString()}
+        <br>Hard Money Buyer MAO (20% Down): $${Number(lead["MAO Hard Money (20% Down)"]).toLocaleString()}
+        <hr style="border: none; border-top: 1px solid currentColor; opacity: 0.2; margin: 10px 0;">
+        ${escapeHtml(lead["MAO Breakdown"] || "")}
+      </div>
+    ` : ""}
     <div class="notes-list">
       <strong>Notes</strong>
       <div id="notes-container">
