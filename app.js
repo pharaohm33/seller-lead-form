@@ -614,6 +614,7 @@ const steps = [
       }
 
       const isResidential = answers.assetType === "Residential Property (1-4 units)";
+      const isOnMarket = answers.marketStatus === "On-Market";
       const addressLine = `${answers.street || ""}, ${answers.city || ""}, ${answers.state || ""} ${answers.zip || ""}`.trim();
       const arvPrompt = `how much is this worth at full market value (ARV): ${addressLine}`;
       const repairPrompt = `how much repair is needed as an investment flip for this property: ${addressLine}`;
@@ -667,6 +668,12 @@ const steps = [
         <label class="field-label" style="margin-top:16px;">Wholesale Fee
           <span class="small-muted">(auto-filled at the greater of $20,000 or 3% of ARV — override with a smaller number if you've negotiated one down for this deal)</span></label>
         <input type="number" id="wholesale-fee-input" placeholder="$">
+
+        ${isOnMarket ? `
+          <p class="hint" style="margin-top:16px;"><em>Pricing guidance: for best results, aim for around 70% of
+          the price posted online for an accepted offer. Only use our highest MAO as a last resort, and round
+          down to the nearest $5,000. The tighter the deal, the less likely it is to sell.</em></p>
+        ` : ""}
 
         <div class="banner warn" id="max-offer-banner" hidden style="margin-top:16px;"></div>
         <div class="banner warn" id="assessed-max-offer-banner" hidden style="margin-top:16px;"></div>
