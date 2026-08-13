@@ -664,6 +664,10 @@ const steps = [
         <textarea id="cash-notes-input" placeholder="e.g. motivated seller, inherited property, tired landlord, needs to relocate..."></textarea>
         <div class="error-text" id="cash-notes-error">Since pictures, rehab estimate, and assessed value are all blank, please describe why this is a good lead.</div>
 
+        <label class="field-label" style="margin-top:16px;">Wholesale Fee
+          <span class="small-muted">(auto-filled at the greater of $20,000 or 3% of ARV — override with a smaller number if you've negotiated one down for this deal)</span></label>
+        <input type="number" id="wholesale-fee-input" placeholder="$">
+
         <div class="banner warn" id="max-offer-banner" hidden style="margin-top:16px;"></div>
         <div class="banner warn" id="assessed-max-offer-banner" hidden style="margin-top:16px;"></div>
       `;
@@ -673,6 +677,11 @@ const steps = [
       root.querySelector("#assessed-value-input").value = answers.countyAssessedValue || "";
       root.querySelector("#bottom-dollar-input").value = answers.bottomDollarPrice || "";
       root.querySelector("#cash-notes-input").value = answers.cashDealNotes || "";
+      root.querySelector("#wholesale-fee-input").value = answers.wholesaleFee || "";
+      // Once a fee is already on file (fresh input, or restored from a save/resume link) treat it as
+      // deliberately set and stop auto-overwriting it as ARV changes -- only a truly untouched field
+      // keeps tracking the formula live.
+      let feeManuallyEdited = !!answers.wholesaleFee;
 
       const recomputeCashDeal = () => {
         const hasSupplementary = !!(root.querySelector("#pictures-link-input").value.trim()
@@ -696,8 +705,13 @@ const steps = [
           }
         }
 
+        const feeInput = root.querySelector("#wholesale-fee-input");
+        const formulaFee = arv ? Math.max(20000, 0.03 * arv) : 0;
+        if (!feeManuallyEdited) feeInput.value = formulaFee || "";
+        const wholesaleFee = Number(feeInput.value) || formulaFee;
+
         const maxOfferBanner = root.querySelector("#max-offer-banner");
-        const maoSuite = computeMaoSuite(arv, rehab, answers.assetType);
+        const maoSuite = computeMaoSuite(arv, rehab, answers.assetType, wholesaleFee);
         if (!maoSuite) {
           maxOfferBanner.hidden = true;
         } else {
@@ -742,17 +756,15 @@ const steps = [
           assessedMaxOfferBanner.hidden = true;
         } else {
           const discountedBase = 0.90 * negotiationBase;
-          const negotiationFee = Math.max(20000, 0.03 * discountedBase);
           const negotiationOffer = usingAssessed
-            ? (discountedBase - rehab - negotiationFee)
-            : (discountedBase - negotiationFee);
+            ? (discountedBase - rehab - wholesaleFee)
+            : (discountedBase - wholesaleFee);
           assessedMaxOfferBanner.hidden = false;
           assessedMaxOfferBanner.innerHTML = `
             <strong>Off-Market Negotiating Anchor:</strong> $${negotiationOffer.toLocaleString(undefined, {maximumFractionDigits: 0})}
             <span class="small-muted">(90% of $${negotiationBase.toLocaleString()} ${negotiationLabel},
-            ${usingAssessed ? `minus $${rehab.toLocaleString()} repairs, ` : ""}minus a
-            $${negotiationFee.toLocaleString(undefined, {maximumFractionDigits: 0})} assignment fee — the
-            greater of $20,000 or 3% of that adjusted value)</span>
+            ${usingAssessed ? `minus $${rehab.toLocaleString()} repairs, ` : ""}minus your
+            $${wholesaleFee.toLocaleString(undefined, {maximumFractionDigits: 0})} wholesale fee)</span>
             <br><span class="small-muted">This is a negotiating tool for off-market deals, not a hard cap like
             the Max Offer above. Use the ${negotiationLabel} as your anchor with the seller and cite the high end
             of your repair estimate to make the case for why the price needs to come down near here.</span>
@@ -762,6 +774,10 @@ const steps = [
       ["#arv-input", "#pictures-link-input", "#rehab-input", "#assessed-value-input"].forEach(sel => {
         root.querySelector(sel).oninput = recomputeCashDeal;
       });
+      root.querySelector("#wholesale-fee-input").oninput = () => {
+        feeManuallyEdited = true;
+        recomputeCashDeal();
+      };
       recomputeCashDeal();
     },
     validate(root) {
@@ -780,7 +796,10 @@ const steps = [
       if (answers.assetType === "Residential Property (1-4 units)" && answers.arv) {
         answers.asIsValue = Number(answers.arv) - (Number(answers.rehabEstimate) || 0);
       }
-      const maoSuite = computeMaoSuite(Number(answers.arv) || 0, Number(answers.rehabEstimate) || 0, answers.assetType);
+      const arvNum = Number(answers.arv) || 0;
+      const feeInputVal = root.querySelector("#wholesale-fee-input").value;
+      answers.wholesaleFee = feeInputVal || (arvNum ? Math.max(20000, 0.03 * arvNum) : "");
+      const maoSuite = computeMaoSuite(arvNum, Number(answers.rehabEstimate) || 0, answers.assetType, answers.wholesaleFee);
       if (maoSuite) {
         answers.maoCash = Math.round(maoSuite.maoCash);
         answers.maoHardMoney10 = Math.round(maoSuite.maoHardMoney10);
@@ -1497,6 +1516,7 @@ function buildAnswerRows() {
     );
     if (answers.role !== "Seller") {
       rows.push(
+        ["Wholesale Fee", answers.wholesaleFee || "—"],
         ["Under Contract", answers.underContract || "—"],
         ["Seller Accepted Price", answers.sellerAcceptedPrice || "—"]
       );
@@ -1621,9 +1641,10 @@ function escapeHtml(str) {
 // If the goal is for Hard Money to show as more competitive than Cash, the fix is to tune Hard
 // Money's ROI down and/or its financing-cost assumptions down, not the Cash formula.
 //
-// Wholesale Fee is unchanged from the rest of the app: the greater of $20,000 or 3% of ARV, applied
-// to every variant.
-function computeMaoSuite(arv, rehab, assetType) {
+// Wholesale Fee defaults to the greater of $20,000 or 3% of ARV, applied to every variant -- pass a
+// 4th argument (wholesaleFeeOverride) to use a specific dollar amount instead, e.g. when an associate
+// has negotiated a smaller fee for a given deal.
+function computeMaoSuite(arv, rehab, assetType, wholesaleFeeOverride) {
   if (!arv) return null;
   const isCommercial = assetType !== "Residential Property (1-4 units)";
   const ratio = rehab / arv;
@@ -1644,7 +1665,8 @@ function computeMaoSuite(arv, rehab, assetType) {
   const purchaseClosingCosts = 0.01 * arv;
   const upfrontCashPct = isCommercial ? 0.03 : 0.02;
   const upfrontCash = upfrontCashPct * arv;
-  const wholesaleFee = Math.max(20000, 0.03 * arv);
+  const hasOverride = wholesaleFeeOverride !== undefined && wholesaleFeeOverride !== null && wholesaleFeeOverride !== "";
+  const wholesaleFee = hasOverride ? Number(wholesaleFeeOverride) : Math.max(20000, 0.03 * arv);
 
   const money = n => "$" + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
   const pct1 = n => (n * 100).toFixed(1) + "%";
@@ -1782,7 +1804,7 @@ async function submitLead(container) {
         dealType: answers.dealType,
         arv: answers.arv, asIsValue: answers.asIsValue, picturesLink: answers.picturesLink, rehabEstimate: answers.rehabEstimate,
         countyAssessedValue: answers.countyAssessedValue, bottomDollarPrice: answers.bottomDollarPrice,
-        cashDealNotes: answers.cashDealNotes,
+        cashDealNotes: answers.cashDealNotes, wholesaleFee: answers.wholesaleFee,
         maoCash: answers.maoCash, maoHardMoney10: answers.maoHardMoney10, maoHardMoney20: answers.maoHardMoney20,
         maoBreakdown: answers.maoBreakdown,
         underContract: answers.underContract, sellerAcceptedPrice: answers.sellerAcceptedPrice,
@@ -2021,6 +2043,7 @@ function buildLeadFields(lead) {
     );
     if (lead["Role"] !== "Seller") {
       fields.push(
+        ["Wholesale Fee", lead["Wholesale Fee"] || "—"],
         ["Under Contract", lead["Under Contract"] || "—"],
         ["Seller Accepted Price", lead["Seller Accepted Price"] || "—"]
       );
