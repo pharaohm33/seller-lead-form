@@ -1005,6 +1005,11 @@ const steps = [
               <input type="number" id="noi-input" placeholder="$">
               <div class="error-text" id="noi-error">Required.</div>
 
+              <label class="field-label" style="margin-top:16px;">Annual Property Taxes</label>
+              <input type="number" id="occ-taxes-input" placeholder="$">
+              <label class="field-label">Annual Insurance</label>
+              <input type="number" id="occ-insurance-input" placeholder="$">
+
               <label class="field-label" style="margin-top:16px;">Does the seller have 12 months of rent rolls for this property? <span class="req">*</span></label>
               <div class="choice-group" id="rent-rolls-group">
                 ${["Yes", "No"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
@@ -1022,9 +1027,40 @@ const steps = [
               <input type="text" id="lease-term-input" placeholder="e.g. Month-to-month">
               <div class="error-text" id="lease-term-error">Required.</div>
 
+              ${occUnits === 1 ? `
+                <label class="field-label" style="margin-top:16px;">When does this tenant's lease end? <span class="small-muted">(a specific date, or "month-to-month" if there's no fixed end)</span> <span class="req">*</span></label>
+                <input type="text" id="lease-end-input" placeholder="e.g. 6/30/2026, or month-to-month">
+                <div class="error-text" id="lease-end-error">Required.</div>
+
+                <label class="field-label">Would the tenant be willing to move out earlier if needed? <span class="req">*</span></label>
+                <div class="choice-group" id="tenant-move-early-group">
+                  ${["Yes", "No", "Not Sure"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
+                </div>
+                <div class="error-text" id="tenant-move-early-error">Please choose one.</div>
+              ` : `
+                <label class="field-label" style="margin-top:16px;">STR NOI Per Unit <span class="small-muted">(optional — for proforma awareness; with ${occUnits} units we wouldn't ask any tenant to leave at closing, so LTR NOI above is still the basis -- this is just what one unit could net under short-term rental once its lease naturally ends)</span></label>
+                <input type="number" id="str-noi-per-unit-input" placeholder="$">
+              `}
+
               <div id="str-comparison-sub"></div>
             `;
             sub.querySelector("#noi-input").value = answers.residentialNOI || "";
+            sub.querySelector("#occ-taxes-input").value = answers.annualPropertyTaxes || "";
+            sub.querySelector("#occ-insurance-input").value = answers.annualInsurance || "";
+            if (occUnits === 1) {
+              sub.querySelector("#lease-end-input").value = answers.leaseEndDate || "";
+              sub.querySelectorAll("#tenant-move-early-group .choice-btn").forEach(btn => {
+                if (btn.dataset.value === answers.tenantWouldMoveEarly) btn.classList.add("selected");
+                btn.onclick = () => {
+                  sub.querySelectorAll("#tenant-move-early-group .choice-btn").forEach(b => b.classList.remove("selected"));
+                  btn.classList.add("selected");
+                  answers.tenantWouldMoveEarly = btn.dataset.value;
+                  toggleError(sub, "#tenant-move-early-error", false);
+                };
+              });
+            } else {
+              sub.querySelector("#str-noi-per-unit-input").value = answers.strNoiPerUnit || "";
+            }
             sub.querySelector("#lease-term-input").value = answers.currentLeaseTerm || "";
 
             const plSub = sub.querySelector("#pl-sub");
@@ -1081,30 +1117,24 @@ const steps = [
                   : "Projected Annual STR Revenue (airdna.co)";
                 strSub.innerHTML = `
                   <h3 class="step-title" style="font-size:18px; margin-top:24px;">Short-Term Rental Comparison
-                    <span class="small-muted">(optional, but encouraged — speeds up admin's evaluation of the deal)</span></h3>
-                  <label class="field-label">Annual Property Taxes <span class="small-muted">(optional)</span></label>
-                  <input type="number" id="occ-taxes-input" placeholder="$">
-                  <label class="field-label">Annual Insurance <span class="small-muted">(optional)</span></label>
-                  <input type="number" id="occ-insurance-input" placeholder="$">
+                    <span class="small-muted">(optional, but encouraged — speeds up admin's evaluation of the deal;
+                    uses the Annual Property Taxes/Insurance entered above)</span></h3>
                   <p class="hint">${strHint}</p>
                   <a href="https://www.airdna.co/" target="_blank" rel="noopener" class="link-btn">Open airdna.co &rarr;</a>
                   <label class="field-label">${strLabel} <span class="small-muted">(optional)</span></label>
                   <input type="number" id="occ-str-revenue-input" placeholder="$">
                   <div class="banner info" id="computed-occ-str-noi-banner" hidden></div>
                 `;
-                strSub.querySelector("#occ-taxes-input").value = answers.annualPropertyTaxes || "";
-                strSub.querySelector("#occ-insurance-input").value = answers.annualInsurance || "";
                 strSub.querySelector("#occ-str-revenue-input").value = occIsMultiUniform && answers.strAnnualRevenue
                   ? (Number(answers.strAnnualRevenue) / occUnits)
                   : (answers.strAnnualRevenue || "");
                 const recomputeOccStr = () => {
-                  const taxes = Number(strSub.querySelector("#occ-taxes-input").value) || 0;
-                  const insurance = Number(strSub.querySelector("#occ-insurance-input").value) || 0;
+                  const taxes = Number(sub.querySelector("#occ-taxes-input").value) || 0;
+                  const insurance = Number(sub.querySelector("#occ-insurance-input").value) || 0;
                   const strRevenueEntered = Number(strSub.querySelector("#occ-str-revenue-input").value) || 0;
                   const banner = strSub.querySelector("#computed-occ-str-noi-banner");
-                  if (!taxes && !insurance && !strRevenueEntered) {
+                  if (!strRevenueEntered) {
                     banner.hidden = true;
-                    answers.annualPropertyTaxes = ""; answers.annualInsurance = "";
                     answers.strAnnualRevenue = ""; answers.strNOI = "";
                     return;
                   }
@@ -1120,18 +1150,15 @@ const steps = [
                       <span class="small-muted">(minus taxes, insurance, and a preset ${STR_EXPENSE_RATIO}% expense ratio)</span></div>
                     <div style="margin-top:6px;"><strong>Current Actual NOI (from rent rolls/P&amp;L):</strong> $${Number(answers.residentialNOI || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}</div>
                   `;
-                  answers.annualPropertyTaxes = taxes;
-                  answers.annualInsurance = insurance;
                   answers.strAnnualRevenue = strRevenue;
                   answers.strNOI = strNOI;
                 };
-                ["#occ-taxes-input", "#occ-insurance-input", "#occ-str-revenue-input"].forEach(sel => {
-                  strSub.querySelector(sel).oninput = recomputeOccStr;
-                });
+                strSub.querySelector("#occ-str-revenue-input").oninput = recomputeOccStr;
+                sub.querySelector("#occ-taxes-input").oninput = recomputeOccStr;
+                sub.querySelector("#occ-insurance-input").oninput = recomputeOccStr;
                 recomputeOccStr();
               } else {
                 strSub.innerHTML = "";
-                answers.annualPropertyTaxes = ""; answers.annualInsurance = "";
                 answers.strAnnualRevenue = ""; answers.strNOI = "";
               }
             };
@@ -1323,7 +1350,10 @@ const steps = [
         toggleError(root, "#occupied-error", !ok1);
         if (!ok1) return false;
         if (answers.residentialOccupied === "Occupied (has a landlord/tenant)") {
+          const occUnits = Number(answers.units) || 1;
           answers.residentialNOI = root.querySelector("#noi-input").value;
+          answers.annualPropertyTaxes = root.querySelector("#occ-taxes-input").value;
+          answers.annualInsurance = root.querySelector("#occ-insurance-input").value;
           answers.currentLeaseTerm = root.querySelector("#lease-term-input").value.trim();
           let okOcc = true;
           toggleError(root, "#noi-error", !answers.residentialNOI); if (!answers.residentialNOI) okOcc = false;
@@ -1333,6 +1363,13 @@ const steps = [
           }
           toggleError(root, "#deliverable-vacant-error", !answers.deliverableVacant); if (!answers.deliverableVacant) okOcc = false;
           toggleError(root, "#lease-term-error", !answers.currentLeaseTerm); if (!answers.currentLeaseTerm) okOcc = false;
+          if (occUnits === 1) {
+            answers.leaseEndDate = root.querySelector("#lease-end-input").value.trim();
+            toggleError(root, "#lease-end-error", !answers.leaseEndDate); if (!answers.leaseEndDate) okOcc = false;
+            toggleError(root, "#tenant-move-early-error", !answers.tenantWouldMoveEarly); if (!answers.tenantWouldMoveEarly) okOcc = false;
+          } else {
+            answers.strNoiPerUnit = root.querySelector("#str-noi-per-unit-input").value;
+          }
           return okOcc;
         }
         // Vacant (no tenant) -- always computes both LTR and STR so admin can compare
@@ -1542,16 +1579,24 @@ function buildAnswerRows() {
       );
     } else if (answers.residentialOccupied === "Occupied (has a landlord/tenant)") {
       rows.push(
-        ["NOI", answers.residentialNOI || "—"],
+        ["Long-Term Rental NOI", answers.residentialNOI || "—"],
+        ["Annual Property Taxes", answers.annualPropertyTaxes || "—"],
+        ["Annual Insurance", answers.annualInsurance || "—"],
         ["Has 12mo Rent Rolls", answers.hasRentRolls || "—"],
         ["Has 12mo P&L", answers.hasRentRolls === "Yes" ? (answers.hasProfitLoss || "—") : "N/A"],
         ["Deliverable Vacant", answers.deliverableVacant || "—"],
         ["Current Lease Term", answers.currentLeaseTerm || "—"]
       );
+      if (Number(answers.units) === 1) {
+        rows.push(
+          ["Lease End Date", answers.leaseEndDate || "—"],
+          ["Tenant Would Move Early", answers.tenantWouldMoveEarly || "—"]
+        );
+      } else {
+        rows.push(["STR NOI Per Unit", answers.strNoiPerUnit || "—"]);
+      }
       if (answers.deliverableVacant === "Yes" && answers.strAnnualRevenue) {
         rows.push(
-          ["Annual Property Taxes", answers.annualPropertyTaxes || "—"],
-          ["Annual Insurance", answers.annualInsurance || "—"],
           ["STR Annual Revenue (airdna.co)", answers.strAnnualRevenue || "—"],
           ["Short-Term Rental NOI", answers.strNOI || "—"]
         );
@@ -1821,6 +1866,8 @@ async function submitLead(container) {
         expenseRatio: answers.expenseRatio,
         hasRentRolls: answers.hasRentRolls, hasProfitLoss: answers.hasProfitLoss,
         deliverableVacant: answers.deliverableVacant, currentLeaseTerm: answers.currentLeaseTerm,
+        leaseEndDate: answers.leaseEndDate, tenantWouldMoveEarly: answers.tenantWouldMoveEarly,
+        strNoiPerUnit: answers.strNoiPerUnit,
         noi: answers.residentialNOI || answers.commercialNOI,
         businessRevenue: answers.businessRevenue, businessEarningsType: answers.businessEarningsType,
         businessEarnings: answers.businessEarnings,
@@ -2069,16 +2116,24 @@ function buildLeadFields(lead) {
       );
     } else if (lead["Occupied Status"] === "Occupied (has a landlord/tenant)") {
       fields.push(
-        ["NOI", lead["NOI"] || "—"],
+        ["Long-Term Rental NOI", lead["NOI"] || "—"],
+        ["Annual Property Taxes", lead["Annual Property Taxes"] || "—"],
+        ["Annual Insurance", lead["Annual Insurance"] || "—"],
         ["Has 12mo Rent Rolls", lead["Has Rent Rolls"] || "—"],
         ["Has 12mo P&L", lead["Has Rent Rolls"] === "Yes" ? (lead["Has P&L"] || "—") : "N/A"],
         ["Deliverable Vacant", lead["Deliverable Vacant"] || "—"],
         ["Current Lease Term", lead["Current Lease Term"] || "—"]
       );
+      if (Number(lead["Units"]) === 1) {
+        fields.push(
+          ["Lease End Date", lead["Lease End Date"] || "—"],
+          ["Tenant Would Move Early", lead["Tenant Would Move Early"] || "—"]
+        );
+      } else {
+        fields.push(["STR NOI Per Unit", lead["STR NOI Per Unit"] || "—"]);
+      }
       if (lead["Deliverable Vacant"] === "Yes" && lead["STR Annual Revenue"]) {
         fields.push(
-          ["Annual Property Taxes", lead["Annual Property Taxes"] || "—"],
-          ["Annual Insurance", lead["Annual Insurance"] || "—"],
           ["STR Annual Revenue (airdna.co)", lead["STR Annual Revenue"] || "—"],
           ["Short-Term Rental NOI", lead["STR NOI"] || "—"]
         );
