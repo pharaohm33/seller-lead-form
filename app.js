@@ -692,17 +692,23 @@ const steps = [
             we'd rather have the whole thing than a partial one.</li>
           </ol>
           ${isLand ? `
-            <p class="hint"><strong>Land comps travel a lot farther than house comps — that's normal.</strong>
-            In suburban areas, comps can be up to <strong>1–5 miles</strong> away. In rural or remote areas
-            with few land sales, comps can go out to <strong>10–50+ miles</strong>. Let Google AI judge which
-            situation applies based on the property's location, and have it state clearly which distance range
-            it used and why. Comps should also be no more than <strong>1 year old</strong>, ideally
-            <strong>under 6 months old</strong> — but for rural/remote land, using the full year is expected
-            if that's what it takes to find real sales.</p>
-            <p class="hint">Only fall back to your own hand-picked comps if AI Mode can't find anything usable
-            — same distance and recency rules apply, and try to match similar acreage and land type/use. Note
-            what you found in Notes below. Lean toward the lowest comps or an average — never cherry-pick the
-            highest value in the area, since that usually doesn't sell.</p>
+            <p class="hint"><strong>For land, what a comp has in common matters more than how close it is.</strong>
+            A comp must match on <strong>zoning</strong> (never compare commercial-zoned to residential-zoned
+            land), <strong>topography/usability</strong> (a flat, buildable lot isn't comparable to a steep or
+            landlocked one), and <strong>access/utilities</strong> (paved road + power vs. off-grid/no access) —
+            these matter more than distance. Only once a comp matches on those should distance be weighed: expect
+            roughly <strong>1–5 miles</strong> in suburban areas and <strong>10–50+ miles</strong> in rural or
+            remote areas with few land sales. A comp farther away that matches on zoning/topography/access beats
+            a closer one that doesn't.</p>
+            <p class="hint"><strong>Recency:</strong> comps sold within the last <strong>6 months</strong> are
+            ideal. Up to <strong>12 months</strong> is fine in a normal market, and up to
+            <strong>24 months</strong> is standard in slow or rural markets with few sales. Any comp older than
+            6 months should have its price <strong>adjusted for how the market has moved</strong> since that
+            sale, not used as a raw historical number — Google AI will handle that math.</p>
+            <p class="hint">Only fall back to your own hand-picked comps if AI Mode can't find anything usable —
+            same zoning/topography/access rules apply, and try to match similar acreage and land type. Note what
+            you found in Notes below. Lean toward the lowest comps or an average — never cherry-pick the highest
+            value in the area, since that usually doesn't sell.</p>
           ` : `
             <p class="hint"><strong>Comps must be within a 1-mile radius of the property — no exceptions.</strong>
             Comps farther out drastically reduce the chance this deal actually closes, so be very cautious about
@@ -932,42 +938,68 @@ const steps = [
           : (answers.beds && answers.baths
               ? `${answers.beds} bedroom(s), ${answers.baths} bathroom(s), ${answers.sqft ? answers.sqft + " square feet" : "[SQUARE FEET]"}`
               : (answers.sqft ? `${answers.sqft} square feet` : "[BEDROOMS/BATHROOMS/SQUARE FEET]"));
-        root.querySelector("#comps-prompt-text").value =
-`Act as a professional real estate data analyst. Explain your math simply and avoid real estate jargon — I have no real estate experience.
+        // Land runs on its own template rather than sharing residential's via ternaries -- the
+        // underlying methodology genuinely differs (utility/zoning-match-first, distance-second,
+        // time-adjusted comps for land vs. a flat distance cutoff for homes), so weaving them
+        // together got harder to read than just writing two prompts.
+        root.querySelector("#comps-prompt-text").value = isLand
+? `Act as a professional real estate data analyst specializing in land valuation. Explain your math simply and avoid real estate jargon — I have no real estate experience.
 
-Find recent comparable sales (comps) and an estimated ${isLand ? "market value" : "After Repair Value (ARV)"} for this property:
+Find recent comparable land sales (comps) and an estimated As-Is Value (current market value — this is NOT an after-repair or projected value, land doesn't get "fixed up") for this property:
 - Address: ${addressLine || "[SUBJECT ADDRESS]"}
 - Details: ${detailsPart}
 
-Search live for 3 to 5 properties that meet ALL of these rules:
-1. Sold within the last 12 months — strongly prefer comps sold within the last 6 months if there are enough to choose from. Comps older than 12 months don't count, no exceptions${isLand ? ", though for rural/remote land it's fine to use the full 12 months if that's what it takes to find real sales" : ""}.
-2. ${isLand
-    ? `Distance depends on how populated the area is: in suburban areas, stay within a MAXIMUM of 1 to 5 miles STRAIGHT-LINE distance; in rural or remote areas with few land sales, you may go out to 10 to 50+ miles STRAIGHT-LINE distance if needed. Judge which situation applies to this property's location, state which one you used and why, and always prefer the closest comps available within that range.`
-    : `Within a MAXIMUM of 1-mile STRAIGHT-LINE distance from the subject address (as the crow flies, not driving distance) — this is a hard limit, not a target, closer is always better.`
-  } State your estimated straight-line distance for each one explicitly, and flag it clearly if you had to go toward the edge of the allowed range because nothing closer was available.
-3. ${isLand
-    ? `Similar land type and use (e.g. vacant residential lot, agricultural, recreational, timber) and similarly usable (comparable access, topography, and zoning) to the subject property.`
-    : `In excellent, fully remodeled, or brand-new condition — skip anything described as a fixer-upper, needing TLC, sold as-is, or a renovation/investment project.`
-  }
-4. ${isLand
-    ? `Similar in acreage (or square footage, for small in-town lots) to the subject property — avoid comps that are dramatically larger or smaller.`
-    : `Ideally a small starter home or bungalow, similar in size and character to the subject property.`
-  }
+For land, what a comp has in common matters more than how close it is. Search live for 3 to 5 properties that meet ALL of these rules, in this order of importance:
+1. Identical or equivalent zoning to the subject property — never treat a commercially-zoned parcel as comparable to a residentially-zoned one, even if they're next to each other.
+2. Comparable topography and usability — a flat, buildable lot is not comparable to a steep, unusable, or landlocked one without a clear value adjustment. Note each comp's topography and any notable features (wooded, cleared, waterfront, floodplain, etc.).
+3. Comparable access and utilities — road access (paved vs. dirt vs. none) and utility hookups (electric, water, septic/sewer) should be similar, or clearly flagged as different along with how that affects value.
+4. Similar in acreage (or square footage, for small in-town lots) to the subject property — avoid comps that are dramatically larger or smaller.
+
+Only after a comp passes ALL four rules above should distance be weighed — prefer the closest qualifying comps, but a comp farther away that matches on zoning/topography/access beats a closer one that doesn't. As a rough guide, expect comps within about 1 to 5 miles in suburban areas, and 10 to 50+ miles in rural or remote areas with few land sales — state each comp's straight-line distance, and note if you had to go unusually far to find a qualifying match.
+
+Recency: comps sold within the last 6 months are ideal. Up to 12 months is acceptable in a normal market. In slow or rural markets with low transaction volume, going back up to 24 months is standard practice. For any comp older than 6 months, apply a reasonable adjustment to its sale price to reflect market movement (appreciation or depreciation) between the sale date and today, show that adjustment explicitly, and use the adjusted price (not the raw historical price) in the calculation below.
 
 If this is a non-disclosure state and you can't find actual sold prices, use active for-sale listings instead that meet the other rules, and clearly label them as asking prices, not confirmed sale prices.
 
 For each comp, list:
 - Full address
-- Exact sale price (or asking price, if using the non-disclosure fallback) and the date
-- Estimated straight-line distance from the subject address, in miles
-- ${isLand ? "Total acreage (and square footage, if it's a small lot)" : "Bedrooms, bathrooms, and total square feet"}
-- ${isLand ? "Exact Price per Acre (price ÷ acreage) — or Price per Square Foot for small lots" : "Exact Price per Square Foot (price ÷ square feet)"}
+- Sale price (or asking price, if using the non-disclosure fallback) and the date
+- Zoning, topography, and access/utilities
+- Straight-line distance from the subject address, in miles
+- Total acreage (and square footage, if it's a small lot)
+- Price per Acre (or Price per Square Foot for small lots) — show both the raw price and, for comps older than 6 months, the time-adjusted price
 
 After listing the comps, calculate and show your work:
-1. ${isLand ? "Acreage" : "Square Footage"} Difference %: (Average Comp ${isLand ? "Acreage" : "SqFt"} - Subject ${isLand ? "Acreage" : "SqFt"}) / Subject ${isLand ? "Acreage" : "SqFt"} x 100
-2. Estimated ${isLand ? "Value" : "ARV"}: Average Price per ${isLand ? "Acre" : "Square Foot"} of the comps x Subject ${isLand ? "Acreage" : "SqFt"} — give a final range, not just one number.
+1. Acreage Difference %: (Average Comp Acreage - Subject Acreage) / Subject Acreage x 100
+2. Estimated As-Is Value: Average (time-adjusted) Price per Acre of the comps x Subject Acreage — give a final range, not just one number.
 
-If the ${isLand ? "value" : "ARV"} comes out lower than what ${isLand ? "you might initially expect" : "a bank's automated home value estimate would show"}, say so plainly — that's an important finding, not something to smooth over.`;
+If the value comes out lower than what you might initially expect, say so plainly — that's an important finding, not something to smooth over.`
+: `Act as a professional real estate data analyst. Explain your math simply and avoid real estate jargon — I have no real estate experience.
+
+Find recent comparable sales (comps) and an estimated After Repair Value (ARV) for this property:
+- Address: ${addressLine || "[SUBJECT ADDRESS]"}
+- Details: ${detailsPart}
+
+Search live for 3 to 5 properties that meet ALL of these rules:
+1. Sold within the last 12 months — strongly prefer comps sold within the last 6 months if there are enough to choose from. Comps older than 12 months don't count, no exceptions.
+2. Within a MAXIMUM of 1-mile STRAIGHT-LINE distance from the subject address (as the crow flies, not driving distance) — this is a hard limit, not a target, closer is always better. State your estimated straight-line distance for each one explicitly, and flag it clearly if you had to go close to the 1-mile edge because nothing closer was available.
+3. In excellent, fully remodeled, or brand-new condition — skip anything described as a fixer-upper, needing TLC, sold as-is, or a renovation/investment project.
+4. Ideally a small starter home or bungalow, similar in size and character to the subject property.
+
+If this is a non-disclosure state and you can't find actual sold prices, use active for-sale listings instead that meet the other three rules, and clearly label them as asking prices, not confirmed sale prices.
+
+For each comp, list:
+- Full address
+- Exact sale price (or asking price, if using the non-disclosure fallback) and the date
+- Estimated straight-line distance from the subject address, in miles
+- Bedrooms, bathrooms, and total square feet
+- Exact Price per Square Foot (price ÷ square feet)
+
+After listing the comps, calculate and show your work:
+1. Square Footage Difference %: (Average Comp SqFt - Subject SqFt) / Subject SqFt x 100
+2. Estimated ARV: Average Price per Square Foot of the comps x Subject SqFt — give a final range, not just one number.
+
+If the ARV comes out lower than what a bank's automated home value estimate would show, say so plainly — that's an important finding, not something to smooth over.`;
         root.querySelector("#comps-prompt-copy-btn").onclick = () => {
           const text = root.querySelector("#comps-prompt-text").value;
           if (navigator.clipboard && navigator.clipboard.writeText) {
