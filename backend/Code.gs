@@ -24,6 +24,7 @@ const LEAD_COLUMNS = [
   'Street Address', 'City', 'State', 'Zip', 'Units',
   'Asset Type', 'Asset Subtype', 'Beds', 'Baths', 'Sq Ft',
   'Deal Type', 'ARV', 'As-Is Value', 'Pictures Link', 'Rehab Estimate', 'Rehab Estimate Low', 'Rehab Estimate High', 'County Assessed Value',
+  'CMA Screenshot URLs',
   'Bottom Dollar Price', 'Cash Deal Notes', 'Wholesale Fee',
   'MAO Cash', 'MAO Hard Money (10% Down)', 'MAO Hard Money (20% Down)', 'MAO Breakdown',
   'Under Contract', 'Seller Accepted Price',
@@ -126,6 +127,8 @@ function doPost(e) {
         return jsonOut(getLeadsByEmail(body));
       case 'checkAddressDuplicate':
         return jsonOut(checkAddressDuplicate(body));
+      case 'uploadCmaScreenshot':
+        return jsonOut(uploadCmaScreenshot(body));
       case 'addPublicNote':
         return jsonOut(addPublicNote(body));
       case 'editPublicNote':
@@ -279,6 +282,7 @@ function submitLead(body) {
     'Rehab Estimate': d.rehabEstimate || '',
     'Rehab Estimate Low': d.rehabEstimateLow || '', 'Rehab Estimate High': d.rehabEstimateHigh || '',
     'County Assessed Value': d.countyAssessedValue || '',
+    'CMA Screenshot URLs': d.cmaScreenshotUrls || '',
     'Bottom Dollar Price': d.bottomDollarPrice || '',
     'Cash Deal Notes': d.cashDealNotes || '', 'Wholesale Fee': d.wholesaleFee || '',
     'MAO Cash': d.maoCash || '', 'MAO Hard Money (10% Down)': d.maoHardMoney10 || '',
@@ -521,6 +525,36 @@ function extractPortfolioAddresses(rawStreet) {
     const isPureNumber = /^\d+$/.test(f);
     return (isPureNumber && sharedStreetName) ? (f + ' ' + sharedStreetName) : f;
   });
+}
+
+// Public, unauthenticated (called mid-wizard, before a lead ID exists) -- an associate can upload
+// several CMA screenshots while filling out Cash Deal Details. Uploads straight to Drive and hands
+// back only a shareable link; the raw image bytes never touch the Sheet or the Save My Progress URL,
+// which both need to stay small. Basic content-type/size guards since this endpoint has no auth.
+function uploadCmaScreenshot(body) {
+  if (!body.fileData || !body.fileName) return { ok: false, error: 'Missing file data.' };
+  const contentType = body.contentType || 'image/png';
+  if (contentType.indexOf('image/') !== 0) return { ok: false, error: 'Only image files are allowed.' };
+  if (String(body.fileData).length > 14000000) return { ok: false, error: 'File is too large (10MB max).' };
+  try {
+    const folder = getOrCreateCmaFolder();
+    const bytes = Utilities.base64Decode(body.fileData);
+    const safeAddress = String(body.address || '').replace(/[^a-zA-Z0-9 ,-]/g, '').trim();
+    const fileName = (safeAddress ? safeAddress + ' - ' : '') + new Date().toISOString() + ' - ' + body.fileName;
+    const blob = Utilities.newBlob(bytes, contentType, fileName);
+    const file = folder.createFile(blob);
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    return { ok: true, url: file.getUrl() };
+  } catch (e) {
+    return { ok: false, error: 'Upload failed: ' + e.message };
+  }
+}
+
+function getOrCreateCmaFolder() {
+  const folderName = 'SendMySeller CMA Screenshots';
+  const existing = DriveApp.getFoldersByName(folderName);
+  if (existing.hasNext()) return existing.next();
+  return DriveApp.createFolder(folderName);
 }
 
 function checkAddressDuplicate(body) {

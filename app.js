@@ -635,18 +635,33 @@ const steps = [
         <h2 class="step-title">Cash Deal Details</h2>
 
         ${isResidential ? `
-          <p class="hint">Use <a href="https://www.chase.com/personal/mortgage/calculators-resources/home-value-estimator" target="_blank" rel="noopener">Chase's Home Value Estimator</a>
-          for this address as your <strong>primary way to find the ARV</strong>. If a value comes up: if
-          <strong>no repairs are needed</strong>, that's your As-Is Value (enter it as the ARV below too,
-          since they're the same with nothing to repair). If <strong>repairs are needed</strong>, use that
-          value as the <strong>ARV</strong> instead — As-Is Value will be computed below by subtracting your
+          <p class="hint"><strong>Step 1 — get a baseline from Chase.</strong> Use
+          <a href="https://www.chase.com/personal/mortgage/calculators-resources/home-value-estimator" target="_blank" rel="noopener">Chase's Home Value Estimator</a>
+          for this address. If a value comes up: if <strong>no repairs are needed</strong>, that's your As-Is
+          Value too (enter the same number as ARV below). If <strong>repairs are needed</strong>, use that
+          Chase number as your <strong>ARV</strong> — As-Is Value will be computed below by subtracting your
           repair estimate.</p>
-          <p class="hint">If Chase doesn't have a value for this address, it's fine to skip the ARV field —
-          <strong>unless you pull your own comps</strong>. If you do, only use comps that are the closest
-          match to the property (same beds, same baths, similar square footage), and save what you found in
-          the Notes below so admin can see how you arrived at the number. Lean toward the lowest comps you
-          find, or an average across them — don't cherry-pick the highest ARV in the area, since an overly
-          optimistic number usually doesn't sell.</p>
+          <p class="hint"><strong>Step 2 — double-check it with Google AI.</strong> Always verify the Chase
+          number this way (or find one from scratch if Chase didn't have data):</p>
+          <ol class="hint" style="margin:0 0 10px 18px; padding:0;">
+            <li>Go to <strong>google.com</strong>, search anything (typing "ai" works fine), and click the
+            <strong>"AI Mode"</strong> tab near the top of the results.</li>
+            <li>Tap <strong>"Get Comps Research Prompt for Google AI"</strong> below, hit <strong>Copy</strong>,
+            and paste it into AI Mode.</li>
+            <li>Google AI will pull real recent comps and calculate an ARV range for you — this is your CMA
+            (Comparative Market Analysis).</li>
+            <li>Screenshot the <strong>full</strong> response (the comps list AND the calculations at the
+            bottom) and upload it below. If it doesn't fit in one screenshot, upload as many as you need —
+            we'd rather have the whole thing than a partial one.</li>
+          </ol>
+          <p class="hint"><strong>Comps must be within a 1-mile radius of the property — no exceptions.</strong>
+          Comps farther out drastically reduce the chance this deal actually closes, so be very cautious about
+          using anything beyond 1 mile. Comps should also be no more than <strong>1 year old</strong>, and
+          ideally <strong>under 6 months old</strong> — the fresher the better.</p>
+          <p class="hint">Only fall back to your own hand-picked comps if AI Mode can't find anything usable —
+          same rules apply (within 1 mile, ideally under 6 months old, same beds, same baths, similar square
+          footage), and note what you found in Notes below. Lean toward the lowest comps or an average — never
+          cherry-pick the highest ARV in the area, since that usually doesn't sell.</p>
 
           <button type="button" class="link-btn" id="comps-prompt-toggle-btn">Get Comps Research Prompt for Google AI &#9662;</button>
           <div id="comps-prompt-panel" hidden style="margin-top:10px;">
@@ -655,6 +670,11 @@ const steps = [
             <textarea id="comps-prompt-text" readonly rows="16" style="width:100%; font-size:12px; font-family:monospace;"></textarea>
             <button type="button" class="btn secondary" id="comps-prompt-copy-btn" style="margin-top:8px;">Copy Prompt</button>
           </div>
+
+          <label class="field-label" style="margin-top:16px;">CMA Screenshots
+            <span class="small-muted">(optional, but strongly encouraged — upload one or more)</span></label>
+          <input type="file" id="cma-screenshots-input" accept="image/*" multiple>
+          <div id="cma-screenshots-list" style="margin-top:8px;"></div>
         ` : ""}
 
         <label class="field-label">ARV <span class="small-muted">(After Repair Value)</span>${isResidential ? "" : ` <span class="req">*</span>`}</label>
@@ -854,8 +874,8 @@ Find recent comparable sales (comps) and an estimated After Repair Value (ARV) f
 - Details: ${detailsPart}
 
 Search live for 3 to 5 properties that meet ALL of these rules:
-1. Sold within the last 12 months.
-2. Within a 0.5-mile to 1-mile STRAIGHT-LINE distance from the subject address (as the crow flies, not driving distance). State your estimated straight-line distance for each one explicitly.
+1. Sold within the last 12 months — strongly prefer comps sold within the last 6 months if there are enough to choose from. Comps older than 12 months don't count, no exceptions.
+2. Within a MAXIMUM of 1-mile STRAIGHT-LINE distance from the subject address (as the crow flies, not driving distance) — this is a hard limit, not a target, closer is always better. State your estimated straight-line distance for each one explicitly, and flag it clearly if you had to go close to the 1-mile edge because nothing closer was available.
 3. In excellent, fully remodeled, or brand-new condition — skip anything described as a fixer-upper, needing TLC, sold as-is, or a renovation/investment project.
 4. Ideally a small starter home or bungalow, similar in size and character to the subject property.
 
@@ -884,6 +904,60 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
           } else {
             prompt("Copy this prompt:", text);
           }
+        };
+
+        // Screenshots upload straight to Drive as soon as they're picked (see uploadCmaScreenshot
+        // in the backend) -- only the resulting links get stored in `answers`, never the raw image
+        // data, so Save My Progress links and the final submission payload both stay small.
+        const screenshotsList = root.querySelector("#cma-screenshots-list");
+        const renderScreenshotsList = () => {
+          const urls = answers.cmaScreenshotUrls || [];
+          screenshotsList.innerHTML = urls.map((url, i) => `
+            <div class="small-muted" style="margin-top:4px;">
+              <a href="${url}" target="_blank" rel="noopener">Screenshot ${i + 1}</a>
+              <button type="button" class="link-btn" data-remove-idx="${i}" style="margin-left:8px;">Remove</button>
+            </div>
+          `).join("");
+          screenshotsList.querySelectorAll("[data-remove-idx]").forEach(btn => {
+            btn.onclick = () => {
+              answers.cmaScreenshotUrls.splice(Number(btn.dataset.removeIdx), 1);
+              renderScreenshotsList();
+            };
+          });
+        };
+        renderScreenshotsList();
+
+        const readFileAsBase64 = (file) => new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+
+        root.querySelector("#cma-screenshots-input").onchange = async (e) => {
+          const files = Array.from(e.target.files);
+          for (const file of files) {
+            const statusEl = document.createElement("div");
+            statusEl.className = "small-muted";
+            statusEl.textContent = `Uploading ${file.name}...`;
+            screenshotsList.appendChild(statusEl);
+            try {
+              const fileData = await readFileAsBase64(file);
+              const res = await api("uploadCmaScreenshot", {
+                fileName: file.name, fileData, contentType: file.type || "image/png", address: addressLine
+              });
+              if (res.ok) {
+                answers.cmaScreenshotUrls = answers.cmaScreenshotUrls || [];
+                answers.cmaScreenshotUrls.push(res.url);
+                renderScreenshotsList();
+              } else {
+                statusEl.textContent = `Failed to upload ${file.name}: ${res.error || "unknown error"}`;
+              }
+            } catch (err) {
+              statusEl.textContent = `Failed to upload ${file.name}: ${err.message}`;
+            }
+          }
+          e.target.value = "";
         };
       }
 
@@ -1673,6 +1747,7 @@ function buildAnswerRows() {
       ["Rehab Estimate — High", answers.rehabEstimateHigh || "—"],
       ["Rehab Estimate (average)", answers.rehabEstimate || "—"],
       ["County Assessed Value", answers.countyAssessedValue || "—"],
+      ["CMA Screenshots", (answers.cmaScreenshotUrls || []).join("\n") || "—"],
       ["Bottom Dollar Price", answers.bottomDollarPrice || "—"],
       ["Notes (Why Sell / Good Lead)", answers.cashDealNotes || "—"]
     );
@@ -1974,7 +2049,9 @@ async function submitLead(container) {
         dealType: answers.dealType,
         arv: answers.arv, asIsValue: answers.asIsValue, picturesLink: answers.picturesLink, rehabEstimate: answers.rehabEstimate,
         rehabEstimateLow: answers.rehabEstimateLow, rehabEstimateHigh: answers.rehabEstimateHigh,
-        countyAssessedValue: answers.countyAssessedValue, bottomDollarPrice: answers.bottomDollarPrice,
+        countyAssessedValue: answers.countyAssessedValue,
+        cmaScreenshotUrls: (answers.cmaScreenshotUrls || []).join("\n"),
+        bottomDollarPrice: answers.bottomDollarPrice,
         cashDealNotes: answers.cashDealNotes, wholesaleFee: answers.wholesaleFee,
         maoCash: answers.maoCash, maoHardMoney10: answers.maoHardMoney10, maoHardMoney20: answers.maoHardMoney20,
         maoBreakdown: answers.maoBreakdown,
@@ -2213,6 +2290,7 @@ function buildLeadFields(lead) {
       ["Rehab Estimate — High", lead["Rehab Estimate High"] || "—"],
       ["Rehab Estimate (average)", lead["Rehab Estimate"] || "—"],
       ["County Assessed Value", lead["County Assessed Value"] || "—"],
+      ["CMA Screenshots", lead["CMA Screenshot URLs"] || "—"],
       ["Bottom Dollar Price", lead["Bottom Dollar Price"] || "—"],
       ["Notes (Why Sell / Good Lead)", lead["Cash Deal Notes"] || "—"]
     );
@@ -2771,6 +2849,13 @@ function openDetail(lead) {
         <br>Hard Money Buyer MAO (20% Down): $${Number(lead["MAO Hard Money (20% Down)"]).toLocaleString()}
         <hr style="border: none; border-top: 1px solid currentColor; opacity: 0.2; margin: 10px 0;">
         ${escapeHtml(lead["MAO Breakdown"] || "")}
+      </div>
+    ` : ""}
+    ${lead["CMA Screenshot URLs"] ? `
+      <div class="banner info" style="margin-top:16px; text-align:left;">
+        <strong>CMA Screenshots</strong>
+        <br>${lead["CMA Screenshot URLs"].split("\n").filter(Boolean).map((url, i) =>
+          `<a href="${escapeHtml(url)}" target="_blank" rel="noopener">Screenshot ${i + 1}</a>`).join(" &middot; ")}
       </div>
     ` : ""}
     <div class="notes-list">
