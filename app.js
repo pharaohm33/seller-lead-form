@@ -347,21 +347,31 @@ const steps = [
     render(root) {
       root.innerHTML = `
         <h2 class="step-title">Asset Type</h2>
-        <div class="banner warn">
+        <div class="banner warn" id="income-req-banner">
           The property or business must currently be generating monthly income — we're not able to help
           with non-income-producing assets.
         </div>
         <label class="field-label">Type <span class="req">*</span></label>
         <div class="choice-group" id="top-type-group">
-          ${["Commercial Property","Business","Residential Property (1-4 units)"]
+          ${["Commercial Property","Business","Residential Property (1-4 units)","Land"]
             .map(t => `<button type="button" class="choice-btn" data-value="${t}">${t}</button>`).join("")}
         </div>
         <div class="error-text" id="top-type-error">Please select an asset type.</div>
         <div id="sub-fields"></div>
       `;
       const subFields = root.querySelector("#sub-fields");
+      const incomeBanner = root.querySelector("#income-req-banner");
 
       function renderSub() {
+        if (answers.assetType === "Land") {
+          incomeBanner.className = "banner info";
+          incomeBanner.textContent = "Land is the one exception to our income rule — vacant or "
+            + "non-income-producing land is fine here. We evaluate it as a straight value/comps play, not on cash flow.";
+        } else {
+          incomeBanner.className = "banner warn";
+          incomeBanner.textContent = "The property or business must currently be generating monthly income "
+            + "— we're not able to help with non-income-producing assets.";
+        }
         if (answers.assetType === "Commercial Property") {
           subFields.innerHTML = `
             <label class="field-label">Commercial subtype <span class="req">*</span></label>
@@ -456,6 +466,16 @@ const steps = [
               };
             });
           }
+        } else if (answers.assetType === "Land") {
+          subFields.innerHTML = `
+            <label class="field-label">Acreage <span class="req">*</span></label>
+            <input type="number" id="acreage-input" min="0" step="0.01" placeholder="e.g. 5.25">
+            <div class="error-text" id="acreage-error">Required.</div>
+            <label class="field-label">Square footage <span class="small-muted">(optional — useful for small in-town lots)</span></label>
+            <input type="number" id="sqft-input" min="0" step="1">
+          `;
+          subFields.querySelector("#acreage-input").value = answers.acreage || "";
+          subFields.querySelector("#sqft-input").value = answers.sqft || "";
         } else {
           subFields.innerHTML = "";
         }
@@ -468,7 +488,7 @@ const steps = [
           root.querySelectorAll("#top-type-group .choice-btn").forEach(b => b.classList.remove("selected"));
           btn.classList.add("selected");
           answers.assetType = btn.dataset.value;
-          answers.assetSubtype = ""; answers.beds = ""; answers.baths = ""; answers.sqft = ""; answers.unitsUniform = "";
+          answers.assetSubtype = ""; answers.beds = ""; answers.baths = ""; answers.sqft = ""; answers.unitsUniform = ""; answers.acreage = "";
           renderSub();
         };
       });
@@ -476,7 +496,11 @@ const steps = [
     validate(root) {
       let ok = true;
       toggleError(root, "#top-type-error", !answers.assetType); if (!answers.assetType) ok = false;
-      if (answers.assetType === "Commercial Property") {
+      if (answers.assetType === "Land") {
+        answers.acreage = root.querySelector("#acreage-input").value;
+        answers.sqft = root.querySelector("#sqft-input").value;
+        toggleError(root, "#acreage-error", !answers.acreage); if (!answers.acreage) ok = false;
+      } else if (answers.assetType === "Commercial Property") {
         answers.assetSubtype = root.querySelector("#subtype-input").value;
         toggleError(root, "#subtype-error", !answers.assetSubtype); if (!answers.assetSubtype) ok = false;
       } else if (answers.assetType === "Business") {
@@ -614,6 +638,8 @@ const steps = [
       }
 
       const isResidential = answers.assetType === "Residential Property (1-4 units)";
+      const isLand = answers.assetType === "Land";
+      const hasCompsWorkflow = isResidential || isLand;
       const isOnMarket = answers.marketStatus === "On-Market";
       const addressLine = `${answers.street || ""}, ${answers.city || ""}, ${answers.state || ""} ${answers.zip || ""}`.trim();
       const arvPrompt = `how much is this worth at full market value (ARV): ${addressLine}`;
@@ -643,30 +669,49 @@ const steps = [
           repair estimate.</p>
           <p class="hint"><strong>Step 2 — double-check it with Google AI.</strong> Always verify the Chase
           number this way (or find one from scratch if Chase didn't have data):</p>
+        ` : isLand ? `
+          <p class="hint"><strong>Research this with Google AI.</strong> There's no bank estimator for land
+          like there is for homes, so Google AI Mode is your primary source for value and comps here:</p>
+        ` : ""}
+        ${hasCompsWorkflow ? `
           <ol class="hint" style="margin:0 0 10px 18px; padding:0;">
             <li>Go to <strong>google.com</strong>, search anything (typing "ai" works fine), and click the
             <strong>"AI Mode"</strong> tab near the top of the results.</li>
             <li>Tap <strong>"Get Comps Research Prompt for Google AI"</strong> below, hit <strong>Copy</strong>,
             and paste it into AI Mode.</li>
-            <li>Google AI will pull real recent comps and calculate an ARV range for you — this is your CMA
-            (Comparative Market Analysis).</li>
+            <li>Google AI will pull real recent comps and calculate ${isLand ? "a value range" : "an ARV range"}
+            for you — this is your CMA (Comparative Market Analysis).</li>
             <li>Screenshot the <strong>full</strong> response (the comps list AND the calculations at the
             bottom) and upload it below. If it doesn't fit in one screenshot, upload as many as you need —
             we'd rather have the whole thing than a partial one.</li>
           </ol>
-          <p class="hint"><strong>Comps must be within a 1-mile radius of the property — no exceptions.</strong>
-          Comps farther out drastically reduce the chance this deal actually closes, so be very cautious about
-          using anything beyond 1 mile. Comps should also be no more than <strong>1 year old</strong>, and
-          ideally <strong>under 6 months old</strong> — the fresher the better.</p>
-          <p class="hint">Only fall back to your own hand-picked comps if AI Mode can't find anything usable —
-          same rules apply (within 1 mile, ideally under 6 months old, same beds, same baths, similar square
-          footage), and note what you found in Notes below. Lean toward the lowest comps or an average — never
-          cherry-pick the highest ARV in the area, since that usually doesn't sell.</p>
+          ${isLand ? `
+            <p class="hint"><strong>Land comps travel a lot farther than house comps — that's normal.</strong>
+            In suburban areas, comps can be up to <strong>1–5 miles</strong> away. In rural or remote areas
+            with few land sales, comps can go out to <strong>10–50+ miles</strong>. Let Google AI judge which
+            situation applies based on the property's location, and have it state clearly which distance range
+            it used and why. Comps should also be no more than <strong>1 year old</strong>, ideally
+            <strong>under 6 months old</strong> — but for rural/remote land, using the full year is expected
+            if that's what it takes to find real sales.</p>
+            <p class="hint">Only fall back to your own hand-picked comps if AI Mode can't find anything usable
+            — same distance and recency rules apply, and try to match similar acreage and land type/use. Note
+            what you found in Notes below. Lean toward the lowest comps or an average — never cherry-pick the
+            highest value in the area, since that usually doesn't sell.</p>
+          ` : `
+            <p class="hint"><strong>Comps must be within a 1-mile radius of the property — no exceptions.</strong>
+            Comps farther out drastically reduce the chance this deal actually closes, so be very cautious about
+            using anything beyond 1 mile. Comps should also be no more than <strong>1 year old</strong>, and
+            ideally <strong>under 6 months old</strong> — the fresher the better.</p>
+            <p class="hint">Only fall back to your own hand-picked comps if AI Mode can't find anything usable —
+            same rules apply (within 1 mile, ideally under 6 months old, same beds, same baths, similar square
+            footage), and note what you found in Notes below. Lean toward the lowest comps or an average — never
+            cherry-pick the highest ARV in the area, since that usually doesn't sell.</p>
+          `}
 
           <button type="button" class="link-btn" id="comps-prompt-toggle-btn">Get Comps Research Prompt for Google AI &#9662;</button>
           <div id="comps-prompt-panel" hidden style="margin-top:10px;">
-            <p class="hint">This is pre-filled with the address/beds/baths/sqft already on file. Copy it,
-            ${googleAiHow}, and paste it in.</p>
+            <p class="hint">This is pre-filled with the address/${isLand ? "acreage" : "beds/baths/sqft"}
+            already on file. Copy it, ${googleAiHow}, and paste it in.</p>
             <textarea id="comps-prompt-text" readonly rows="16" style="width:100%; font-size:12px; font-family:monospace;"></textarea>
             <button type="button" class="btn secondary" id="comps-prompt-copy-btn" style="margin-top:8px;">Copy Prompt</button>
           </div>
@@ -680,7 +725,7 @@ const steps = [
         <label class="field-label">ARV <span class="small-muted">(After Repair Value)</span>${isResidential ? "" : ` <span class="req">*</span>`}</label>
         <input type="number" id="arv-input" placeholder="$">
         <div class="error-text" id="arv-error">Required.</div>
-        ${!isResidential ? `
+        ${!hasCompsWorkflow ? `
           <p class="hint">${googleAiHow}, copy a listing link if you have one (or just use the address), then ask:
           <br><span class="small-muted">"${arvPrompt}"</span></p>
         ` : ""}
@@ -698,7 +743,7 @@ const steps = [
         <br><span class="small-muted" id="repair-prompt-hint"></span></p>
         <div class="banner info" id="rehab-average-banner" hidden></div>
 
-        ${isResidential ? `<div class="banner info" id="as-is-value-banner" hidden></div>` : ""}
+        ${hasCompsWorkflow ? `<div class="banner info" id="as-is-value-banner" hidden></div>` : ""}
 
         <label class="field-label">County Assessed Value <span class="small-muted">(optional, if known)</span></label>
         <input type="number" id="assessed-value-input" placeholder="$">
@@ -762,7 +807,7 @@ const steps = [
           rehabAverageBanner.hidden = true;
         }
 
-        if (isResidential) {
+        if (hasCompsWorkflow) {
           const asIsBanner = root.querySelector("#as-is-value-banner");
           if (!arv) {
             asIsBanner.hidden = true;
@@ -851,7 +896,7 @@ const steps = [
         recomputeCashDeal();
       };
 
-      if (isResidential) {
+      if (hasCompsWorkflow) {
         const compsPromptToggleBtn = root.querySelector("#comps-prompt-toggle-btn");
         const compsPromptPanel = root.querySelector("#comps-prompt-panel");
         compsPromptToggleBtn.onclick = () => {
@@ -860,39 +905,52 @@ const steps = [
             ? "Get Comps Research Prompt for Google AI &#9662;"
             : "Hide Comps Research Prompt &#9652;";
         };
-        // Address/beds/baths/sqft are already on file by this point in the wizard (collected in
-        // the address and asset type steps) -- pre-fill the prompt with them instead of leaving
-        // the associate to retype everything by hand.
-        const detailsPart = answers.beds && answers.baths
-          ? `${answers.beds} bedroom(s), ${answers.baths} bathroom(s), ${answers.sqft ? answers.sqft + " square feet" : "[SQUARE FEET]"}`
-          : (answers.sqft ? `${answers.sqft} square feet` : "[BEDROOMS/BATHROOMS/SQUARE FEET]");
+        // Address/beds/baths/sqft (or acreage, for land) are already on file by this point in the
+        // wizard (collected in the address and asset type steps) -- pre-fill the prompt with them
+        // instead of leaving the associate to retype everything by hand.
+        const detailsPart = isLand
+          ? (answers.acreage
+              ? `${answers.acreage} acre(s)${answers.sqft ? ` (${answers.sqft} square feet)` : ""}`
+              : (answers.sqft ? `${answers.sqft} square feet` : "[ACREAGE/SQUARE FEET]"))
+          : (answers.beds && answers.baths
+              ? `${answers.beds} bedroom(s), ${answers.baths} bathroom(s), ${answers.sqft ? answers.sqft + " square feet" : "[SQUARE FEET]"}`
+              : (answers.sqft ? `${answers.sqft} square feet` : "[BEDROOMS/BATHROOMS/SQUARE FEET]"));
         root.querySelector("#comps-prompt-text").value =
 `Act as a professional real estate data analyst. Explain your math simply and avoid real estate jargon — I have no real estate experience.
 
-Find recent comparable sales (comps) and an estimated After Repair Value (ARV) for this property:
+Find recent comparable sales (comps) and an estimated ${isLand ? "market value" : "After Repair Value (ARV)"} for this property:
 - Address: ${addressLine || "[SUBJECT ADDRESS]"}
 - Details: ${detailsPart}
 
 Search live for 3 to 5 properties that meet ALL of these rules:
-1. Sold within the last 12 months — strongly prefer comps sold within the last 6 months if there are enough to choose from. Comps older than 12 months don't count, no exceptions.
-2. Within a MAXIMUM of 1-mile STRAIGHT-LINE distance from the subject address (as the crow flies, not driving distance) — this is a hard limit, not a target, closer is always better. State your estimated straight-line distance for each one explicitly, and flag it clearly if you had to go close to the 1-mile edge because nothing closer was available.
-3. In excellent, fully remodeled, or brand-new condition — skip anything described as a fixer-upper, needing TLC, sold as-is, or a renovation/investment project.
-4. Ideally a small starter home or bungalow, similar in size and character to the subject property.
+1. Sold within the last 12 months — strongly prefer comps sold within the last 6 months if there are enough to choose from. Comps older than 12 months don't count, no exceptions${isLand ? ", though for rural/remote land it's fine to use the full 12 months if that's what it takes to find real sales" : ""}.
+2. ${isLand
+    ? `Distance depends on how populated the area is: in suburban areas, stay within a MAXIMUM of 1 to 5 miles STRAIGHT-LINE distance; in rural or remote areas with few land sales, you may go out to 10 to 50+ miles STRAIGHT-LINE distance if needed. Judge which situation applies to this property's location, state which one you used and why, and always prefer the closest comps available within that range.`
+    : `Within a MAXIMUM of 1-mile STRAIGHT-LINE distance from the subject address (as the crow flies, not driving distance) — this is a hard limit, not a target, closer is always better.`
+  } State your estimated straight-line distance for each one explicitly, and flag it clearly if you had to go toward the edge of the allowed range because nothing closer was available.
+3. ${isLand
+    ? `Similar land type and use (e.g. vacant residential lot, agricultural, recreational, timber) and similarly usable (comparable access, topography, and zoning) to the subject property.`
+    : `In excellent, fully remodeled, or brand-new condition — skip anything described as a fixer-upper, needing TLC, sold as-is, or a renovation/investment project.`
+  }
+4. ${isLand
+    ? `Similar in acreage (or square footage, for small in-town lots) to the subject property — avoid comps that are dramatically larger or smaller.`
+    : `Ideally a small starter home or bungalow, similar in size and character to the subject property.`
+  }
 
-If this is a non-disclosure state and you can't find actual sold prices, use active for-sale listings instead that meet the other three rules, and clearly label them as asking prices, not confirmed sale prices.
+If this is a non-disclosure state and you can't find actual sold prices, use active for-sale listings instead that meet the other rules, and clearly label them as asking prices, not confirmed sale prices.
 
 For each comp, list:
 - Full address
 - Exact sale price (or asking price, if using the non-disclosure fallback) and the date
 - Estimated straight-line distance from the subject address, in miles
-- Bedrooms, bathrooms, and total square feet
-- Exact Price per Square Foot (price ÷ square feet)
+- ${isLand ? "Total acreage (and square footage, if it's a small lot)" : "Bedrooms, bathrooms, and total square feet"}
+- ${isLand ? "Exact Price per Acre (price ÷ acreage) — or Price per Square Foot for small lots" : "Exact Price per Square Foot (price ÷ square feet)"}
 
 After listing the comps, calculate and show your work:
-1. Square Footage Difference %: (Average Comp SqFt - Subject SqFt) / Subject SqFt x 100
-2. Estimated ARV: Average Price per Square Foot of the comps x Subject SqFt — give a final range, not just one number.
+1. ${isLand ? "Acreage" : "Square Footage"} Difference %: (Average Comp ${isLand ? "Acreage" : "SqFt"} - Subject ${isLand ? "Acreage" : "SqFt"}) / Subject ${isLand ? "Acreage" : "SqFt"} x 100
+2. Estimated ${isLand ? "Value" : "ARV"}: Average Price per ${isLand ? "Acre" : "Square Foot"} of the comps x Subject ${isLand ? "Acreage" : "SqFt"} — give a final range, not just one number.
 
-If the ARV comes out lower than what a bank's automated home value estimate would show, say so plainly — that's an important finding, not something to smooth over.`;
+If the ${isLand ? "value" : "ARV"} comes out lower than what ${isLand ? "you might initially expect" : "a bank's automated home value estimate would show"}, say so plainly — that's an important finding, not something to smooth over.`;
         root.querySelector("#comps-prompt-copy-btn").onclick = () => {
           const text = root.querySelector("#comps-prompt-text").value;
           if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -980,7 +1038,7 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
       const rHigh = Number(answers.rehabEstimateHigh) || 0;
       answers.rehabEstimate = rLow && rHigh ? String((rLow + rHigh) / 2) : String(rLow || rHigh || "");
       answers.countyAssessedValue = root.querySelector("#assessed-value-input").value;
-      if (answers.assetType === "Residential Property (1-4 units)" && answers.arv) {
+      if ((answers.assetType === "Residential Property (1-4 units)" || answers.assetType === "Land") && answers.arv) {
         answers.asIsValue = Number(answers.arv) - (Number(answers.rehabEstimate) || 0);
       }
       const arvNum = Number(answers.arv) || 0;
@@ -1618,7 +1676,7 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
       // profiles (Cash, Hard Money 10%/20% Down); if the seller won't come down below that, the deal
       // doesn't work under any scenario and there's nothing to submit yet.
       const isEligibleAssetType = answers.assetType === "Residential Property (1-4 units)"
-        || answers.assetType === "Commercial Property";
+        || answers.assetType === "Commercial Property" || answers.assetType === "Land";
       const highestMao = Math.max(answers.maoCash || 0, answers.maoHardMoney10 || 0, answers.maoHardMoney20 || 0);
       const fmt = n => "$" + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
 
@@ -1670,7 +1728,7 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
     },
     validate(root) {
       const isEligibleAssetType = answers.assetType === "Residential Property (1-4 units)"
-        || answers.assetType === "Commercial Property";
+        || answers.assetType === "Commercial Property" || answers.assetType === "Land";
       const highestMao = Math.max(answers.maoCash || 0, answers.maoHardMoney10 || 0, answers.maoHardMoney20 || 0);
       const fmt = n => "$" + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
 
@@ -1735,7 +1793,7 @@ function buildAnswerRows() {
     ["Address", `${answers.street}, ${answers.city}, ${answers.state} ${answers.zip}`],
     ["Units", answers.units],
     ["Asset Type", answers.assetType],
-    ["Subtype / Details", answers.assetSubtype || [answers.beds && `${answers.beds} bd`, answers.baths && `${answers.baths} ba`, answers.sqft && `${answers.sqft} sqft`].filter(Boolean).join(", ")],
+    ["Subtype / Details", answers.assetSubtype || [answers.beds && `${answers.beds} bd`, answers.baths && `${answers.baths} ba`, answers.acreage && `${answers.acreage} acres`, answers.sqft && `${answers.sqft} sqft`].filter(Boolean).join(", ")],
     ["Deal Type", answers.dealType || "—"]
   );
   if (answers.dealType === "Cash Deal") {
@@ -2045,7 +2103,7 @@ async function submitLead(container) {
         sellerContactEmail: answers.sellerContactEmail,
         street: answers.street, city: answers.city, state: answers.state, zip: answers.zip, units: answers.units,
         assetType: answers.assetType, assetSubtype: answers.assetSubtype,
-        beds: answers.beds, baths: answers.baths, sqft: answers.sqft,
+        beds: answers.beds, baths: answers.baths, sqft: answers.sqft, acreage: answers.acreage,
         dealType: answers.dealType,
         arv: answers.arv, asIsValue: answers.asIsValue, picturesLink: answers.picturesLink, rehabEstimate: answers.rehabEstimate,
         rehabEstimateLow: answers.rehabEstimateLow, rehabEstimateHigh: answers.rehabEstimateHigh,
@@ -2278,7 +2336,7 @@ function buildLeadFields(lead) {
     ["Address", `${lead["Street Address"]}, ${lead["City"]}, ${lead["State"]} ${lead["Zip"]}`],
     ["Units", lead["Units"]],
     ["Asset Type", lead["Asset Type"]], ["Subtype", lead["Asset Subtype"] || "—"],
-    ["Beds", lead["Beds"] || "—"], ["Baths", lead["Baths"] || "—"], ["Sq Ft", lead["Sq Ft"] || "—"],
+    ["Beds", lead["Beds"] || "—"], ["Baths", lead["Baths"] || "—"], ["Acreage", lead["Acreage"] || "—"], ["Sq Ft", lead["Sq Ft"] || "—"],
     ["Deal Type", lead["Deal Type"] || "—"]
   );
   if (lead["Deal Type"] === "Cash Deal") {
@@ -2722,6 +2780,7 @@ function openMaoCalculator() {
       <option value="Residential Property (1-4 units)">Residential Property (1-4 units)</option>
       <option value="Commercial Property">Commercial Property</option>
       <option value="Business">Business</option>
+      <option value="Land">Land</option>
     </select>
 
     <div class="banner warn" id="mao-calc-output" hidden style="margin-top:16px;"></div>
