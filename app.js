@@ -647,6 +647,14 @@ const steps = [
           the Notes below so admin can see how you arrived at the number. Lean toward the lowest comps you
           find, or an average across them — don't cherry-pick the highest ARV in the area, since an overly
           optimistic number usually doesn't sell.</p>
+
+          <button type="button" class="link-btn" id="comps-prompt-toggle-btn">Get Comps Research Prompt for Google AI &#9662;</button>
+          <div id="comps-prompt-panel" hidden style="margin-top:10px;">
+            <p class="hint">This is pre-filled with the address/beds/baths/sqft already on file. Copy it,
+            ${googleAiHow}, and paste it in.</p>
+            <textarea id="comps-prompt-text" readonly rows="16" style="width:100%; font-size:12px; font-family:monospace;"></textarea>
+            <button type="button" class="btn secondary" id="comps-prompt-copy-btn" style="margin-top:8px;">Copy Prompt</button>
+          </div>
         ` : ""}
 
         <label class="field-label">ARV <span class="small-muted">(After Repair Value)</span>${isResidential ? "" : ` <span class="req">*</span>`}</label>
@@ -822,6 +830,63 @@ const steps = [
         feeManuallyEdited = true;
         recomputeCashDeal();
       };
+
+      if (isResidential) {
+        const compsPromptToggleBtn = root.querySelector("#comps-prompt-toggle-btn");
+        const compsPromptPanel = root.querySelector("#comps-prompt-panel");
+        compsPromptToggleBtn.onclick = () => {
+          compsPromptPanel.hidden = !compsPromptPanel.hidden;
+          compsPromptToggleBtn.innerHTML = compsPromptPanel.hidden
+            ? "Get Comps Research Prompt for Google AI &#9662;"
+            : "Hide Comps Research Prompt &#9652;";
+        };
+        // Address/beds/baths/sqft are already on file by this point in the wizard (collected in
+        // the address and asset type steps) -- pre-fill the prompt with them instead of leaving
+        // the associate to retype everything by hand.
+        const detailsPart = answers.beds && answers.baths
+          ? `${answers.beds} bedroom(s), ${answers.baths} bathroom(s), ${answers.sqft ? answers.sqft + " square feet" : "[SQUARE FEET]"}`
+          : (answers.sqft ? `${answers.sqft} square feet` : "[BEDROOMS/BATHROOMS/SQUARE FEET]");
+        root.querySelector("#comps-prompt-text").value =
+`Act as a professional real estate data analyst. Explain your math simply and avoid real estate jargon — I have no real estate experience.
+
+Find recent comparable sales (comps) and an estimated After Repair Value (ARV) for this property:
+- Address: ${addressLine || "[SUBJECT ADDRESS]"}
+- Details: ${detailsPart}
+
+Search live for 3 to 5 properties that meet ALL of these rules:
+1. Sold within the last 12 months.
+2. Within a 0.5-mile to 1-mile STRAIGHT-LINE distance from the subject address (as the crow flies, not driving distance). State your estimated straight-line distance for each one explicitly.
+3. In excellent, fully remodeled, or brand-new condition — skip anything described as a fixer-upper, needing TLC, sold as-is, or a renovation/investment project.
+4. Ideally a small starter home or bungalow, similar in size and character to the subject property.
+
+If this is a non-disclosure state and you can't find actual sold prices, use active for-sale listings instead that meet the other three rules, and clearly label them as asking prices, not confirmed sale prices.
+
+For each comp, list:
+- Full address
+- Exact sale price (or asking price, if using the non-disclosure fallback) and the date
+- Estimated straight-line distance from the subject address, in miles
+- Bedrooms, bathrooms, and total square feet
+- Exact Price per Square Foot (price ÷ square feet)
+
+After listing the comps, calculate and show your work:
+1. Square Footage Difference %: (Average Comp SqFt - Subject SqFt) / Subject SqFt x 100
+2. Estimated ARV: Average Price per Square Foot of the comps x Subject SqFt — give a final range, not just one number.
+
+If the ARV comes out lower than what a bank's automated home value estimate would show, say so plainly — that's an important finding, not something to smooth over.`;
+        root.querySelector("#comps-prompt-copy-btn").onclick = () => {
+          const text = root.querySelector("#comps-prompt-text").value;
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(() => {
+              alert("Prompt copied to clipboard.");
+            }).catch(() => {
+              prompt("Copy this prompt:", text);
+            });
+          } else {
+            prompt("Copy this prompt:", text);
+          }
+        };
+      }
+
       recomputeCashDeal();
     },
     validate(root) {
