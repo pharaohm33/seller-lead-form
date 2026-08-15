@@ -489,6 +489,9 @@ const steps = [
           btn.classList.add("selected");
           answers.assetType = btn.dataset.value;
           answers.assetSubtype = ""; answers.beds = ""; answers.baths = ""; answers.sqft = ""; answers.unitsUniform = ""; answers.acreage = "";
+          // Land is cash-only for now -- Seller Financing / Creative Finance isn't offered for it,
+          // so lock the deal type here and skip asking (see the dealType step's skip()).
+          if (answers.assetType === "Land") answers.dealType = "Cash Deal";
           renderSub();
         };
       });
@@ -535,6 +538,9 @@ const steps = [
   {
     key: "dealType",
     progress: true,
+    // Land is cash-only for now -- assetType's button handler already forces
+    // answers.dealType = "Cash Deal" when Land is selected, so this step has nothing to ask.
+    skip() { return answers.assetType === "Land"; },
     render(root) {
       root.innerHTML = `
         <h2 class="step-title">Deal Type</h2>
@@ -722,7 +728,8 @@ const steps = [
           <div id="cma-screenshots-list" style="margin-top:8px;"></div>
         ` : ""}
 
-        <label class="field-label">ARV <span class="small-muted">(After Repair Value)</span>${isResidential ? "" : ` <span class="req">*</span>`}</label>
+        <label class="field-label">${isLand ? "As-Is Value" : "ARV"}
+          <span class="small-muted">${isLand ? "(current market value — land offers are based on this directly, not a post-repair value)" : "(After Repair Value)"}</span>${isResidential ? "" : ` <span class="req">*</span>`}</label>
         <input type="number" id="arv-input" placeholder="$">
         <div class="error-text" id="arv-error">Required.</div>
         ${!hasCompsWorkflow ? `
@@ -733,17 +740,19 @@ const steps = [
         <label class="field-label">Pictures Link <span class="small-muted">(optional, if available)</span></label>
         <input type="text" id="pictures-link-input" placeholder="https://...">
 
-        <label class="field-label">Rehab Estimate — Low <span class="small-muted">(optional, if known)</span></label>
-        <input type="number" id="rehab-low-input" placeholder="$">
-        <label class="field-label">Rehab Estimate — High</label>
-        <input type="number" id="rehab-high-input" placeholder="$">
-        <p class="hint">To estimate this, ${googleAiHow}. It's important to also give it the for-sale listing
-        link or a link to pictures of the property so it can actually see the property's condition — a repair
-        estimate without pictures is just a guess. Then ask:
-        <br><span class="small-muted" id="repair-prompt-hint"></span></p>
-        <div class="banner info" id="rehab-average-banner" hidden></div>
+        ${!isLand ? `
+          <label class="field-label">Rehab Estimate — Low <span class="small-muted">(optional, if known)</span></label>
+          <input type="number" id="rehab-low-input" placeholder="$">
+          <label class="field-label">Rehab Estimate — High</label>
+          <input type="number" id="rehab-high-input" placeholder="$">
+          <p class="hint">To estimate this, ${googleAiHow}. It's important to also give it the for-sale listing
+          link or a link to pictures of the property so it can actually see the property's condition — a repair
+          estimate without pictures is just a guess. Then ask:
+          <br><span class="small-muted" id="repair-prompt-hint"></span></p>
+          <div class="banner info" id="rehab-average-banner" hidden></div>
 
-        ${hasCompsWorkflow ? `<div class="banner info" id="as-is-value-banner" hidden></div>` : ""}
+          ${hasCompsWorkflow ? `<div class="banner info" id="as-is-value-banner" hidden></div>` : ""}
+        ` : ""}
 
         <label class="field-label">County Assessed Value <span class="small-muted">(optional, if known)</span></label>
         <input type="number" id="assessed-value-input" placeholder="$">
@@ -756,10 +765,10 @@ const steps = [
         <label class="field-label">Notes: why does the seller want to sell / what makes this a good lead?
           <span class="small-muted" id="cash-notes-hint"></span></label>
         <textarea id="cash-notes-input" placeholder="e.g. motivated seller, inherited property, tired landlord, needs to relocate..."></textarea>
-        <div class="error-text" id="cash-notes-error">Since pictures, rehab estimate, and assessed value are all blank, please describe why this is a good lead.</div>
+        <div class="error-text" id="cash-notes-error">Since pictures${isLand ? "" : ", rehab estimate,"} and assessed value are all blank, please describe why this is a good lead.</div>
 
         <label class="field-label" style="margin-top:16px;">Wholesale Fee
-          <span class="small-muted">(auto-filled at the greater of $20,000 or 3% of ARV — override with a smaller number if you've negotiated one down for this deal)</span></label>
+          <span class="small-muted">(auto-filled at the greater of $20,000 or 3% of ${isLand ? "As-Is Value" : "ARV"} — override with a smaller number if you've negotiated one down for this deal)</span></label>
         <input type="number" id="wholesale-fee-input" placeholder="$">
 
         ${isOnMarket ? `
@@ -773,8 +782,10 @@ const steps = [
       `;
       root.querySelector("#arv-input").value = answers.arv || "";
       root.querySelector("#pictures-link-input").value = answers.picturesLink || "";
-      root.querySelector("#rehab-low-input").value = answers.rehabEstimateLow || "";
-      root.querySelector("#rehab-high-input").value = answers.rehabEstimateHigh || "";
+      if (!isLand) {
+        root.querySelector("#rehab-low-input").value = answers.rehabEstimateLow || "";
+        root.querySelector("#rehab-high-input").value = answers.rehabEstimateHigh || "";
+      }
       root.querySelector("#assessed-value-input").value = answers.countyAssessedValue || "";
       root.querySelector("#bottom-dollar-input").value = answers.bottomDollarPrice || "";
       root.querySelector("#cash-notes-input").value = answers.cashDealNotes || "";
@@ -785,36 +796,40 @@ const steps = [
       let feeManuallyEdited = !!answers.wholesaleFee;
 
       const recomputeCashDeal = () => {
-        const rehabLow = Number(root.querySelector("#rehab-low-input").value) || 0;
-        const rehabHigh = Number(root.querySelector("#rehab-high-input").value) || 0;
+        // Land has no Rehab Estimate inputs -- offers run purely off the As-Is Value entered above,
+        // so rehab stays 0 and never gets subtracted from anything below.
+        const rehabLow = isLand ? 0 : (Number(root.querySelector("#rehab-low-input").value) || 0);
+        const rehabHigh = isLand ? 0 : (Number(root.querySelector("#rehab-high-input").value) || 0);
         const hasSupplementary = !!(root.querySelector("#pictures-link-input").value.trim()
           || rehabLow || rehabHigh
           || root.querySelector("#assessed-value-input").value);
         root.querySelector("#cash-notes-hint").textContent = hasSupplementary
           ? "(optional)"
-          : "(required since pictures/rehab estimate/assessed value are all blank)";
+          : `(required since pictures${isLand ? "" : "/rehab estimate"}/assessed value are all blank)`;
 
         const arv = Number(root.querySelector("#arv-input").value) || 0;
         const rehab = rehabLow && rehabHigh ? (rehabLow + rehabHigh) / 2 : (rehabLow || rehabHigh || 0);
 
-        root.querySelector("#repair-prompt-hint").textContent = `"${buildRepairPrompt(arv)}"`;
-        const rehabAverageBanner = root.querySelector("#rehab-average-banner");
-        if (rehabLow && rehabHigh) {
-          rehabAverageBanner.hidden = false;
-          rehabAverageBanner.innerHTML = `<strong>Rehab Estimate (average):</strong> $${rehab.toLocaleString(undefined, {maximumFractionDigits: 0})}
-            <span class="small-muted">(average of your $${rehabLow.toLocaleString()} low and $${rehabHigh.toLocaleString()} high)</span>`;
-        } else {
-          rehabAverageBanner.hidden = true;
-        }
-
-        if (hasCompsWorkflow) {
-          const asIsBanner = root.querySelector("#as-is-value-banner");
-          if (!arv) {
-            asIsBanner.hidden = true;
+        if (!isLand) {
+          root.querySelector("#repair-prompt-hint").textContent = `"${buildRepairPrompt(arv)}"`;
+          const rehabAverageBanner = root.querySelector("#rehab-average-banner");
+          if (rehabLow && rehabHigh) {
+            rehabAverageBanner.hidden = false;
+            rehabAverageBanner.innerHTML = `<strong>Rehab Estimate (average):</strong> $${rehab.toLocaleString(undefined, {maximumFractionDigits: 0})}
+              <span class="small-muted">(average of your $${rehabLow.toLocaleString()} low and $${rehabHigh.toLocaleString()} high)</span>`;
           } else {
-            asIsBanner.hidden = false;
-            asIsBanner.innerHTML = `<strong>As-Is Value:</strong> $${(arv - rehab).toLocaleString(undefined, {maximumFractionDigits: 0})}
-              <span class="small-muted">(ARV minus the repair estimate)</span>`;
+            rehabAverageBanner.hidden = true;
+          }
+
+          if (hasCompsWorkflow) {
+            const asIsBanner = root.querySelector("#as-is-value-banner");
+            if (!arv) {
+              asIsBanner.hidden = true;
+            } else {
+              asIsBanner.hidden = false;
+              asIsBanner.innerHTML = `<strong>As-Is Value:</strong> $${(arv - rehab).toLocaleString(undefined, {maximumFractionDigits: 0})}
+                <span class="small-muted">(ARV minus the repair estimate)</span>`;
+            }
           }
         }
 
@@ -863,7 +878,7 @@ const steps = [
         const asIsValue = arv ? Math.max(arv - rehab, 0) : 0;
         const usingAssessed = assessedValue > 0;
         const negotiationBase = usingAssessed ? assessedValue : asIsValue;
-        const negotiationLabel = usingAssessed ? "county assessed value" : "As-Is Value (ARV minus repairs)";
+        const negotiationLabel = usingAssessed ? "county assessed value" : (isLand ? "As-Is Value" : "As-Is Value (ARV minus repairs)");
         const assessedMaxOfferBanner = root.querySelector("#assessed-max-offer-banner");
         if (!isOffMarket || !negotiationBase) {
           assessedMaxOfferBanner.hidden = true;
@@ -879,7 +894,7 @@ const steps = [
           assessedMaxOfferBanner.innerHTML = `
             <strong>Off-Market Negotiating Anchor:</strong> $${negotiationOffer.toLocaleString(undefined, {maximumFractionDigits: 0})}
             <span class="small-muted">(90% of $${negotiationBase.toLocaleString()} ${negotiationLabel},
-            ${usingAssessed ? `minus $${rehab.toLocaleString()} repairs, ` : ""}minus $${anchorSellingCosts.toLocaleString(undefined, {maximumFractionDigits: 0})}
+            ${(usingAssessed && !isLand) ? `minus $${rehab.toLocaleString()} repairs, ` : ""}minus $${anchorSellingCosts.toLocaleString(undefined, {maximumFractionDigits: 0})}
             selling costs (8% of ${negotiationLabel} — realtor commission plus escrow/title fees), minus your
             $${wholesaleFee.toLocaleString(undefined, {maximumFractionDigits: 0})} wholesale fee)</span>
             <br><span class="small-muted">This is a negotiating tool for off-market deals, not a hard cap like
@@ -888,7 +903,9 @@ const steps = [
           `;
         }
       };
-      ["#arv-input", "#pictures-link-input", "#rehab-low-input", "#rehab-high-input", "#assessed-value-input"].forEach(sel => {
+      const recomputeTriggerSelectors = ["#arv-input", "#pictures-link-input", "#assessed-value-input"];
+      if (!isLand) recomputeTriggerSelectors.push("#rehab-low-input", "#rehab-high-input");
+      recomputeTriggerSelectors.forEach(sel => {
         root.querySelector(sel).oninput = recomputeCashDeal;
       });
       root.querySelector("#wholesale-fee-input").oninput = () => {
@@ -1030,10 +1047,12 @@ If the ${isLand ? "value" : "ARV"} comes out lower than what ${isLand ? "you mig
         toggleError(root, "#cash-notes-error", !ok);
         return ok;
       }
+      const isLand = answers.assetType === "Land";
       answers.arv = root.querySelector("#arv-input").value;
       answers.picturesLink = root.querySelector("#pictures-link-input").value.trim();
-      answers.rehabEstimateLow = root.querySelector("#rehab-low-input").value;
-      answers.rehabEstimateHigh = root.querySelector("#rehab-high-input").value;
+      // Land has no Rehab Estimate inputs -- offers run purely off the As-Is Value entered above.
+      answers.rehabEstimateLow = isLand ? "" : root.querySelector("#rehab-low-input").value;
+      answers.rehabEstimateHigh = isLand ? "" : root.querySelector("#rehab-high-input").value;
       const rLow = Number(answers.rehabEstimateLow) || 0;
       const rHigh = Number(answers.rehabEstimateHigh) || 0;
       answers.rehabEstimate = rLow && rHigh ? String((rLow + rHigh) / 2) : String(rLow || rHigh || "");
@@ -1950,9 +1969,18 @@ function escapeHtml(str) {
 function computeMaoSuite(arv, rehab, assetType, wholesaleFeeOverride) {
   if (!arv) return null;
   const isCommercial = assetType !== "Residential Property (1-4 units)";
+  // Land has no separate ARV/rehab concept -- the value plugged in here is already the As-Is
+  // Value entered in Cash Deal Details (rehab is always 0), so the explanation text should say
+  // that instead of "ARV" to match. The math itself is asset-type-agnostic either way.
+  const valueLabel = assetType === "Land" ? "As-Is Value" : "ARV";
   const ratio = rehab / arv;
   let tierName, months, targetRoi, cashTargetRoc;
-  if (isCommercial) {
+  if (assetType === "Land") {
+    // Rehab is always 0 for land (no repair/reno concept), so the rehab-ratio tiers below would
+    // always land on the lightest bucket anyway -- name it for what it actually is instead of
+    // reusing "Light Tenant Improvement" wording that implies a building with tenants.
+    tierName = "Land Acquisition"; months = 3.5; targetRoi = 0.18; cashTargetRoc = targetRoi;
+  } else if (isCommercial) {
     if (ratio < 0.10) { tierName = "Light Tenant Improvement"; months = 3.5; targetRoi = 0.18; }
     else if (ratio < 0.25) { tierName = "Heavy Adaptive Reuse / Value-Add"; months = 9; targetRoi = 0.22; }
     else { tierName = "Ground-Up / Major Expansion"; months = 15; targetRoi = 0.25; }
@@ -1983,27 +2011,27 @@ function computeMaoSuite(arv, rehab, assetType, wholesaleFeeOverride) {
   //   MAO = (ARV - Rehab - Selling Costs) / (1 + Target ROC) - Wholesale Fee
   // matching the fee-subtracted-after-division convention the leveraged formula also uses.
   const cashMao = ((arv - rehab - sellingCosts - purchaseClosingCosts) / (1 + cashTargetRoc)) - wholesaleFee;
-  const cashExplanation = `${money(arv)} ARV, minus ${money(rehab)} repairs, minus ${money(sellingCosts)} selling `
-    + `costs (8% of ARV -- realtor commission plus title/escrow fees), minus ${money(purchaseClosingCosts)} `
-    + `purchase-side closing costs (1% of ARV -- title/escrow only, no commission on the buy side; buyer and `
+  const cashExplanation = `${money(arv)} ${valueLabel}, minus ${money(rehab)} repairs, minus ${money(sellingCosts)} selling `
+    + `costs (8% of ${valueLabel} -- realtor commission plus title/escrow fees), minus ${money(purchaseClosingCosts)} `
+    + `purchase-side closing costs (1% of ${valueLabel} -- title/escrow only, no commission on the buy side; buyer and `
     + `seller customarily split closing costs this way), divided by 1 + a ${pct1(cashTargetRoc)} target ROC `
     + `for this deal profile (${tierName}) -- no financing cost or upfront loan fees, since an all-cash `
-    + `purchase has no loan -- minus a ${money(wholesaleFee)} wholesale fee — the greater of $20,000 or 3% of ARV`;
+    + `purchase has no loan -- minus a ${money(wholesaleFee)} wholesale fee — the greater of $20,000 or 3% of ${valueLabel}`;
   const cash = { mao: cashMao, explanation: cashExplanation };
 
   function variant(downPaymentPct, downPaymentLabel, roi, roiLabel) {
     const numerator = arv - rehab - sellingCosts - purchaseClosingCosts - (upfrontCash * (1 + roi));
     const denominator = 1 + (downPaymentPct * (1 + roi)) + financingCostPct;
     const mao = (numerator / denominator) - wholesaleFee;
-    const explanation = `${money(arv)} ARV, minus ${money(rehab)} repairs, minus ${money(sellingCosts)} selling `
-      + `costs (8% of ARV -- realtor commission plus title/escrow fees), minus ${money(purchaseClosingCosts)} `
-      + `purchase-side closing costs (1% of ARV -- title/escrow only, no commission on the buy side; buyer `
+    const explanation = `${money(arv)} ${valueLabel}, minus ${money(rehab)} repairs, minus ${money(sellingCosts)} selling `
+      + `costs (8% of ${valueLabel} -- realtor commission plus title/escrow fees), minus ${money(purchaseClosingCosts)} `
+      + `purchase-side closing costs (1% of ${valueLabel} -- title/escrow only, no commission on the buy side; buyer `
       + `and seller customarily split closing costs this way), minus ${money(upfrontCash)} upfront hard money `
-      + `loan fees (${pct0(upfrontCashPct)} of ARV) grossed up by the target ${roiLabel}, all divided by `
+      + `loan fees (${pct0(upfrontCashPct)} of ${valueLabel}) grossed up by the target ${roiLabel}, all divided by `
       + `1 + [${downPaymentLabel} down payment x (1 + ${pct1(roi)} target ${roiLabel})] + `
       + `${pct1(financingCostPct)} financing cost (a 12% approximate hard money rate over an estimated `
       + `${months}-month ${tierName.toLowerCase()} hold), minus a ${money(wholesaleFee)} wholesale fee — `
-      + `the greater of $20,000 or 3% of ARV`;
+      + `the greater of $20,000 or 3% of ${valueLabel}`;
     return { mao, explanation };
   }
 
