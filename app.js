@@ -626,19 +626,27 @@ const steps = [
         <h2 class="step-title">Cash Deal Details</h2>
 
         ${isResidential ? `
-          <p class="hint">Check <a href="https://www.chase.com/personal/mortgage/calculators-resources/home-value-estimator" target="_blank" rel="noopener">Chase's Home Value Estimator</a>
-          for this address. If a value comes up: if <strong>no repairs are needed</strong>, that's your As-Is
-          Value (enter it as the ARV below too, since they're the same with nothing to repair). If
-          <strong>repairs are needed</strong>, use that value as the <strong>ARV</strong> instead — As-Is Value
-          will be computed below by subtracting your repair estimate.</p>
+          <p class="hint">Use <a href="https://www.chase.com/personal/mortgage/calculators-resources/home-value-estimator" target="_blank" rel="noopener">Chase's Home Value Estimator</a>
+          for this address as your <strong>primary way to find the ARV</strong>. If a value comes up: if
+          <strong>no repairs are needed</strong>, that's your As-Is Value (enter it as the ARV below too,
+          since they're the same with nothing to repair). If <strong>repairs are needed</strong>, use that
+          value as the <strong>ARV</strong> instead — As-Is Value will be computed below by subtracting your
+          repair estimate.</p>
+          <p class="hint">If Chase doesn't have a value for this address, it's fine to skip the ARV field —
+          <strong>unless you pull your own comps</strong>. If you do, only use comps that are the closest
+          match to the property (same beds, same baths, similar square footage), and save what you found in
+          the Notes below so admin can see how you arrived at the number. Lean toward the lowest comps you
+          find, or an average across them — don't cherry-pick the highest ARV in the area, since an overly
+          optimistic number usually doesn't sell.</p>
         ` : ""}
 
-        <label class="field-label">ARV <span class="small-muted">(After Repair Value)</span> <span class="req">*</span></label>
+        <label class="field-label">ARV <span class="small-muted">(After Repair Value)</span>${isResidential ? "" : ` <span class="req">*</span>`}</label>
         <input type="number" id="arv-input" placeholder="$">
         <div class="error-text" id="arv-error">Required.</div>
-        <p class="hint">No value on Chase, or want a second opinion? ${googleAiHow}, copy a listing link if you
-        have one (or just use the address), then ask:
-        <br><span class="small-muted">"${arvPrompt}"</span></p>
+        ${!isResidential ? `
+          <p class="hint">${googleAiHow}, copy a listing link if you have one (or just use the address), then ask:
+          <br><span class="small-muted">"${arvPrompt}"</span></p>
+        ` : ""}
 
         <label class="field-label">Pictures Link <span class="small-muted">(optional, if available)</span></label>
         <input type="text" id="pictures-link-input" placeholder="https://...">
@@ -814,7 +822,17 @@ const steps = [
         answers.maoBreakdown = maoSuite.fullBreakdown;
       }
       let ok = true;
-      toggleError(root, "#arv-error", !answers.arv); if (!answers.arv) ok = false;
+      // Residential ARV is no longer a hard requirement: Chase is the primary source, but if it
+      // doesn't have a value for the address, it's fine to skip ARV rather than guess -- the
+      // alternative is pulling real matched comps (documented in Notes), not just leaving it blank
+      // AND making something up. Commercial/business have no Chase-equivalent fallback, so ARV
+      // stays required there.
+      const isResidential = answers.assetType === "Residential Property (1-4 units)";
+      if (!isResidential) {
+        toggleError(root, "#arv-error", !answers.arv); if (!answers.arv) ok = false;
+      } else {
+        toggleError(root, "#arv-error", false);
+      }
       const hasSupplementary = !!(answers.picturesLink || answers.rehabEstimate || answers.countyAssessedValue);
       if (!hasSupplementary) {
         toggleError(root, "#cash-notes-error", !answers.cashDealNotes); if (!answers.cashDealNotes) ok = false;
