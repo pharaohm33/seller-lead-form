@@ -796,14 +796,18 @@ const steps = [
           assessedMaxOfferBanner.hidden = true;
         } else {
           const discountedBase = 0.90 * negotiationBase;
+          // Same 8% selling costs (realtor commission + escrow/title fees) the main MAO formula
+          // subtracts from ARV -- this banner was missing it entirely, which overstated the anchor.
+          const anchorSellingCosts = 0.08 * negotiationBase;
           const negotiationOffer = usingAssessed
-            ? (discountedBase - rehab - wholesaleFee)
-            : (discountedBase - wholesaleFee);
+            ? (discountedBase - rehab - anchorSellingCosts - wholesaleFee)
+            : (discountedBase - anchorSellingCosts - wholesaleFee);
           assessedMaxOfferBanner.hidden = false;
           assessedMaxOfferBanner.innerHTML = `
             <strong>Off-Market Negotiating Anchor:</strong> $${negotiationOffer.toLocaleString(undefined, {maximumFractionDigits: 0})}
             <span class="small-muted">(90% of $${negotiationBase.toLocaleString()} ${negotiationLabel},
-            ${usingAssessed ? `minus $${rehab.toLocaleString()} repairs, ` : ""}minus your
+            ${usingAssessed ? `minus $${rehab.toLocaleString()} repairs, ` : ""}minus $${anchorSellingCosts.toLocaleString(undefined, {maximumFractionDigits: 0})}
+            selling costs (8% of ${negotiationLabel} — realtor commission plus escrow/title fees), minus your
             $${wholesaleFee.toLocaleString(undefined, {maximumFractionDigits: 0})} wholesale fee)</span>
             <br><span class="small-muted">This is a negotiating tool for off-market deals, not a hard cap like
             the Max Offer above. Use the ${negotiationLabel} as your anchor with the seller and cite the high end
