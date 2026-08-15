@@ -468,11 +468,11 @@ const steps = [
           }
         } else if (answers.assetType === "Land") {
           subFields.innerHTML = `
-            <label class="field-label">Acreage <span class="req">*</span></label>
+            <label class="field-label">Acreage <span class="small-muted">(required unless square footage is filled in below)</span></label>
             <input type="number" id="acreage-input" min="0" step="0.01" placeholder="e.g. 5.25">
-            <div class="error-text" id="acreage-error">Required.</div>
-            <label class="field-label">Square footage <span class="small-muted">(optional — useful for small in-town lots)</span></label>
+            <label class="field-label">Square footage <span class="small-muted">(required unless acreage is filled in above — useful for small in-town lots)</span></label>
             <input type="number" id="sqft-input" min="0" step="1">
+            <div class="error-text" id="acreage-error">Enter either acreage or square footage.</div>
           `;
           subFields.querySelector("#acreage-input").value = answers.acreage || "";
           subFields.querySelector("#sqft-input").value = answers.sqft || "";
@@ -502,7 +502,8 @@ const steps = [
       if (answers.assetType === "Land") {
         answers.acreage = root.querySelector("#acreage-input").value;
         answers.sqft = root.querySelector("#sqft-input").value;
-        toggleError(root, "#acreage-error", !answers.acreage); if (!answers.acreage) ok = false;
+        const hasSize = !!(answers.acreage || answers.sqft);
+        toggleError(root, "#acreage-error", !hasSize); if (!hasSize) ok = false;
       } else if (answers.assetType === "Commercial Property") {
         answers.assetSubtype = root.querySelector("#subtype-input").value;
         toggleError(root, "#subtype-error", !answers.assetSubtype); if (!answers.assetSubtype) ok = false;
@@ -722,7 +723,7 @@ const steps = [
 
           <button type="button" class="link-btn" id="comps-prompt-toggle-btn">Get Comps Research Prompt for Google AI &#9662;</button>
           <div id="comps-prompt-panel" hidden style="margin-top:10px;">
-            <p class="hint">This is pre-filled with the address/${isLand ? "acreage" : "beds/baths/sqft"}
+            <p class="hint">This is pre-filled with the address/${isLand ? "acreage or square footage" : "beds/baths/sqft"}
             already on file. Copy it, ${googleAiHow}, and paste it in.</p>
             <textarea id="comps-prompt-text" readonly rows="16" style="width:100%; font-size:12px; font-family:monospace;"></textarea>
             <button type="button" class="btn secondary" id="comps-prompt-copy-btn" style="margin-top:8px;">Copy Prompt</button>
