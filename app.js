@@ -617,8 +617,17 @@ const steps = [
       const isOnMarket = answers.marketStatus === "On-Market";
       const addressLine = `${answers.street || ""}, ${answers.city || ""}, ${answers.state || ""} ${answers.zip || ""}`.trim();
       const arvPrompt = `how much is this worth at full market value (ARV): ${addressLine}`;
-      const repairPrompt = `how much repair is needed as an investment flip for this property: ${addressLine}`;
       const assessedValuePrompt = `what is the county assessed value for this property: ${addressLine}`;
+      const zillowAddressSlug = `${answers.street || ""} ${answers.city || ""} ${answers.state || ""} ${answers.zip || ""}`
+        .trim().replace(/[^a-zA-Z0-9]+/g, "-");
+      const zillowSearchUrl = `https://www.zillow.com/homes/${zillowAddressSlug}_rb/`;
+      // Depends on the current ARV input value, so it's rebuilt live in recomputeCashDeal() rather
+      // than computed once here -- feeding the Chase-sourced ARV back into the repair prompt lets
+      // the AI estimate repairs against an actual target value instead of guessing blind.
+      const buildRepairPrompt = (arv) => {
+        const arvPart = arv ? ` to reach an ARV of $${Number(arv).toLocaleString()} (from Chase Bank's Home Value Estimator)` : "";
+        return `how much fix and flip investor repair is needed at ${addressLine}${arvPart}? ${zillowSearchUrl}`;
+      };
       const googleAiHow = `go to <strong>google.com</strong> and search anything (typing "ai" works fine, or just the
         address) — once results load, look at the row of tabs near the top of the page (next to "All", "Images",
         "News", "Shopping") and click <strong>"AI Mode"</strong>`;
@@ -651,12 +660,15 @@ const steps = [
         <label class="field-label">Pictures Link <span class="small-muted">(optional, if available)</span></label>
         <input type="text" id="pictures-link-input" placeholder="https://...">
 
-        <label class="field-label">Rehab Estimate <span class="small-muted">(optional, if known)</span></label>
-        <input type="number" id="rehab-input" placeholder="$">
+        <label class="field-label">Rehab Estimate — Low <span class="small-muted">(optional, if known)</span></label>
+        <input type="number" id="rehab-low-input" placeholder="$">
+        <label class="field-label">Rehab Estimate — High</label>
+        <input type="number" id="rehab-high-input" placeholder="$">
         <p class="hint">To estimate this, ${googleAiHow}. It's important to also give it the for-sale listing
-        link or a link to pictures of the property (the Pictures Link above works) so it can actually see the
-        property's condition — a repair estimate without pictures is just a guess. Then ask:
-        <br><span class="small-muted">"${repairPrompt}"</span></p>
+        link or a link to pictures of the property so it can actually see the property's condition — a repair
+        estimate without pictures is just a guess. Then ask:
+        <br><span class="small-muted" id="repair-prompt-hint"></span></p>
+        <div class="banner info" id="rehab-average-banner" hidden></div>
 
         ${isResidential ? `<div class="banner info" id="as-is-value-banner" hidden></div>` : ""}
 
@@ -688,7 +700,8 @@ const steps = [
       `;
       root.querySelector("#arv-input").value = answers.arv || "";
       root.querySelector("#pictures-link-input").value = answers.picturesLink || "";
-      root.querySelector("#rehab-input").value = answers.rehabEstimate || "";
+      root.querySelector("#rehab-low-input").value = answers.rehabEstimateLow || "";
+      root.querySelector("#rehab-high-input").value = answers.rehabEstimateHigh || "";
       root.querySelector("#assessed-value-input").value = answers.countyAssessedValue || "";
       root.querySelector("#bottom-dollar-input").value = answers.bottomDollarPrice || "";
       root.querySelector("#cash-notes-input").value = answers.cashDealNotes || "";
@@ -699,15 +712,27 @@ const steps = [
       let feeManuallyEdited = !!answers.wholesaleFee;
 
       const recomputeCashDeal = () => {
+        const rehabLow = Number(root.querySelector("#rehab-low-input").value) || 0;
+        const rehabHigh = Number(root.querySelector("#rehab-high-input").value) || 0;
         const hasSupplementary = !!(root.querySelector("#pictures-link-input").value.trim()
-          || root.querySelector("#rehab-input").value
+          || rehabLow || rehabHigh
           || root.querySelector("#assessed-value-input").value);
         root.querySelector("#cash-notes-hint").textContent = hasSupplementary
           ? "(optional)"
           : "(required since pictures/rehab estimate/assessed value are all blank)";
 
         const arv = Number(root.querySelector("#arv-input").value) || 0;
-        const rehab = Number(root.querySelector("#rehab-input").value) || 0;
+        const rehab = rehabLow && rehabHigh ? (rehabLow + rehabHigh) / 2 : (rehabLow || rehabHigh || 0);
+
+        root.querySelector("#repair-prompt-hint").textContent = `"${buildRepairPrompt(arv)}"`;
+        const rehabAverageBanner = root.querySelector("#rehab-average-banner");
+        if (rehabLow && rehabHigh) {
+          rehabAverageBanner.hidden = false;
+          rehabAverageBanner.innerHTML = `<strong>Rehab Estimate (average):</strong> $${rehab.toLocaleString(undefined, {maximumFractionDigits: 0})}
+            <span class="small-muted">(average of your $${rehabLow.toLocaleString()} low and $${rehabHigh.toLocaleString()} high)</span>`;
+        } else {
+          rehabAverageBanner.hidden = true;
+        }
 
         if (isResidential) {
           const asIsBanner = root.querySelector("#as-is-value-banner");
@@ -786,7 +811,7 @@ const steps = [
           `;
         }
       };
-      ["#arv-input", "#pictures-link-input", "#rehab-input", "#assessed-value-input"].forEach(sel => {
+      ["#arv-input", "#pictures-link-input", "#rehab-low-input", "#rehab-high-input", "#assessed-value-input"].forEach(sel => {
         root.querySelector(sel).oninput = recomputeCashDeal;
       });
       root.querySelector("#wholesale-fee-input").oninput = () => {
@@ -806,7 +831,11 @@ const steps = [
       }
       answers.arv = root.querySelector("#arv-input").value;
       answers.picturesLink = root.querySelector("#pictures-link-input").value.trim();
-      answers.rehabEstimate = root.querySelector("#rehab-input").value;
+      answers.rehabEstimateLow = root.querySelector("#rehab-low-input").value;
+      answers.rehabEstimateHigh = root.querySelector("#rehab-high-input").value;
+      const rLow = Number(answers.rehabEstimateLow) || 0;
+      const rHigh = Number(answers.rehabEstimateHigh) || 0;
+      answers.rehabEstimate = rLow && rHigh ? String((rLow + rHigh) / 2) : String(rLow || rHigh || "");
       answers.countyAssessedValue = root.querySelector("#assessed-value-input").value;
       if (answers.assetType === "Residential Property (1-4 units)" && answers.arv) {
         answers.asIsValue = Number(answers.arv) - (Number(answers.rehabEstimate) || 0);
@@ -1571,7 +1600,9 @@ function buildAnswerRows() {
       ["ARV", answers.arv || "—"],
       ["As-Is Value", answers.asIsValue || "—"],
       ["Pictures Link", answers.picturesLink || "—"],
-      ["Rehab Estimate", answers.rehabEstimate || "—"],
+      ["Rehab Estimate — Low", answers.rehabEstimateLow || "—"],
+      ["Rehab Estimate — High", answers.rehabEstimateHigh || "—"],
+      ["Rehab Estimate (average)", answers.rehabEstimate || "—"],
       ["County Assessed Value", answers.countyAssessedValue || "—"],
       ["Bottom Dollar Price", answers.bottomDollarPrice || "—"],
       ["Notes (Why Sell / Good Lead)", answers.cashDealNotes || "—"]
@@ -1873,6 +1904,7 @@ async function submitLead(container) {
         beds: answers.beds, baths: answers.baths, sqft: answers.sqft,
         dealType: answers.dealType,
         arv: answers.arv, asIsValue: answers.asIsValue, picturesLink: answers.picturesLink, rehabEstimate: answers.rehabEstimate,
+        rehabEstimateLow: answers.rehabEstimateLow, rehabEstimateHigh: answers.rehabEstimateHigh,
         countyAssessedValue: answers.countyAssessedValue, bottomDollarPrice: answers.bottomDollarPrice,
         cashDealNotes: answers.cashDealNotes, wholesaleFee: answers.wholesaleFee,
         maoCash: answers.maoCash, maoHardMoney10: answers.maoHardMoney10, maoHardMoney20: answers.maoHardMoney20,
@@ -2108,7 +2140,9 @@ function buildLeadFields(lead) {
       ["ARV", lead["ARV"] || "—"],
       ["As-Is Value", lead["As-Is Value"] || "—"],
       ["Pictures Link", lead["Pictures Link"] || "—"],
-      ["Rehab Estimate", lead["Rehab Estimate"] || "—"],
+      ["Rehab Estimate — Low", lead["Rehab Estimate Low"] || "—"],
+      ["Rehab Estimate — High", lead["Rehab Estimate High"] || "—"],
+      ["Rehab Estimate (average)", lead["Rehab Estimate"] || "—"],
       ["County Assessed Value", lead["County Assessed Value"] || "—"],
       ["Bottom Dollar Price", lead["Bottom Dollar Price"] || "—"],
       ["Notes (Why Sell / Good Lead)", lead["Cash Deal Notes"] || "—"]
