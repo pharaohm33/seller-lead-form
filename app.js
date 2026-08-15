@@ -775,7 +775,7 @@ const steps = [
         <div class="error-text" id="cash-notes-error">Since pictures${isLand ? "" : ", rehab estimate,"} and assessed value are all blank, please describe why this is a good lead.</div>
 
         <label class="field-label" style="margin-top:16px;">Wholesale Fee
-          <span class="small-muted">(auto-filled at the greater of $20,000 or 3% of ${isLand ? "As-Is Value" : "ARV"} — override with a smaller number if you've negotiated one down for this deal)</span></label>
+          <span class="small-muted">(auto-filled at the greater of $25,000 or 3% of ${isLand ? "As-Is Value" : "ARV"} — override with a smaller number if you've negotiated one down for this deal)</span></label>
         <input type="number" id="wholesale-fee-input" placeholder="$">
 
         ${isOnMarket ? `
@@ -841,7 +841,7 @@ const steps = [
         }
 
         const feeInput = root.querySelector("#wholesale-fee-input");
-        const formulaFee = arv ? Math.max(20000, 0.03 * arv) : 0;
+        const formulaFee = arv ? Math.max(25000, 0.03 * arv) : 0;
         if (!feeManuallyEdited) feeInput.value = formulaFee || "";
         const wholesaleFee = Number(feeInput.value) || formulaFee;
 
@@ -1095,7 +1095,7 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
       }
       const arvNum = Number(answers.arv) || 0;
       const feeInputVal = root.querySelector("#wholesale-fee-input").value;
-      answers.wholesaleFee = feeInputVal || (arvNum ? Math.max(20000, 0.03 * arvNum) : "");
+      answers.wholesaleFee = feeInputVal || (arvNum ? Math.max(25000, 0.03 * arvNum) : "");
       const maoSuite = computeMaoSuite(arvNum, Number(answers.rehabEstimate) || 0, answers.assetType, answers.wholesaleFee);
       if (maoSuite) {
         answers.maoCash = Math.round(maoSuite.maoCash);
@@ -1996,7 +1996,7 @@ function escapeHtml(str) {
 // If the goal is for Hard Money to show as more competitive than Cash, the fix is to tune Hard
 // Money's ROI down and/or its financing-cost assumptions down, not the Cash formula.
 //
-// Wholesale Fee defaults to the greater of $20,000 or 3% of ARV, applied to every variant -- pass a
+// Wholesale Fee defaults to the greater of $25,000 or 3% of ARV, applied to every variant -- pass a
 // 4th argument (wholesaleFeeOverride) to use a specific dollar amount instead, e.g. when an associate
 // has negotiated a smaller fee for a given deal.
 function computeMaoSuite(arv, rehab, assetType, wholesaleFeeOverride) {
@@ -2030,7 +2030,7 @@ function computeMaoSuite(arv, rehab, assetType, wholesaleFeeOverride) {
   const upfrontCashPct = isCommercial ? 0.03 : 0.02;
   const upfrontCash = upfrontCashPct * arv;
   const hasOverride = wholesaleFeeOverride !== undefined && wholesaleFeeOverride !== null && wholesaleFeeOverride !== "";
-  const wholesaleFee = hasOverride ? Number(wholesaleFeeOverride) : Math.max(20000, 0.03 * arv);
+  const wholesaleFee = hasOverride ? Number(wholesaleFeeOverride) : Math.max(25000, 0.03 * arv);
 
   const money = n => "$" + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
   const pct1 = n => (n * 100).toFixed(1) + "%";
@@ -2049,7 +2049,7 @@ function computeMaoSuite(arv, rehab, assetType, wholesaleFeeOverride) {
     + `purchase-side closing costs (1% of ${valueLabel} -- title/escrow only, no commission on the buy side; buyer and `
     + `seller customarily split closing costs this way), divided by 1 + a ${pct1(cashTargetRoc)} target ROC `
     + `for this deal profile (${tierName}) -- no financing cost or upfront loan fees, since an all-cash `
-    + `purchase has no loan -- minus a ${money(wholesaleFee)} wholesale fee — the greater of $20,000 or 3% of ${valueLabel}`;
+    + `purchase has no loan -- minus a ${money(wholesaleFee)} wholesale fee — the greater of $25,000 or 3% of ${valueLabel}`;
   const cash = { mao: cashMao, explanation: cashExplanation };
 
   function variant(downPaymentPct, downPaymentLabel, roi, roiLabel) {
@@ -2064,7 +2064,7 @@ function computeMaoSuite(arv, rehab, assetType, wholesaleFeeOverride) {
       + `1 + [${downPaymentLabel} down payment x (1 + ${pct1(roi)} target ${roiLabel})] + `
       + `${pct1(financingCostPct)} financing cost (a 12% approximate hard money rate over an estimated `
       + `${months}-month ${tierName.toLowerCase()} hold), minus a ${money(wholesaleFee)} wholesale fee — `
-      + `the greater of $20,000 or 3% of ${valueLabel}`;
+      + `the greater of $25,000 or 3% of ${valueLabel}`;
     return { mao, explanation };
   }
 

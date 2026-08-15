@@ -127,7 +127,7 @@
 // these specific rate/ROI assumptions. Tune Target ROI/ROC or the financing-cost assumptions below if
 // you want a different relationship between the three numbers.
 //
-// Wholesale Fee is the greater of $20,000 or 3% of ARV, applied to every variant.
+// Wholesale Fee is the greater of $25,000 or 3% of ARV, applied to every variant.
 function computeMaoSuite(arv, rehab, assetType) {
   if (!arv) return null;
   const isCommercial = assetType !== "Residential Property (1-4 units)";
@@ -149,7 +149,7 @@ function computeMaoSuite(arv, rehab, assetType) {
   const purchaseClosingCosts = 0.01 * arv;
   const upfrontCashPct = isCommercial ? 0.03 : 0.02;
   const upfrontCash = upfrontCashPct * arv;
-  const wholesaleFee = Math.max(20000, 0.03 * arv);
+  const wholesaleFee = Math.max(25000, 0.03 * arv);
 
   const money = n => "$" + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
   const pct1 = n => (n * 100).toFixed(1) + "%";
@@ -163,7 +163,7 @@ function computeMaoSuite(arv, rehab, assetType) {
     + `purchase-side closing costs (1% of ARV -- title/escrow only, no commission on the buy side; buyer and `
     + `seller customarily split closing costs this way), divided by 1 + a ${pct1(cashTargetRoc)} target ROC `
     + `for this deal profile (${tierName}) -- no financing cost or upfront loan fees, since an all-cash `
-    + `purchase has no loan -- minus a ${money(wholesaleFee)} wholesale fee — the greater of $20,000 or 3% of ARV`;
+    + `purchase has no loan -- minus a ${money(wholesaleFee)} wholesale fee — the greater of $25,000 or 3% of ARV`;
   const cash = { mao: cashMao, explanation: cashExplanation };
 
   function variant(downPaymentPct, downPaymentLabel, roi, roiLabel) {
@@ -178,7 +178,7 @@ function computeMaoSuite(arv, rehab, assetType) {
       + `1 + [${downPaymentLabel} down payment x (1 + ${pct1(roi)} target ${roiLabel})] + `
       + `${pct1(financingCostPct)} financing cost (a 12% approximate hard money rate over an estimated `
       + `${months}-month ${tierName.toLowerCase()} hold), minus a ${money(wholesaleFee)} wholesale fee — `
-      + `the greater of $20,000 or 3% of ARV`;
+      + `the greater of $25,000 or 3% of ARV`;
     return { mao, explanation };
   }
 
