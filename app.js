@@ -261,6 +261,9 @@ const steps = [
         <input type="text" id="street-input" placeholder="123 Main St">
         <div class="error-text" id="street-error">Street address is required.</div>
 
+        <label class="field-label">Parcel ID(s) <span class="small-muted">(optional, if known — separate multiple with commas)</span></label>
+        <input type="text" id="parcel-ids-input" placeholder="e.g. 123-456-789">
+
         <div class="row3" style="margin-top:16px;">
           <div>
             <label class="field-label">City <span class="req">*</span></label>
@@ -290,6 +293,7 @@ const steps = [
         <p class="hint">If this property has more than 4 units, choose <strong>Commercial Property</strong> as the asset type on the next step instead of Residential.</p>
       `;
       root.querySelector("#street-input").value = answers.street || "";
+      root.querySelector("#parcel-ids-input").value = answers.parcelIds || "";
       root.querySelector("#city-input").value = answers.city || "";
       root.querySelector("#state-input").value = answers.state || "";
       root.querySelector("#zip-input").value = answers.zip || "";
@@ -327,6 +331,7 @@ const steps = [
     },
     validate(root) {
       answers.street = root.querySelector("#street-input").value.trim();
+      answers.parcelIds = root.querySelector("#parcel-ids-input").value.trim();
       answers.city = root.querySelector("#city-input").value.trim();
       answers.state = root.querySelector("#state-input").value;
       answers.zip = root.querySelector("#zip-input").value.trim();
@@ -473,9 +478,42 @@ const steps = [
             <label class="field-label">Square footage <span class="small-muted">(required unless acreage is filled in above — useful for small in-town lots)</span></label>
             <input type="number" id="sqft-input" min="0" step="1">
             <div class="error-text" id="acreage-error">Enter either acreage or square footage.</div>
+
+            <label class="field-label" style="margin-top:16px;">Zoning
+              <span class="small-muted">(optional, but highly encouraged — ask the seller or look it up if you're not sure. Skip if truly unknown.)</span></label>
+            <div class="choice-group" id="land-zoning-group">
+              ${["Single Family", "Multifamily", "Other"].map(z => `<button type="button" class="choice-btn" data-value="${z}">${z}</button>`).join("")}
+            </div>
+            <div id="land-zoning-other-wrap" hidden style="margin-top:8px;">
+              <input type="text" id="land-zoning-other-input" placeholder="e.g. Agricultural, Commercial, Industrial...">
+            </div>
           `;
           subFields.querySelector("#acreage-input").value = answers.acreage || "";
           subFields.querySelector("#sqft-input").value = answers.sqft || "";
+
+          const isKnownZoning = answers.landZoning === "Single Family" || answers.landZoning === "Multifamily";
+          const zoningOtherValue = (!isKnownZoning && answers.landZoning) ? answers.landZoning : "";
+          const selectedZoningValue = isKnownZoning ? answers.landZoning : (zoningOtherValue ? "Other" : "");
+          const zoningGroup = subFields.querySelector("#land-zoning-group");
+          const zoningOtherWrap = subFields.querySelector("#land-zoning-other-wrap");
+          const zoningOtherInput = subFields.querySelector("#land-zoning-other-input");
+          zoningOtherInput.value = zoningOtherValue;
+          zoningOtherWrap.hidden = selectedZoningValue !== "Other";
+          zoningGroup.querySelectorAll(".choice-btn").forEach(btn => {
+            if (btn.dataset.value === selectedZoningValue) btn.classList.add("selected");
+            btn.onclick = () => {
+              zoningGroup.querySelectorAll(".choice-btn").forEach(b => b.classList.remove("selected"));
+              btn.classList.add("selected");
+              zoningOtherWrap.hidden = btn.dataset.value !== "Other";
+              if (btn.dataset.value === "Other") {
+                answers.landZoning = zoningOtherInput.value.trim();
+                zoningOtherInput.focus();
+              } else {
+                answers.landZoning = btn.dataset.value;
+              }
+            };
+          });
+          zoningOtherInput.oninput = () => { answers.landZoning = zoningOtherInput.value.trim(); };
         } else {
           subFields.innerHTML = "";
         }
@@ -488,7 +526,7 @@ const steps = [
           root.querySelectorAll("#top-type-group .choice-btn").forEach(b => b.classList.remove("selected"));
           btn.classList.add("selected");
           answers.assetType = btn.dataset.value;
-          answers.assetSubtype = ""; answers.beds = ""; answers.baths = ""; answers.sqft = ""; answers.unitsUniform = ""; answers.acreage = "";
+          answers.assetSubtype = ""; answers.beds = ""; answers.baths = ""; answers.sqft = ""; answers.unitsUniform = ""; answers.acreage = ""; answers.landZoning = "";
           // Land is cash-only for now -- Seller Financing / Creative Finance isn't offered for it,
           // so lock the deal type here and skip asking (see the dealType step's skip()).
           if (answers.assetType === "Land") answers.dealType = "Cash Deal";
@@ -856,10 +894,10 @@ const steps = [
             <strong>Cash Buyer MAO:</strong> ${fmt(maoSuite.maoCash)}
             <br><span class="small-muted">(${maoSuite.cashExplanation})</span>
             <hr style="border: none; border-top: 1px solid currentColor; opacity: 0.2; margin: 10px 0;">
-            <strong>Hard Money Buyer MAO (10% Down):</strong> ${fmt(maoSuite.maoHardMoney10)}
+            <strong>Hard Money Buyer MAO (${maoSuite.hm10Label} Down):</strong> ${fmt(maoSuite.maoHardMoney10)}
             <br><span class="small-muted">(${maoSuite.hm10Explanation})</span>
             <hr style="border: none; border-top: 1px solid currentColor; opacity: 0.2; margin: 10px 0;">
-            <strong>Hard Money Buyer MAO (20% Down):</strong> ${fmt(maoSuite.maoHardMoney20)}
+            <strong>Hard Money Buyer MAO (${maoSuite.hm20Label} Down):</strong> ${fmt(maoSuite.maoHardMoney20)}
             <br><span class="small-muted">(${maoSuite.hm20Explanation})</span>
             <br><br><strong>Start well below the Cash Buyer number and try to close there in negotiation.</strong>
             <br><span class="small-muted">The hard money numbers show what a leveraged buyer could still pay and
@@ -934,8 +972,8 @@ const steps = [
         // instead of leaving the associate to retype everything by hand.
         const detailsPart = isLand
           ? (answers.acreage
-              ? `${answers.acreage} acre(s)${answers.sqft ? ` (${answers.sqft} square feet)` : ""}`
-              : (answers.sqft ? `${answers.sqft} square feet` : "[ACREAGE/SQUARE FEET]"))
+              ? `${answers.acreage} acre(s)${answers.sqft ? ` (${answers.sqft} square feet)` : ""}${answers.landZoning ? `, zoned ${answers.landZoning}` : ""}`
+              : (answers.sqft ? `${answers.sqft} square feet${answers.landZoning ? `, zoned ${answers.landZoning}` : ""}` : "[ACREAGE/SQUARE FEET]"))
           : (answers.beds && answers.baths
               ? `${answers.beds} bedroom(s), ${answers.baths} bathroom(s), ${answers.sqft ? answers.sqft + " square feet" : "[SQUARE FEET]"}`
               : (answers.sqft ? `${answers.sqft} square feet` : "[BEDROOMS/BATHROOMS/SQUARE FEET]"));
@@ -1725,7 +1763,8 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
       // Residential/commercial cash deals must pencil out under at least one buyer profile before
       // they can be submitted -- Business isn't held to this since it doesn't get a comparable MAO
       // suite the same way. Highest MAO = the most a buyer could still pay under ANY of the three
-      // profiles (Cash, Hard Money 10%/20% Down); if the seller won't come down below that, the deal
+      // profiles (Cash, Hard Money low/high Down -- 10%/20% for residential/commercial, 30%/50%
+      // for land); if the seller won't come down below that, the deal
       // doesn't work under any scenario and there's nothing to submit yet.
       const isEligibleAssetType = answers.assetType === "Residential Property (1-4 units)"
         || answers.assetType === "Commercial Property" || answers.assetType === "Land";
@@ -1745,7 +1784,7 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
         ${isEligibleAssetType && highestMao > 0 ? `
           <div class="banner warn" style="margin-top:16px;">
             <strong>Highest Max Allowable Offer:</strong> ${fmt(highestMao)}
-            <span class="small-muted">(the greater of the Cash Buyer / Hard Money 10% Down / Hard Money 20%
+            <span class="small-muted">(the greater of the Cash Buyer / Hard Money ${answers.assetType === "Land" ? "30%" : "10%"} Down / Hard Money ${answers.assetType === "Land" ? "50%" : "20%"}
             Down numbers from the Cash Deal Details step)</span>
             <br><span class="small-muted">The seller's accepted price has to land below this number to submit
             this lead. If they won't come down that far yet, keep negotiating before submitting.</span>
@@ -1843,11 +1882,15 @@ function buildAnswerRows() {
   }
   rows.push(
     ["Address", `${answers.street}, ${answers.city}, ${answers.state} ${answers.zip}`],
+    ["Parcel ID(s)", answers.parcelIds || "—"],
     ["Units", answers.units],
     ["Asset Type", answers.assetType],
     ["Subtype / Details", answers.assetSubtype || [answers.beds && `${answers.beds} bd`, answers.baths && `${answers.baths} ba`, answers.acreage && `${answers.acreage} acres`, answers.sqft && `${answers.sqft} sqft`].filter(Boolean).join(", ")],
     ["Deal Type", answers.dealType || "—"]
   );
+  if (answers.assetType === "Land") {
+    rows.push(["Zoning", answers.landZoning || "—"]);
+  }
   if (answers.dealType === "Cash Deal") {
     rows.push(
       ["ARV", answers.arv || "—"],
@@ -2006,13 +2049,18 @@ function computeMaoSuite(arv, rehab, assetType, wholesaleFeeOverride) {
   // Value entered in Cash Deal Details (rehab is always 0), so the explanation text should say
   // that instead of "ARV" to match. The math itself is asset-type-agnostic either way.
   const valueLabel = assetType === "Land" ? "As-Is Value" : "ARV";
+  const isLand = assetType === "Land";
   const ratio = rehab / arv;
   let tierName, months, targetRoi, cashTargetRoc;
-  if (assetType === "Land") {
+  if (isLand) {
     // Rehab is always 0 for land (no repair/reno concept), so the rehab-ratio tiers below would
     // always land on the lightest bucket anyway -- name it for what it actually is instead of
     // reusing "Light Tenant Improvement" wording that implies a building with tenants.
-    tierName = "Land Acquisition"; months = 3.5; targetRoi = 0.18; cashTargetRoc = targetRoi;
+    // Numbers are Tier 1 ("Micro/Small Projects", $20K-$250K land cost) of the land underwriting
+    // framework: 22-30%+ target IRR (25% used here) and an 11-24 month lifecycle -- 15 months
+    // matches the framework's own worked example ($100K equity returning $140K, a 1.4x multiple,
+    // squarely inside its 1.3x-1.6x Tier 1 target).
+    tierName = "Land Acquisition"; months = 15; targetRoi = 0.25; cashTargetRoc = targetRoi;
   } else if (isCommercial) {
     if (ratio < 0.10) { tierName = "Light Tenant Improvement"; months = 3.5; targetRoi = 0.18; }
     else if (ratio < 0.25) { tierName = "Heavy Adaptive Reuse / Value-Add"; months = 9; targetRoi = 0.22; }
@@ -2068,21 +2116,30 @@ function computeMaoSuite(arv, rehab, assetType, wholesaleFeeOverride) {
     return { mao, explanation };
   }
 
-  const hm10 = variant(0.10, "10%", targetRoi, "ROI");
-  const hm20 = variant(0.20, "20%", targetRoi, "ROI");
+  // Land uses much heavier down payments than the other asset types -- 30%/50% instead of
+  // 10%/20% -- reflecting how much harder land is to get conventional leverage on. The "10"/"20"
+  // suffixes on the returned/stored field names (maoHardMoney10, MAO Hard Money (10% Down), etc.)
+  // stay fixed regardless -- they just mean "lower-leverage variant" / "higher-leverage variant"
+  // now, not literally 10%/20% -- renaming them would touch live Sheet column names for no benefit.
+  const dp1Pct = isLand ? 0.30 : 0.10;
+  const dp1Label = isLand ? "30%" : "10%";
+  const dp2Pct = isLand ? 0.50 : 0.20;
+  const dp2Label = isLand ? "50%" : "20%";
+  const hm10 = variant(dp1Pct, dp1Label, targetRoi, "ROI");
+  const hm20 = variant(dp2Pct, dp2Label, targetRoi, "ROI");
 
   const sheetBlurb = (label, mao, explanation) =>
     `Maximum Allowable Offer — ${label}: ${money(mao)}\n(${explanation}) = ${money(mao)}`;
   const fullBreakdown = [
     sheetBlurb("Cash Buyer", cash.mao, cash.explanation),
-    sheetBlurb("Hard Money Buyer (10% Down)", hm10.mao, hm10.explanation),
-    sheetBlurb("Hard Money Buyer (20% Down)", hm20.mao, hm20.explanation)
+    sheetBlurb(`Hard Money Buyer (${dp1Label} Down)`, hm10.mao, hm10.explanation),
+    sheetBlurb(`Hard Money Buyer (${dp2Label} Down)`, hm20.mao, hm20.explanation)
   ].join("\n\n");
 
   return {
     maoCash: cash.mao, maoHardMoney10: hm10.mao, maoHardMoney20: hm20.mao,
     cashExplanation: cash.explanation, hm10Explanation: hm10.explanation, hm20Explanation: hm20.explanation,
-    fullBreakdown, tierName, targetRoi
+    fullBreakdown, tierName, targetRoi, hm10Label: dp1Label, hm20Label: dp2Label
   };
 }
 
@@ -2162,9 +2219,9 @@ async function submitLead(container) {
         referrerName: answers.referrerName, referrerPhone: answers.referrerPhone,
         sellerContactName: answers.sellerContactName, sellerContactPhone: answers.sellerContactPhone,
         sellerContactEmail: answers.sellerContactEmail,
-        street: answers.street, city: answers.city, state: answers.state, zip: answers.zip, units: answers.units,
+        street: answers.street, parcelIds: answers.parcelIds, city: answers.city, state: answers.state, zip: answers.zip, units: answers.units,
         assetType: answers.assetType, assetSubtype: answers.assetSubtype,
-        beds: answers.beds, baths: answers.baths, sqft: answers.sqft, acreage: answers.acreage,
+        beds: answers.beds, baths: answers.baths, sqft: answers.sqft, acreage: answers.acreage, landZoning: answers.landZoning,
         dealType: answers.dealType,
         arv: answers.arv, asIsValue: answers.asIsValue, picturesLink: answers.picturesLink, rehabEstimate: answers.rehabEstimate,
         rehabEstimateLow: answers.rehabEstimateLow, rehabEstimateHigh: answers.rehabEstimateHigh,
@@ -2395,11 +2452,15 @@ function buildLeadFields(lead) {
   }
   fields.push(
     ["Address", `${lead["Street Address"]}, ${lead["City"]}, ${lead["State"]} ${lead["Zip"]}`],
+    ["Parcel ID(s)", lead["Parcel IDs"] || "—"],
     ["Units", lead["Units"]],
     ["Asset Type", lead["Asset Type"]], ["Subtype", lead["Asset Subtype"] || "—"],
     ["Beds", lead["Beds"] || "—"], ["Baths", lead["Baths"] || "—"], ["Acreage", lead["Acreage"] || "—"], ["Sq Ft", lead["Sq Ft"] || "—"],
     ["Deal Type", lead["Deal Type"] || "—"]
   );
+  if (lead["Asset Type"] === "Land") {
+    fields.push(["Zoning", lead["Land Zoning"] || "—"]);
+  }
   if (lead["Deal Type"] === "Cash Deal") {
     fields.push(
       ["ARV", lead["ARV"] || "—"],
@@ -2876,10 +2937,10 @@ function openMaoCalculator() {
       <strong>Cash Buyer MAO:</strong> ${fmt(lastMaoCalcSuite.maoCash)}
       <br><span class="small-muted">(${lastMaoCalcSuite.cashExplanation})</span>
       <hr style="border: none; border-top: 1px solid currentColor; opacity: 0.2; margin: 10px 0;">
-      <strong>Hard Money Buyer MAO (10% Down):</strong> ${fmt(lastMaoCalcSuite.maoHardMoney10)}
+      <strong>Hard Money Buyer MAO (${lastMaoCalcSuite.hm10Label} Down):</strong> ${fmt(lastMaoCalcSuite.maoHardMoney10)}
       <br><span class="small-muted">(${lastMaoCalcSuite.hm10Explanation})</span>
       <hr style="border: none; border-top: 1px solid currentColor; opacity: 0.2; margin: 10px 0;">
-      <strong>Hard Money Buyer MAO (20% Down):</strong> ${fmt(lastMaoCalcSuite.maoHardMoney20)}
+      <strong>Hard Money Buyer MAO (${lastMaoCalcSuite.hm20Label} Down):</strong> ${fmt(lastMaoCalcSuite.maoHardMoney20)}
       <br><span class="small-muted">(${lastMaoCalcSuite.hm20Explanation})</span>
     `;
     if (saveBtn) saveBtn.disabled = !leadSelected;
@@ -2965,8 +3026,8 @@ function openDetail(lead) {
       <div class="banner info" style="margin-top:16px; text-align:left; white-space:pre-wrap;">
         <strong>Wholesale Offer Math (admin-only)</strong>
         <br>Cash Buyer MAO: $${Number(lead["MAO Cash"]).toLocaleString()}
-        <br>Hard Money Buyer MAO (10% Down): $${Number(lead["MAO Hard Money (10% Down)"]).toLocaleString()}
-        <br>Hard Money Buyer MAO (20% Down): $${Number(lead["MAO Hard Money (20% Down)"]).toLocaleString()}
+        <br>Hard Money Buyer MAO (${lead["Asset Type"] === "Land" ? "30%" : "10%"} Down): $${Number(lead["MAO Hard Money (10% Down)"]).toLocaleString()}
+        <br>Hard Money Buyer MAO (${lead["Asset Type"] === "Land" ? "50%" : "20%"} Down): $${Number(lead["MAO Hard Money (20% Down)"]).toLocaleString()}
         <hr style="border: none; border-top: 1px solid currentColor; opacity: 0.2; margin: 10px 0;">
         ${escapeHtml(lead["MAO Breakdown"] || "")}
       </div>
