@@ -254,8 +254,17 @@ const steps = [
     key: "address",
     progress: true,
     render(root) {
+      const isSeller = answers.role === "Seller";
       root.innerHTML = `
         <h2 class="step-title">Property Address</h2>
+        ${!isSeller ? `
+          <div class="banner info">
+            Your contact info is filled in now, and it won't change between deals — this is a good
+            time to hit <strong>"Save My Progress"</strong> at the top of the page and bookmark the
+            link. Reopening it later brings you right back here with your name and contact info
+            already filled in, so entering your next deal is faster than starting over.
+          </div>
+        ` : ""}
         <p class="step-sub">Full U.S. address required for every submission.</p>
         <label class="field-label">Street address <span class="req">*</span></label>
         <input type="text" id="street-input" placeholder="123 Main St">
