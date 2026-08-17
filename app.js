@@ -742,6 +742,11 @@ const steps = [
             bottom) and upload it below. If it doesn't fit in one screenshot, upload as many as you need —
             we'd rather have the whole thing than a partial one.</li>
           </ol>
+          ${isResidential ? `
+            <p class="hint"><strong>Once you have both numbers, use whichever is LOWER as your ARV</strong>
+            in the field below — Chase's estimate, or the average ARV Google AI calculates from its comps.
+            Being conservative here protects the deal; overestimating ARV is what makes offers fall through.</p>
+          ` : ""}
           ${isLand ? `
             <p class="hint"><strong>For land, what a comp has in common matters more than how close it is.</strong>
             A comp must match on <strong>zoning</strong> (never compare commercial-zoned to residential-zoned
