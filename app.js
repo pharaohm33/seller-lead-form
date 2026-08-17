@@ -963,20 +963,20 @@ const steps = [
         } else {
           const discountedBase = 0.90 * negotiationBase;
           // Same 8% selling costs (realtor commission + escrow/title fees) the main MAO formula
-          // subtracts from ARV -- this banner was missing it entirely, which overstated the anchor.
-          const anchorSellingCosts = 0.08 * negotiationBase;
+          // subtracts from ARV -- this banner was missing it entirely, which overstated the ceiling.
+          const ceilingSellingCosts = 0.08 * negotiationBase;
           const negotiationOffer = usingAssessed
-            ? (discountedBase - rehab - anchorSellingCosts - wholesaleFee)
-            : (discountedBase - anchorSellingCosts - wholesaleFee);
+            ? (discountedBase - rehab - ceilingSellingCosts - wholesaleFee)
+            : (discountedBase - ceilingSellingCosts - wholesaleFee);
           assessedMaxOfferBanner.hidden = false;
           assessedMaxOfferBanner.innerHTML = `
-            <strong>Off-Market Negotiating Anchor:</strong> $${negotiationOffer.toLocaleString(undefined, {maximumFractionDigits: 0})}
+            <strong>Off-Market Negotiating Ceiling:</strong> $${negotiationOffer.toLocaleString(undefined, {maximumFractionDigits: 0})}
             <span class="small-muted">(90% of $${negotiationBase.toLocaleString()} ${negotiationLabel},
-            ${(usingAssessed && !isLand) ? `minus $${rehab.toLocaleString()} repairs, ` : ""}minus $${anchorSellingCosts.toLocaleString(undefined, {maximumFractionDigits: 0})}
+            ${(usingAssessed && !isLand) ? `minus $${rehab.toLocaleString()} repairs, ` : ""}minus $${ceilingSellingCosts.toLocaleString(undefined, {maximumFractionDigits: 0})}
             selling costs (8% of ${negotiationLabel} — realtor commission plus escrow/title fees), minus your
             $${wholesaleFee.toLocaleString(undefined, {maximumFractionDigits: 0})} wholesale fee)</span>
             <br><span class="small-muted">This is a negotiating tool for off-market deals, not a hard cap like
-            the Max Offer above. Use the ${negotiationLabel} as your anchor with the seller and cite the high end
+            the Max Offer above. Use the ${negotiationLabel} as your ceiling with the seller and cite the high end
             of your repair estimate to make the case for why the price needs to come down near here.</span>
           `;
         }
