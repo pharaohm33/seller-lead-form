@@ -709,10 +709,11 @@ const steps = [
       // the AI estimate repairs against an actual target value instead of guessing blind.
       const buildRepairPrompt = (arv) => {
         const arvPart = arv ? ` to reach an ARV of $${Number(arv).toLocaleString()} (from Chase Bank's Home Value Estimator)` : "";
-        // Wholesale deals are cosmetic-repair-only -- no bedroom/bathroom additions or conversions,
-        // so tell the AI to price the repair for the CURRENT bed/bath count, not a hypothetical one.
+        // Wholesale deals don't add or convert bedrooms/bathrooms, so tell the AI to price the
+        // repair for the CURRENT bed/bath count, not a hypothetical one -- this doesn't limit the
+        // repair scope itself, which can still run anywhere from light cosmetic to a full gut.
         const bedBathPart = (isResidential && answers.beds && answers.baths)
-          ? ` It's currently ${answers.beds} bed / ${answers.baths} bath -- estimate cosmetic repair costs only for that existing layout, no bedroom or bathroom additions or conversions (that's not customary for a wholesale deal).`
+          ? ` It's currently ${answers.beds} bed / ${answers.baths} bath -- estimate repair costs for that existing layout (however light or heavy the work actually is), with no bedroom or bathroom additions or conversions (that's not customary for a wholesale deal).`
           : "";
         return `how much fix and flip investor repair is needed at ${addressLine}${arvPart}?${bedBathPart} ${zillowSearchUrl}`;
       };
@@ -815,8 +816,9 @@ const steps = [
           <input type="number" id="rehab-high-input" placeholder="$">
           <p class="hint">To estimate this, ${googleAiHow}. It's important to also give it the for-sale listing
           link or a link to pictures of the property so it can actually see the property's condition — a repair
-          estimate without pictures is just a guess.${isResidential ? ` <strong>Cosmetic repairs only</strong> —
-          wholesale deals don't add or convert bedrooms/bathrooms.` : ""} Then ask:
+          estimate without pictures is just a guess.${isResidential ? ` <strong>No bedroom or bathroom
+          additions</strong> — wholesale deals don't add or convert them, though the repair itself can
+          still run as light or as heavy as the property actually needs.` : ""} Then ask:
           <br><span class="small-muted" id="repair-prompt-hint"></span></p>
           <div class="banner info" id="rehab-average-banner" hidden></div>
 
@@ -1047,7 +1049,7 @@ Search live for 3 to 5 properties that meet ALL of these rules:
 1. Sold within the last 12 months — strongly prefer comps sold within the last 6 months if there are enough to choose from. Comps older than 12 months don't count, no exceptions.
 2. Within a MAXIMUM of 1-mile STRAIGHT-LINE distance from the subject address (as the crow flies, not driving distance) — this is a hard limit, not a target, closer is always better. State your estimated straight-line distance for each one explicitly, and flag it clearly if you had to go close to the 1-mile edge because nothing closer was available.
 3. In excellent, fully remodeled, or brand-new condition — skip anything described as a fixer-upper, needing TLC, sold as-is, or a renovation/investment project.
-4. Same bedroom and bathroom count as the subject property (or as close as possible) — this is a wholesale deal with cosmetic repairs only, no bedroom or bathroom additions or conversions, so a comp with more beds or baths would overstate what this property can actually sell for as-is. Also ideally a small starter home or bungalow, similar in size and character to the subject property.
+4. Same bedroom and bathroom count as the subject property (or as close as possible) — this is a wholesale deal, so no bedroom or bathroom additions or conversions will happen before resale, meaning a comp with more beds or baths would overstate what this property can actually sell for as-is. Also ideally a small starter home or bungalow, similar in size and character to the subject property.
 
 If this is a non-disclosure state and you can't find actual sold prices, use active for-sale listings instead that meet the other three rules, and clearly label them as asking prices, not confirmed sale prices.
 
