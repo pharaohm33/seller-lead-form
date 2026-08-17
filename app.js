@@ -735,11 +735,13 @@ const steps = [
           repair estimate. For your first offer to the seller, start at the <strong>lowest</strong> of the
           calculated Max Allowable Offer figures below (not the Cash Buyer ceiling) — that gets a
           conservative opening offer out fast, without needing full comps research yet.</p>
-          <p class="hint"><strong>Step 2 — if the seller counters, refine with Google AI.</strong> Chase's
-          number is enough for a fast first offer. But once the seller comes back with a counter and it's
-          worth the extra time, run the AI comps research below and <strong>replace the ARV above</strong>
-          with the more accurate number Google AI calculates from real recent sales (or find one from
-          scratch if Chase didn't have data):</p>
+          <p class="hint"><strong>Step 2 — if the seller counters, all you have to do is press the
+          button below.</strong> Chase's number is enough for a fast first offer, but if the seller comes
+          back asking for more, tap <strong>"Get Comps Research Prompt for Google AI"</strong> below to
+          find out whether there's actually room to go higher — it's pre-filled with this property's
+          details, so all you have to do is copy it, paste it into Google AI, and see what comes back.
+          Then <strong>replace the ARV above</strong> with the more accurate number Google AI calculates
+          from real recent sales (or find one from scratch if Chase didn't have data):</p>
         ` : isLand ? `
           <p class="hint"><strong>Research this with Google AI.</strong> There's no bank estimator for land
           like there is for homes, so Google AI Mode is your primary source for value and comps here:</p>
@@ -755,6 +757,10 @@ const steps = [
             <li>Screenshot the <strong>full</strong> response (the comps list AND the calculations at the
             bottom) and upload it below. If it doesn't fit in one screenshot, upload as many as you need —
             we'd rather have the whole thing than a partial one.</li>
+            <li><strong>Review it before trusting it</strong> — read back through the comps and math and
+            make sure it actually looks right for this property. If anything seems off (a comp that's too
+            far away, in different condition than claimed, math that doesn't add up, etc.), write that in
+            Notes below so admin can see your reasoning.</li>
           </ol>
           ${isResidential ? `
             <p class="hint"><strong>Wholesale deals don't add beds or baths.</strong> Comps should match
