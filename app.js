@@ -709,7 +709,13 @@ const steps = [
       // the AI estimate repairs against an actual target value instead of guessing blind.
       const buildRepairPrompt = (arv) => {
         const arvPart = arv ? ` to reach an ARV of $${Number(arv).toLocaleString()} (from Chase Bank's Home Value Estimator)` : "";
-        return `how much fix and flip investor repair is needed at ${addressLine}${arvPart}? ${zillowSearchUrl}`;
+        // Match whatever bed/bath count the ARV is actually based on -- if Notes calls for adding a
+        // bed/bath to support the ARV (see the comps-check hint above), the repair cost for THAT is
+        // very different from a cosmetic repair of what's already there, so tell the AI explicitly.
+        const bedBathPart = (isResidential && answers.beds && answers.baths)
+          ? ` It's currently ${answers.beds} bed / ${answers.baths} bath -- if your notes call for adding a bed or bath to support that ARV, mention the target bed/bath count here too and ask specifically what that addition would cost, not just cosmetic repairs.`
+          : "";
+        return `how much fix and flip investor repair is needed at ${addressLine}${arvPart}?${bedBathPart} ${zillowSearchUrl}`;
       };
       const googleAiHow = `go to <strong>google.com</strong> and search anything (typing "ai" works fine, or just the
         address) — once results load, look at the row of tabs near the top of the page (next to "All", "Images",
@@ -743,9 +749,13 @@ const steps = [
             we'd rather have the whole thing than a partial one.</li>
           </ol>
           ${isResidential ? `
-            <p class="hint"><strong>Once you have both numbers, use whichever is LOWER as your ARV</strong>
-            in the field below — Chase's estimate, or the average ARV Google AI calculates from its comps.
-            Being conservative here protects the deal; overestimating ARV is what makes offers fall through.</p>
+            <p class="hint"><strong>Check the comps' beds/baths against the subject's.</strong> Look at
+            the CMA comps in your screenshots — if the comps used to calculate that ARV have more beds or
+            baths than this property currently has, the ARV may be assuming beds/baths it doesn't have yet.
+            If adding a bed or bath (using existing square footage, with Google AI's price-per-square-foot
+            adjustment already applied) would be needed to actually support that ARV, write that in Notes
+            below — e.g. "add 1 bath using existing sqft to support the $X ARV." Make sure the Rehab
+            Estimate prompt below reflects the same target bed/bath count you land on here.</p>
           ` : ""}
           ${isLand ? `
             <p class="hint"><strong>For land, what a comp has in common matters more than how close it is.</strong>
@@ -809,7 +819,9 @@ const steps = [
           <input type="number" id="rehab-high-input" placeholder="$">
           <p class="hint">To estimate this, ${googleAiHow}. It's important to also give it the for-sale listing
           link or a link to pictures of the property so it can actually see the property's condition — a repair
-          estimate without pictures is just a guess. Then ask:
+          estimate without pictures is just a guess.${isResidential ? ` <strong>If you noted a bed/bath addition
+          above, make sure the target count here matches it</strong> — adding a bed or bath costs very
+          differently than cosmetic repairs.` : ""} Then ask:
           <br><span class="small-muted" id="repair-prompt-hint"></span></p>
           <div class="banner info" id="rehab-average-banner" hidden></div>
 
