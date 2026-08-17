@@ -705,10 +705,12 @@ const steps = [
         .trim().replace(/[^a-zA-Z0-9]+/g, "-");
       const zillowSearchUrl = `https://www.zillow.com/homes/${zillowAddressSlug}_rb/`;
       // Depends on the current ARV input value, so it's rebuilt live in recomputeCashDeal() rather
-      // than computed once here -- feeding the Chase-sourced ARV back into the repair prompt lets
-      // the AI estimate repairs against an actual target value instead of guessing blind.
+      // than computed once here -- feeding the current ARV back into the repair prompt lets the AI
+      // estimate repairs against an actual target value instead of guessing blind. By the time repair
+      // costs matter, that ARV is usually the AI-CMA-refined number (see Step 2 above), not Chase's
+      // quick estimate, so it isn't attributed to a specific source here anymore.
       const buildRepairPrompt = (arv) => {
-        const arvPart = arv ? ` to reach an ARV of $${Number(arv).toLocaleString()} (from Chase Bank's Home Value Estimator)` : "";
+        const arvPart = arv ? ` to reach an ARV of $${Number(arv).toLocaleString()}` : "";
         // Wholesale deals don't add or convert bedrooms/bathrooms, so tell the AI to price the
         // repair for the CURRENT bed/bath count, not a hypothetical one -- this doesn't limit the
         // repair scope itself, which can still run anywhere from light cosmetic to a full gut.
@@ -724,14 +726,19 @@ const steps = [
         <h2 class="step-title">Cash Deal Details</h2>
 
         ${isResidential ? `
-          <p class="hint"><strong>Step 1 — get a baseline from Chase.</strong> Use
+          <p class="hint"><strong>Step 1 — get a fast first offer from Chase.</strong> Use
           <a href="https://www.chase.com/personal/mortgage/calculators-resources/home-value-estimator" target="_blank" rel="noopener">Chase's Home Value Estimator</a>
           for this address. If a value comes up: if <strong>no repairs are needed</strong>, that's your As-Is
           Value too (enter the same number as ARV below). If <strong>repairs are needed</strong>, use that
           Chase number as your <strong>ARV</strong> — As-Is Value will be computed below by subtracting your
-          repair estimate.</p>
-          <p class="hint"><strong>Step 2 — double-check it with Google AI.</strong> Always verify the Chase
-          number this way (or find one from scratch if Chase didn't have data):</p>
+          repair estimate. For your first offer to the seller, start at the <strong>lowest</strong> of the
+          calculated Max Allowable Offer figures below (not the Cash Buyer ceiling) — that gets a
+          conservative opening offer out fast, without needing full comps research yet.</p>
+          <p class="hint"><strong>Step 2 — if the seller counters, refine with Google AI.</strong> Chase's
+          number is enough for a fast first offer. But once the seller comes back with a counter and it's
+          worth the extra time, run the AI comps research below and <strong>replace the ARV above</strong>
+          with the more accurate number Google AI calculates from real recent sales (or find one from
+          scratch if Chase didn't have data):</p>
         ` : isLand ? `
           <p class="hint"><strong>Research this with Google AI.</strong> There's no bank estimator for land
           like there is for homes, so Google AI Mode is your primary source for value and comps here:</p>
