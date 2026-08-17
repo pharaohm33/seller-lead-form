@@ -186,10 +186,11 @@ const steps = [
 
         <div class="banner info" id="save-progress-nudge" style="margin-top:16px;" hidden>
           The next step asks for the seller/realtor/broker's contact info, which is different for
-          every deal — so <strong>right now, before you fill that in</strong>, is the best time to
-          hit <strong>"Save My Progress"</strong> at the top of the page and bookmark the link.
-          Reopening it later brings you right back here with your own name and contact info already
-          filled in, ready for the next seller.
+          every deal — so <strong>right now, before you fill in the next page</strong> (after you
+          fill out this page), is the best time to hit <strong>"Save My Progress"</strong> at the
+          top of the page and bookmark the link. Reopening it later brings you right back here with
+          your own name and contact info already filled in, ready for the next seller/realtor/broker
+          and address etc.
         </div>
       `;
       const saveNudge = root.querySelector("#save-progress-nudge");
