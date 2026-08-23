@@ -833,7 +833,9 @@ const steps = [
           estimate without pictures is just a guess.${isResidential ? ` <strong>No bedroom or bathroom
           additions</strong> — wholesale deals don't add or convert them, though the repair itself can
           still run as light or as heavy as the property actually needs.` : ""} Then ask:
-          <br><span class="small-muted" id="repair-prompt-hint"></span></p>
+          <br><span class="small-muted" id="repair-prompt-hint"></span>
+          <br><button type="button" class="btn secondary" id="repair-prompt-copy-btn" style="margin-top:8px;">Copy Prompt</button>
+          </p>
           <div class="banner info" id="rehab-average-banner" hidden></div>
 
           ${hasCompsWorkflow ? `<div class="banner info" id="as-is-value-banner" hidden></div>` : ""}
@@ -997,6 +999,22 @@ const steps = [
         feeManuallyEdited = true;
         recomputeCashDeal();
       };
+
+      if (!isLand) {
+        root.querySelector("#repair-prompt-copy-btn").onclick = () => {
+          const arv = Number(root.querySelector("#arv-input").value) || 0;
+          const text = buildRepairPrompt(arv);
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(() => {
+              alert("Prompt copied to clipboard.");
+            }).catch(() => {
+              prompt("Copy this prompt:", text);
+            });
+          } else {
+            prompt("Copy this prompt:", text);
+          }
+        };
+      }
 
       if (hasCompsWorkflow) {
         const compsPromptToggleBtn = root.querySelector("#comps-prompt-toggle-btn");
