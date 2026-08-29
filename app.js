@@ -864,6 +864,12 @@ const steps = [
           <div id="cma-screenshots-list" style="margin-top:8px;"></div>
         ` : ""}
 
+        ${isResidential ? `
+          <label class="field-label">Chase Bank Estimated Value
+            <span class="small-muted">(optional — the raw number from Chase's Home Value Estimator, for admin's reference alongside the ARV below)</span></label>
+          <input type="number" id="chase-estimate-input" placeholder="$">
+        ` : ""}
+
         <label class="field-label">${isLand ? "As-Is Value" : "ARV"}
           <span class="small-muted">${isLand ? "(current market value — land offers are based on this directly, not a post-repair value)" : "(After Repair Value)"}</span>${isResidential ? "" : ` <span class="req">*</span>`}</label>
         <input type="number" id="arv-input" placeholder="$">
@@ -897,7 +903,9 @@ const steps = [
         <label class="field-label">County Assessed Value <span class="small-muted">(optional, if known)</span></label>
         <input type="number" id="assessed-value-input" placeholder="$">
         <p class="hint">Don't have this handy? ${googleAiHow}, then ask:
-        <br><span class="small-muted">"${assessedValuePrompt}"</span></p>
+        <br><span class="small-muted">"${assessedValuePrompt}"</span>
+        <br><button type="button" class="btn secondary" id="assessed-value-prompt-copy-btn" style="margin-top:8px;">Copy Prompt</button>
+        </p>
 
         <label class="field-label">Price they'd accept to close quickly <span class="small-muted">(their bottom dollar — we'll see if we can make that work, optional)</span></label>
         <input type="number" id="bottom-dollar-input" placeholder="$">
@@ -927,6 +935,7 @@ const steps = [
         `}
       `;
       root.querySelector("#arv-input").value = answers.arv || "";
+      if (isResidential) root.querySelector("#chase-estimate-input").value = answers.chaseEstimate || "";
       root.querySelector("#pictures-link-input").value = answers.picturesLink || "";
       if (!isLand) {
         root.querySelector("#rehab-low-input").value = answers.rehabEstimateLow || "";
@@ -1078,6 +1087,8 @@ const steps = [
           }
         };
       }
+
+      wireCopyPromptButton(root, "#assessed-value-prompt-copy-btn", () => assessedValuePrompt);
 
       if (hasCompsWorkflow) {
         const compsPromptToggleBtn = root.querySelector("#comps-prompt-toggle-btn");
@@ -1240,7 +1251,9 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
         return ok;
       }
       const isLand = answers.assetType === "Land";
+      const isResidentialForChase = answers.assetType === "Residential Property (1-4 units)";
       answers.arv = root.querySelector("#arv-input").value;
+      if (isResidentialForChase) answers.chaseEstimate = root.querySelector("#chase-estimate-input").value;
       answers.picturesLink = root.querySelector("#pictures-link-input").value.trim();
       // Land has no Rehab Estimate inputs -- offers run purely off the As-Is Value entered above.
       answers.rehabEstimateLow = isLand ? "" : root.querySelector("#rehab-low-input").value;
@@ -1396,14 +1409,21 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
     render(root) {
       root.innerHTML = `
         <h2 class="step-title">Down Payment</h2>
-        <p class="step-sub">How much down payment does the seller need to move into their next stage?
-        It's okay to skip this if they're not sure yet.</p>
+        <p class="step-sub">What does the seller intend to do with the down payment from this
+        transaction, and roughly how much are they looking for? It's okay to skip this if they'd
+        rather not say.</p>
+
+        <label class="field-label">What will they use it for? <span class="small-muted">(optional)</span></label>
+        <textarea id="dp-intent-input" placeholder="e.g. pay off their mortgage, move into a new place, medical bills..." ${answers.dpSkipped ? "disabled" : ""}></textarea>
+
+        <label class="field-label" style="margin-top:16px;">Approximate dollar amount <span class="small-muted">(optional)</span></label>
         <input type="number" id="dp-input" placeholder="Down payment amount" ${answers.dpSkipped ? "disabled" : ""}>
         <div style="margin-top:10px;">
-          <button type="button" class="btn ghost-small ${answers.dpSkipped ? "active" : ""}" id="skip-dp-btn">Skip / not sure</button>
+          <button type="button" class="btn ghost-small ${answers.dpSkipped ? "active" : ""}" id="skip-dp-btn">Skip / seller prefers not to answer</button>
         </div>
         <div id="nonneg-wrap"></div>
       `;
+      root.querySelector("#dp-intent-input").value = answers.downPaymentIntent || "";
       root.querySelector("#dp-input").value = answers.downPaymentNeeded || "";
       const nonnegWrap = root.querySelector("#nonneg-wrap");
       function renderNonNeg() {
@@ -1421,18 +1441,22 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
         }
       }
       renderNonNeg();
+      root.querySelector("#dp-intent-input").oninput = (e) => {
+        answers.downPaymentIntent = e.target.value;
+      };
       root.querySelector("#dp-input").oninput = (e) => {
         answers.downPaymentNeeded = e.target.value;
         renderNonNeg();
       };
       root.querySelector("#skip-dp-btn").onclick = () => {
         answers.dpSkipped = !answers.dpSkipped;
-        if (answers.dpSkipped) { answers.downPaymentNeeded = ""; answers.downPaymentNonNegotiable = ""; }
+        if (answers.dpSkipped) { answers.downPaymentNeeded = ""; answers.downPaymentNonNegotiable = ""; answers.downPaymentIntent = ""; }
         renderStep();
       };
     },
     validate(root) {
       if (answers.dpSkipped) return true;
+      answers.downPaymentIntent = root.querySelector("#dp-intent-input").value.trim();
       answers.downPaymentNeeded = root.querySelector("#dp-input").value;
       if (!answers.downPaymentNeeded) return true; // treated as skipped
       const ok = !!answers.downPaymentNonNegotiable;
@@ -1452,9 +1476,40 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
           information readily accessible — we're not able to evaluate deals without it.
         </div>
       `;
+      const incomeAddressLine = `${answers.street || ""}, ${answers.city || ""}, ${answers.state || ""} ${answers.zip || ""}`.trim();
+      const taxesInsurancePrompt = `what are the estimated annual property taxes and homeowners insurance for this property: ${incomeAddressLine}? Give a single best estimate for each, not just a range.`;
+      const incomeGoogleAiHow = `go to <strong>google.com</strong> and search anything (typing "ai" works fine, or just the
+        address) — once results load, look at the row of tabs near the top of the page (next to "All", "Images",
+        "News", "Shopping") and click <strong>"AI Mode"</strong>`;
       if (answers.assetType === "Residential Property (1-4 units)") {
+        // Only offered on the not-rent-ready Seller Financing path (see rentReadyCheck) -- if admin's
+        // eventual buyer plans to resell rather than hold this as a rental, income/NOI research is
+        // wasted effort. Ask admin if unsure whether the buyer intends to keep or sell.
+        const showsSellSkip = answers.propertyRentReady === "No";
+        if (showsSellSkip && answers.buyerIntendsToSell) {
+          root.innerHTML = `
+            <h2 class="step-title">Property Income (NOI)</h2>
+            <div style="margin-bottom:16px;">
+              <button type="button" class="btn ghost-small active" id="buyer-sells-btn">Admin's buyer intends to sell property (ask admin if unsure)</button>
+            </div>
+            <div class="banner info">Skipping income/NOI details since admin's buyer intends to sell this property.</div>
+          `;
+          root.querySelector("#buyer-sells-btn").onclick = () => {
+            answers.buyerIntendsToSell = false;
+            renderStep();
+          };
+          return;
+        }
         root.innerHTML = `
           <h2 class="step-title">Property Income (NOI)</h2>
+          ${showsSellSkip ? `
+            <div style="margin-bottom:16px;">
+              <button type="button" class="btn ghost-small" id="buyer-sells-btn">Admin's buyer intends to sell property (ask admin if unsure)</button>
+              <p class="hint" style="margin-top:8px;">If admin's buyer for this deal plans to resell rather
+              than hold it as a rental, tap this to skip the income/NOI questions below. If they intend to
+              keep and rent it out, leave this off and fill out the section as normal.</p>
+            </div>
+          ` : ""}
           ${disclaimer}
           <label class="field-label">Is the property currently occupied by a paying tenant? <span class="req">*</span></label>
           <div class="choice-group" id="occupied-group">
@@ -1463,6 +1518,12 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
           <div class="error-text" id="occupied-error">Please choose one.</div>
           <div id="income-sub"></div>
         `;
+        if (showsSellSkip) {
+          root.querySelector("#buyer-sells-btn").onclick = () => {
+            answers.buyerIntendsToSell = true;
+            renderStep();
+          };
+        }
         const sub = root.querySelector("#income-sub");
         const renderIncomeSub = () => {
           if (answers.residentialOccupied === "Occupied (has a landlord/tenant)") {
@@ -1477,6 +1538,10 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
               <input type="number" id="occ-taxes-input" placeholder="$">
               <label class="field-label">Annual Insurance</label>
               <input type="number" id="occ-insurance-input" placeholder="$">
+              <p class="hint">Don't have this from the seller? ${incomeGoogleAiHow}, then ask:
+              <br><span class="small-muted">"${taxesInsurancePrompt}"</span>
+              <br><button type="button" class="btn secondary" id="occ-taxes-prompt-copy-btn" style="margin-top:8px;">Copy Prompt</button>
+              </p>
 
               <label class="field-label" style="margin-top:16px;">Does the seller have 12 months of rent rolls for this property? <span class="req">*</span></label>
               <div class="choice-group" id="rent-rolls-group">
@@ -1515,6 +1580,7 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
             sub.querySelector("#noi-input").value = answers.residentialNOI || "";
             sub.querySelector("#occ-taxes-input").value = answers.annualPropertyTaxes || "";
             sub.querySelector("#occ-insurance-input").value = answers.annualInsurance || "";
+            wireCopyPromptButton(sub, "#occ-taxes-prompt-copy-btn", () => taxesInsurancePrompt);
             if (occUnits === 1) {
               sub.querySelector("#lease-end-input").value = answers.leaseEndDate || "";
               sub.querySelectorAll("#tenant-move-early-group .choice-btn").forEach(btn => {
@@ -1662,7 +1728,10 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
               ${answers.city || "this city"}${answers.state ? ", " + answers.state : ""}
               (search Google, or check the county assessor and an insurance quote, and use the
               middle of any range you find), and enter them below — these apply to both rental
-              strategies below.</p>
+              strategies below. Or ${incomeGoogleAiHow}, then ask:
+              <br><span class="small-muted">"${taxesInsurancePrompt}"</span>
+              <br><button type="button" class="btn secondary" id="vacant-taxes-prompt-copy-btn" style="margin-top:8px;">Copy Prompt</button>
+              </p>
               <label class="field-label">Annual Property Taxes <span class="req">*</span></label>
               <input type="number" id="taxes-input" placeholder="$">
               <div class="error-text" id="taxes-error">Required.</div>
@@ -1698,6 +1767,7 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
             `;
             sub.querySelector("#taxes-input").value = answers.annualPropertyTaxes || "";
             sub.querySelector("#insurance-input").value = answers.annualInsurance || "";
+            wireCopyPromptButton(sub, "#vacant-taxes-prompt-copy-btn", () => taxesInsurancePrompt);
             sub.querySelector("#rent-input").value = answers.rentcastMonthlyRent || "";
             if (units !== 1) {
               sub.querySelector("#expense-ratio-input").value = typeof answers.expenseRatio === "number" || /^\d+$/.test(answers.expenseRatio || "") ? answers.expenseRatio : "";
@@ -1814,6 +1884,7 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
     },
     validate(root) {
       if (answers.assetType === "Residential Property (1-4 units)") {
+        if (answers.propertyRentReady === "No" && answers.buyerIntendsToSell) return true;
         const ok1 = !!answers.residentialOccupied;
         toggleError(root, "#occupied-error", !ok1);
         if (!ok1) return false;
@@ -2029,6 +2100,7 @@ function buildAnswerRows() {
     || (answers.dealType === "Seller Financing / Creative Finance" && answers.propertyRentReady === "No");
   if (showsCashDealFields) {
     rows.push(
+      ["Chase Bank Estimated Value", answers.chaseEstimate || "—"],
       ["ARV", answers.arv || "—"],
       ["As-Is Value", answers.asIsValue || "—"],
       ["Pictures Link", answers.picturesLink || "—"],
@@ -2051,7 +2123,12 @@ function buildAnswerRows() {
   if (answers.dealType !== "Cash Deal") {
     if (answers.assetType === "Residential Property (1-4 units)") {
       rows.push(["Rent Ready", answers.propertyRentReady || "—"]);
-      rows.push(["Occupied Status", answers.residentialOccupied || "—"]);
+      if (answers.propertyRentReady === "No") {
+        rows.push(["Buyer Intends To Sell", answers.buyerIntendsToSell ? "Yes" : "No"]);
+      }
+      if (!answers.buyerIntendsToSell) {
+        rows.push(["Occupied Status", answers.residentialOccupied || "—"]);
+      }
       if (answers.residentialOccupied === "Vacant (no tenant)") {
         rows.push(
           ["Annual Property Taxes", answers.annualPropertyTaxes || "—"],
@@ -2102,12 +2179,32 @@ function buildAnswerRows() {
     ["Willing: Payment Structure", answers.paymentStructureWilling],
     ["Price Sought", answers.priceSought],
     ["Price Reasoning", answers.priceReasoning],
+    ["Down Payment Intended Use", answers.dpSkipped || !answers.downPaymentIntent ? "—" : answers.downPaymentIntent],
     ["Down Payment Needed", answers.dpSkipped || !answers.downPaymentNeeded ? "Skipped" : answers.downPaymentNeeded],
     ["Seller Flexible on Down Payment", answers.downPaymentNonNegotiable || "N/A"],
     ["On/Off Market", answers.marketStatus || "—"],
     ["Listing Source Link", answers.sourceLink || "—"]
   );
   return rows;
+}
+
+// Shared by every "Copy Prompt" button (county assessed value, taxes, insurance, etc.) so each new
+// one doesn't need to reimplement the clipboard-with-fallback dance.
+function wireCopyPromptButton(root, buttonSelector, getText) {
+  const btn = root.querySelector(buttonSelector);
+  if (!btn) return;
+  btn.onclick = () => {
+    const text = getText();
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(() => {
+        alert("Prompt copied to clipboard.");
+      }).catch(() => {
+        prompt("Copy this prompt:", text);
+      });
+    } else {
+      prompt("Copy this prompt:", text);
+    }
+  };
 }
 
 function bindChoiceGroup(root, selector, answerKey) {
@@ -2363,7 +2460,7 @@ async function submitLead(container) {
         assetType: answers.assetType, assetSubtype: answers.assetSubtype,
         beds: answers.beds, baths: answers.baths, sqft: answers.sqft, acreage: answers.acreage, landZoning: answers.landZoning,
         dealType: answers.dealType,
-        arv: answers.arv, asIsValue: answers.asIsValue, picturesLink: answers.picturesLink, rehabEstimate: answers.rehabEstimate,
+        arv: answers.arv, chaseEstimate: answers.chaseEstimate, asIsValue: answers.asIsValue, picturesLink: answers.picturesLink, rehabEstimate: answers.rehabEstimate,
         rehabEstimateLow: answers.rehabEstimateLow, rehabEstimateHigh: answers.rehabEstimateHigh,
         countyAssessedValue: answers.countyAssessedValue,
         cmaScreenshotUrls: (answers.cmaScreenshotUrls || []).join("\n"),
@@ -2373,6 +2470,7 @@ async function submitLead(container) {
         maoBreakdown: answers.maoBreakdown,
         underContract: answers.underContract, sellerAcceptedPrice: answers.sellerAcceptedPrice,
         propertyRentReady: answers.propertyRentReady,
+        buyerIntendsToSell: answers.buyerIntendsToSell ? "Yes" : "",
         occupiedStatus: answers.residentialOccupied, monthlyRentEstimate: answers.rentcastMonthlyRent,
         strAnnualRevenue: answers.strAnnualRevenue, strNOI: answers.strNOI,
         annualPropertyTaxes: answers.annualPropertyTaxes, annualInsurance: answers.annualInsurance,
@@ -2387,6 +2485,7 @@ async function submitLead(container) {
         totalDebt: answers.debtUnknown ? "" : answers.totalDebt,
         seniorLoanWilling: answers.seniorLoanWilling, paymentStructureWilling: answers.paymentStructureWilling,
         priceSought: answers.priceSought, priceReasoning: answers.priceReasoning,
+        downPaymentIntent: answers.dpSkipped ? "" : answers.downPaymentIntent,
         downPaymentNeeded: answers.dpSkipped ? "" : answers.downPaymentNeeded,
         downPaymentNonNegotiable: answers.downPaymentNonNegotiable,
         marketStatus: answers.marketStatus, sourceLink: answers.sourceLink
@@ -2609,6 +2708,7 @@ function buildLeadFields(lead) {
     || (lead["Deal Type"] === "Seller Financing / Creative Finance" && lead["Rent Ready"] === "No");
   if (showsCashDealFields) {
     fields.push(
+      ["Chase Bank Estimated Value", lead["Chase Estimated Value"] || "—"],
       ["ARV", lead["ARV"] || "—"],
       ["As-Is Value", lead["As-Is Value"] || "—"],
       ["Pictures Link", lead["Pictures Link"] || "—"],
@@ -2631,7 +2731,13 @@ function buildLeadFields(lead) {
   if (lead["Deal Type"] !== "Cash Deal") {
     if (lead["Asset Type"] === "Residential Property (1-4 units)") {
       fields.push(["Rent Ready", lead["Rent Ready"] || "—"]);
-      fields.push(["Occupied Status", lead["Occupied Status"] || "—"]);
+      const buyerIntendsToSell = lead["Rent Ready"] === "No" && lead["Buyer Intends To Sell"] === "Yes";
+      if (lead["Rent Ready"] === "No") {
+        fields.push(["Buyer Intends To Sell", lead["Buyer Intends To Sell"] || "No"]);
+      }
+      if (!buyerIntendsToSell) {
+        fields.push(["Occupied Status", lead["Occupied Status"] || "—"]);
+      }
       if (lead["Occupied Status"] === "Vacant (no tenant)") {
         fields.push(
           ["Annual Property Taxes", lead["Annual Property Taxes"] || "—"],
@@ -2681,6 +2787,7 @@ function buildLeadFields(lead) {
     ["Willing: New Senior Loan", lead["Senior Loan Willing"]],
     ["Willing: Payment Structure", lead["Payment Structure Willing"]],
     ["Price Sought", lead["Price Sought"]], ["Price Reasoning", lead["Price Reasoning"]],
+    ["Down Payment Intended Use", lead["Down Payment Intent"] || "—"],
     ["Down Payment Needed", lead["Down Payment Needed"]],
     ["Seller Flexible on Down Payment", lead["Down Payment Non-Negotiable"]],
     ["On/Off Market", lead["Market Status"] || "—"],
