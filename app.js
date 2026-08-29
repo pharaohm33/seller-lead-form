@@ -670,9 +670,45 @@ const steps = [
     }
   },
   {
+    key: "rentReadyCheck",
+    progress: true,
+    // Only relevant for residential Seller Financing deals -- Cash Deals already get the full
+    // ARV/rehab/comps workflow unconditionally, and this question doesn't map cleanly onto
+    // Commercial/Business/Land the way it does a rental house.
+    skip() {
+      return answers.dealType !== "Seller Financing / Creative Finance"
+        || answers.assetType !== "Residential Property (1-4 units)";
+    },
+    render(root) {
+      root.innerHTML = `
+        <h2 class="step-title">Property Condition</h2>
+        <p class="step-sub">This determines what we need from you next.</p>
+        <label class="field-label">Is the property currently in rent-ready condition? <span class="req">*</span></label>
+        <div class="choice-group" id="rent-ready-group">
+          ${["Yes", "No"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
+        </div>
+        <div class="error-text" id="rent-ready-error">Please choose one.</div>
+        <p class="hint">If <strong>No</strong>, the next step walks you through the same ARV, rehab estimate,
+        and comps research used for cash deals. Admin uses that alongside the seller financing terms to
+        structure a blended hard money + seller carryback offer.</p>
+      `;
+      bindChoiceGroup(root, "#rent-ready-group", "propertyRentReady");
+    },
+    validate(root) {
+      const ok = !!answers.propertyRentReady;
+      toggleError(root, "#rent-ready-error", !ok);
+      return ok;
+    }
+  },
+  {
     key: "cashDealDetails",
     progress: true,
-    skip() { return answers.dealType !== "Cash Deal"; },
+    skip() {
+      const isRentReadyException = answers.dealType === "Seller Financing / Creative Finance"
+        && answers.assetType === "Residential Property (1-4 units)"
+        && answers.propertyRentReady === "No";
+      return answers.dealType !== "Cash Deal" && !isRentReadyException;
+    },
     render(root) {
       const isSeller = answers.role === "Seller";
       if (isSeller) {
@@ -1949,7 +1985,13 @@ function buildAnswerRows() {
   if (answers.assetType === "Land") {
     rows.push(["Zoning", answers.landZoning || "—"]);
   }
-  if (answers.dealType === "Cash Deal") {
+  // Seller Financing deals on a not-rent-ready residential property collect the same ARV/rehab/comps
+  // data Cash Deals do (see rentReadyCheck + cashDealDetails' skip()), so admin has both that AND the
+  // income/NOI numbers below to structure a blended hard money + seller carryback offer -- these two
+  // blocks are independent (not else-if) specifically to allow that overlap.
+  const showsCashDealFields = answers.dealType === "Cash Deal"
+    || (answers.dealType === "Seller Financing / Creative Finance" && answers.propertyRentReady === "No");
+  if (showsCashDealFields) {
     rows.push(
       ["ARV", answers.arv || "—"],
       ["As-Is Value", answers.asIsValue || "—"],
@@ -1962,57 +2004,61 @@ function buildAnswerRows() {
       ["Bottom Dollar Price", answers.bottomDollarPrice || "—"],
       ["Notes (Why Sell / Good Lead)", answers.cashDealNotes || "—"]
     );
-    if (answers.role !== "Seller") {
+    if (answers.role !== "Seller" && answers.dealType === "Cash Deal") {
       rows.push(
         ["Wholesale Fee", answers.wholesaleFee || "—"],
         ["Under Contract", answers.underContract || "—"],
         ["Seller Accepted Price", answers.sellerAcceptedPrice || "—"]
       );
     }
-  } else if (answers.assetType === "Residential Property (1-4 units)") {
-    rows.push(["Occupied Status", answers.residentialOccupied || "—"]);
-    if (answers.residentialOccupied === "Vacant (no tenant)") {
-      rows.push(
-        ["Annual Property Taxes", answers.annualPropertyTaxes || "—"],
-        ["Annual Insurance", answers.annualInsurance || "—"],
-        ["Rentcast Monthly Rent", answers.rentcastMonthlyRent || "—"],
-        ["Expense Ratio %", answers.expenseRatio || "—"],
-        ["Long-Term Rental NOI", answers.residentialNOI || "—"],
-        ["STR Annual Revenue (airdna.co)", answers.strAnnualRevenue || "—"],
-        ["Short-Term Rental NOI", answers.strNOI || "—"]
-      );
-    } else if (answers.residentialOccupied === "Occupied (has a landlord/tenant)") {
-      rows.push(
-        ["Long-Term Rental NOI", answers.residentialNOI || "—"],
-        ["Annual Property Taxes", answers.annualPropertyTaxes || "—"],
-        ["Annual Insurance", answers.annualInsurance || "—"],
-        ["Has 12mo Rent Rolls", answers.hasRentRolls || "—"],
-        ["Has 12mo P&L", answers.hasRentRolls === "Yes" ? (answers.hasProfitLoss || "—") : "N/A"],
-        ["Deliverable Vacant", answers.deliverableVacant || "—"],
-        ["Current Lease Term", answers.currentLeaseTerm || "—"]
-      );
-      if (Number(answers.units) === 1) {
+  }
+  if (answers.dealType !== "Cash Deal") {
+    if (answers.assetType === "Residential Property (1-4 units)") {
+      rows.push(["Rent Ready", answers.propertyRentReady || "—"]);
+      rows.push(["Occupied Status", answers.residentialOccupied || "—"]);
+      if (answers.residentialOccupied === "Vacant (no tenant)") {
         rows.push(
-          ["Lease End Date", answers.leaseEndDate || "—"],
-          ["Tenant Would Move Early", answers.tenantWouldMoveEarly || "—"]
-        );
-      } else {
-        rows.push(["STR NOI Per Unit", answers.strNoiPerUnit || "—"]);
-      }
-      if (answers.deliverableVacant === "Yes" && answers.strAnnualRevenue) {
-        rows.push(
+          ["Annual Property Taxes", answers.annualPropertyTaxes || "—"],
+          ["Annual Insurance", answers.annualInsurance || "—"],
+          ["Rentcast Monthly Rent", answers.rentcastMonthlyRent || "—"],
+          ["Expense Ratio %", answers.expenseRatio || "—"],
+          ["Long-Term Rental NOI", answers.residentialNOI || "—"],
           ["STR Annual Revenue (airdna.co)", answers.strAnnualRevenue || "—"],
           ["Short-Term Rental NOI", answers.strNOI || "—"]
         );
+      } else if (answers.residentialOccupied === "Occupied (has a landlord/tenant)") {
+        rows.push(
+          ["Long-Term Rental NOI", answers.residentialNOI || "—"],
+          ["Annual Property Taxes", answers.annualPropertyTaxes || "—"],
+          ["Annual Insurance", answers.annualInsurance || "—"],
+          ["Has 12mo Rent Rolls", answers.hasRentRolls || "—"],
+          ["Has 12mo P&L", answers.hasRentRolls === "Yes" ? (answers.hasProfitLoss || "—") : "N/A"],
+          ["Deliverable Vacant", answers.deliverableVacant || "—"],
+          ["Current Lease Term", answers.currentLeaseTerm || "—"]
+        );
+        if (Number(answers.units) === 1) {
+          rows.push(
+            ["Lease End Date", answers.leaseEndDate || "—"],
+            ["Tenant Would Move Early", answers.tenantWouldMoveEarly || "—"]
+          );
+        } else {
+          rows.push(["STR NOI Per Unit", answers.strNoiPerUnit || "—"]);
+        }
+        if (answers.deliverableVacant === "Yes" && answers.strAnnualRevenue) {
+          rows.push(
+            ["STR Annual Revenue (airdna.co)", answers.strAnnualRevenue || "—"],
+            ["Short-Term Rental NOI", answers.strNOI || "—"]
+          );
+        }
       }
+    } else if (answers.assetType === "Commercial Property") {
+      rows.push(["NOI", answers.commercialNOI || "—"]);
+    } else if (answers.assetType === "Business") {
+      rows.push(
+        ["Annual Revenue", answers.businessRevenue || "—"],
+        [`Annual ${answers.businessEarningsType || "Earnings"}`, answers.businessEarnings || "—"]
+      );
     }
-  } else if (answers.assetType === "Commercial Property") {
-    rows.push(["NOI", answers.commercialNOI || "—"]);
-  } else if (answers.assetType === "Business") {
-    rows.push(
-      ["Annual Revenue", answers.businessRevenue || "—"],
-      [`Annual ${answers.businessEarningsType || "Earnings"}`, answers.businessEarnings || "—"]
-    );
   }
   rows.push(
     ["Total Debt", answers.debtUnknown ? "Unknown" : (answers.totalDebt || "—")],
@@ -2290,6 +2336,7 @@ async function submitLead(container) {
         maoCash: answers.maoCash, maoHardMoney10: answers.maoHardMoney10, maoHardMoney20: answers.maoHardMoney20,
         maoBreakdown: answers.maoBreakdown,
         underContract: answers.underContract, sellerAcceptedPrice: answers.sellerAcceptedPrice,
+        propertyRentReady: answers.propertyRentReady,
         occupiedStatus: answers.residentialOccupied, monthlyRentEstimate: answers.rentcastMonthlyRent,
         strAnnualRevenue: answers.strAnnualRevenue, strNOI: answers.strNOI,
         annualPropertyTaxes: answers.annualPropertyTaxes, annualInsurance: answers.annualInsurance,
@@ -2519,7 +2566,12 @@ function buildLeadFields(lead) {
   if (lead["Asset Type"] === "Land") {
     fields.push(["Zoning", lead["Land Zoning"] || "—"]);
   }
-  if (lead["Deal Type"] === "Cash Deal") {
+  // Mirrors buildAnswerRows() -- Seller Financing deals on a not-rent-ready residential property
+  // collect both the ARV/rehab/comps block AND the income/NOI block, so these two ifs are
+  // independent (not else-if) to let both show for that case.
+  const showsCashDealFields = lead["Deal Type"] === "Cash Deal"
+    || (lead["Deal Type"] === "Seller Financing / Creative Finance" && lead["Rent Ready"] === "No");
+  if (showsCashDealFields) {
     fields.push(
       ["ARV", lead["ARV"] || "—"],
       ["As-Is Value", lead["As-Is Value"] || "—"],
@@ -2532,57 +2584,61 @@ function buildLeadFields(lead) {
       ["Bottom Dollar Price", lead["Bottom Dollar Price"] || "—"],
       ["Notes (Why Sell / Good Lead)", lead["Cash Deal Notes"] || "—"]
     );
-    if (lead["Role"] !== "Seller") {
+    if (lead["Role"] !== "Seller" && lead["Deal Type"] === "Cash Deal") {
       fields.push(
         ["Wholesale Fee", lead["Wholesale Fee"] || "—"],
         ["Under Contract", lead["Under Contract"] || "—"],
         ["Seller Accepted Price", lead["Seller Accepted Price"] || "—"]
       );
     }
-  } else if (lead["Asset Type"] === "Residential Property (1-4 units)") {
-    fields.push(["Occupied Status", lead["Occupied Status"] || "—"]);
-    if (lead["Occupied Status"] === "Vacant (no tenant)") {
-      fields.push(
-        ["Annual Property Taxes", lead["Annual Property Taxes"] || "—"],
-        ["Annual Insurance", lead["Annual Insurance"] || "—"],
-        ["Rentcast Monthly Rent", lead["Monthly Rent Estimate"] || "—"],
-        ["Expense Ratio %", lead["Expense Ratio %"] || "—"],
-        ["Long-Term Rental NOI", lead["NOI"] || "—"],
-        ["STR Annual Revenue (airdna.co)", lead["STR Annual Revenue"] || "—"],
-        ["Short-Term Rental NOI", lead["STR NOI"] || "—"]
-      );
-    } else if (lead["Occupied Status"] === "Occupied (has a landlord/tenant)") {
-      fields.push(
-        ["Long-Term Rental NOI", lead["NOI"] || "—"],
-        ["Annual Property Taxes", lead["Annual Property Taxes"] || "—"],
-        ["Annual Insurance", lead["Annual Insurance"] || "—"],
-        ["Has 12mo Rent Rolls", lead["Has Rent Rolls"] || "—"],
-        ["Has 12mo P&L", lead["Has Rent Rolls"] === "Yes" ? (lead["Has P&L"] || "—") : "N/A"],
-        ["Deliverable Vacant", lead["Deliverable Vacant"] || "—"],
-        ["Current Lease Term", lead["Current Lease Term"] || "—"]
-      );
-      if (Number(lead["Units"]) === 1) {
+  }
+  if (lead["Deal Type"] !== "Cash Deal") {
+    if (lead["Asset Type"] === "Residential Property (1-4 units)") {
+      fields.push(["Rent Ready", lead["Rent Ready"] || "—"]);
+      fields.push(["Occupied Status", lead["Occupied Status"] || "—"]);
+      if (lead["Occupied Status"] === "Vacant (no tenant)") {
         fields.push(
-          ["Lease End Date", lead["Lease End Date"] || "—"],
-          ["Tenant Would Move Early", lead["Tenant Would Move Early"] || "—"]
-        );
-      } else {
-        fields.push(["STR NOI Per Unit", lead["STR NOI Per Unit"] || "—"]);
-      }
-      if (lead["Deliverable Vacant"] === "Yes" && lead["STR Annual Revenue"]) {
-        fields.push(
+          ["Annual Property Taxes", lead["Annual Property Taxes"] || "—"],
+          ["Annual Insurance", lead["Annual Insurance"] || "—"],
+          ["Rentcast Monthly Rent", lead["Monthly Rent Estimate"] || "—"],
+          ["Expense Ratio %", lead["Expense Ratio %"] || "—"],
+          ["Long-Term Rental NOI", lead["NOI"] || "—"],
           ["STR Annual Revenue (airdna.co)", lead["STR Annual Revenue"] || "—"],
           ["Short-Term Rental NOI", lead["STR NOI"] || "—"]
         );
+      } else if (lead["Occupied Status"] === "Occupied (has a landlord/tenant)") {
+        fields.push(
+          ["Long-Term Rental NOI", lead["NOI"] || "—"],
+          ["Annual Property Taxes", lead["Annual Property Taxes"] || "—"],
+          ["Annual Insurance", lead["Annual Insurance"] || "—"],
+          ["Has 12mo Rent Rolls", lead["Has Rent Rolls"] || "—"],
+          ["Has 12mo P&L", lead["Has Rent Rolls"] === "Yes" ? (lead["Has P&L"] || "—") : "N/A"],
+          ["Deliverable Vacant", lead["Deliverable Vacant"] || "—"],
+          ["Current Lease Term", lead["Current Lease Term"] || "—"]
+        );
+        if (Number(lead["Units"]) === 1) {
+          fields.push(
+            ["Lease End Date", lead["Lease End Date"] || "—"],
+            ["Tenant Would Move Early", lead["Tenant Would Move Early"] || "—"]
+          );
+        } else {
+          fields.push(["STR NOI Per Unit", lead["STR NOI Per Unit"] || "—"]);
+        }
+        if (lead["Deliverable Vacant"] === "Yes" && lead["STR Annual Revenue"]) {
+          fields.push(
+            ["STR Annual Revenue (airdna.co)", lead["STR Annual Revenue"] || "—"],
+            ["Short-Term Rental NOI", lead["STR NOI"] || "—"]
+          );
+        }
       }
+    } else if (lead["Asset Type"] === "Commercial Property") {
+      fields.push(["NOI", lead["NOI"] || "—"]);
+    } else if (lead["Asset Type"] === "Business") {
+      fields.push(
+        ["Annual Revenue", lead["Business Revenue"] || "—"],
+        [`Annual ${lead["Business Earnings Type"] || "Earnings"}`, lead["Business Earnings"] || "—"]
+      );
     }
-  } else if (lead["Asset Type"] === "Commercial Property") {
-    fields.push(["NOI", lead["NOI"] || "—"]);
-  } else if (lead["Asset Type"] === "Business") {
-    fields.push(
-      ["Annual Revenue", lead["Business Revenue"] || "—"],
-      [`Annual ${lead["Business Earnings Type"] || "Earnings"}`, lead["Business Earnings"] || "—"]
-    );
   }
   fields.push(
     ["Total Debt", lead["Total Debt"]],
