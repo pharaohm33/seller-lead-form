@@ -711,12 +711,17 @@ const steps = [
     },
     render(root) {
       const isSeller = answers.role === "Seller";
+      // The only way this step ever renders for a non-Cash-Deal is the rentReadyCheck exception
+      // (Seller Financing, residential, not rent-ready) -- see this step's skip(). Admin makes the
+      // offer/terms for those deals, not the associate, so this path drops every piece of copy that
+      // instructs making or negotiating an offer, and skips the wholesale-fee/MAO math entirely.
+      const isSellerFinancing = answers.dealType !== "Cash Deal";
       if (isSeller) {
         // A seller filling this out about their own property has no reason to run ARV/repair
         // research or see our internal offer-ceiling math -- just get the two things we
         // actually need from them directly.
         root.innerHTML = `
-          <h2 class="step-title">Cash Deal Details</h2>
+          <h2 class="step-title">${isSellerFinancing ? "Property Value & Repair Research" : "Cash Deal Details"}</h2>
           <label class="field-label">Why are you looking to sell, and anything else we should know about the property? <span class="req">*</span></label>
           <textarea id="cash-notes-input" placeholder="e.g. relocating, inherited the property, tired of managing it, needs repairs I can't afford..."></textarea>
           <div class="error-text" id="cash-notes-error">Required.</div>
@@ -748,11 +753,11 @@ const steps = [
       // quick estimate, so it isn't attributed to a specific source here anymore.
       const buildRepairPrompt = (arv) => {
         const arvPart = arv ? ` to reach an ARV of $${Number(arv).toLocaleString()}` : "";
-        // Wholesale deals don't add or convert bedrooms/bathrooms, so tell the AI to price the
-        // repair for the CURRENT bed/bath count, not a hypothetical one -- this doesn't limit the
-        // repair scope itself, which can still run anywhere from light cosmetic to a full gut.
+        // This deal doesn't add or convert bedrooms/bathrooms, so tell the AI to price the repair
+        // for the CURRENT bed/bath count, not a hypothetical one -- this doesn't limit the repair
+        // scope itself, which can still run anywhere from light cosmetic to a full gut.
         const bedBathPart = (isResidential && answers.beds && answers.baths)
-          ? ` It's currently ${answers.beds} bed / ${answers.baths} bath -- estimate repair costs for that existing layout (however light or heavy the work actually is), with no bedroom or bathroom additions or conversions (that's not customary for a wholesale deal).`
+          ? ` It's currently ${answers.beds} bed / ${answers.baths} bath -- estimate repair costs for that existing layout (however light or heavy the work actually is), with no bedroom or bathroom additions or conversions planned.`
           : "";
         return `how much fix and flip investor repair is needed at ${addressLine}${arvPart}?${bedBathPart} ${zillowSearchUrl}`;
       };
@@ -760,9 +765,21 @@ const steps = [
         address) — once results load, look at the row of tabs near the top of the page (next to "All", "Images",
         "News", "Shopping") and click <strong>"AI Mode"</strong>`;
       root.innerHTML = `
-        <h2 class="step-title">Cash Deal Details</h2>
+        <h2 class="step-title">${isSellerFinancing ? "Property Value & Repair Research" : "Cash Deal Details"}</h2>
 
-        ${isResidential ? `
+        ${isResidential ? (isSellerFinancing ? `
+          <p class="hint"><strong>Step 1 — get a baseline from Chase.</strong> Use
+          <a href="https://www.chase.com/personal/mortgage/calculators-resources/home-value-estimator" target="_blank" rel="noopener">Chase's Home Value Estimator</a>
+          for this address. If a value comes up: if <strong>no repairs are needed</strong>, that's your As-Is
+          Value too (enter the same number as ARV below). If <strong>repairs are needed</strong>, use that
+          Chase number as your <strong>ARV</strong> — As-Is Value will be computed below by subtracting your
+          repair estimate.</p>
+          <p class="hint"><strong>Step 2 — refine with Google AI if you have time.</strong> Tap
+          <strong>"Get Comps Research Prompt for Google AI"</strong> below — it's pre-filled with this
+          property's details, so all you have to do is copy it, paste it into Google AI, and see what comes
+          back. Then <strong>replace the ARV above</strong> with the more accurate number Google AI
+          calculates from real recent sales (or find one from scratch if Chase didn't have data):</p>
+        ` : `
           <p class="hint"><strong>Step 1 — get a fast first offer from Chase.</strong> Use
           <a href="https://www.chase.com/personal/mortgage/calculators-resources/home-value-estimator" target="_blank" rel="noopener">Chase's Home Value Estimator</a>
           for this address. If a value comes up: if <strong>no repairs are needed</strong>, that's your As-Is
@@ -778,7 +795,7 @@ const steps = [
           details, so all you have to do is copy it, paste it into Google AI, and see what comes back.
           Then <strong>replace the ARV above</strong> with the more accurate number Google AI calculates
           from real recent sales (or find one from scratch if Chase didn't have data):</p>
-        ` : isLand ? `
+        `) : isLand ? `
           <p class="hint"><strong>Research this with Google AI.</strong> There's no bank estimator for land
           like there is for homes, so Google AI Mode is your primary source for value and comps here:</p>
         ` : ""}
@@ -799,7 +816,7 @@ const steps = [
             Notes below so admin can see your reasoning.</li>
           </ol>
           ${isResidential ? `
-            <p class="hint"><strong>Wholesale deals don't add beds or baths.</strong> Comps should match
+            <p class="hint"><strong>This deal doesn't add beds or baths.</strong> Comps should match
             the subject's current bed/bath count — if the CMA leans on comps with more beds or baths than
             this property has, that overstates the ARV for a change this deal won't actually make. The
             comps prompt below already tells Google AI to match bed/bath count for this reason.</p>
@@ -867,7 +884,7 @@ const steps = [
           <p class="hint">To estimate this, ${googleAiHow}. It's important to also give it the for-sale listing
           link or a link to pictures of the property so it can actually see the property's condition — a repair
           estimate without pictures is just a guess.${isResidential ? ` <strong>No bedroom or bathroom
-          additions</strong> — wholesale deals don't add or convert them, though the repair itself can
+          additions</strong> — this deal doesn't add or convert them, though the repair itself can
           still run as light or as heavy as the property actually needs.` : ""} Then ask:
           <br><span class="small-muted" id="repair-prompt-hint"></span>
           <br><button type="button" class="btn secondary" id="repair-prompt-copy-btn" style="margin-top:8px;">Copy Prompt</button>
@@ -890,18 +907,24 @@ const steps = [
         <textarea id="cash-notes-input" placeholder="e.g. motivated seller, inherited property, tired landlord, needs to relocate..."></textarea>
         <div class="error-text" id="cash-notes-error">Since pictures${isLand ? "" : ", rehab estimate,"} and assessed value are all blank, please describe why this is a good lead.</div>
 
-        <label class="field-label" style="margin-top:16px;">Wholesale Fee
-          <span class="small-muted">(auto-filled at the greater of $25,000 or 3% of ${isLand ? "As-Is Value" : "ARV"} — override with a smaller number if you've negotiated one down for this deal)</span></label>
-        <input type="number" id="wholesale-fee-input" placeholder="$">
+        ${!isSellerFinancing ? `
+          <label class="field-label" style="margin-top:16px;">Wholesale Fee
+            <span class="small-muted">(auto-filled at the greater of $25,000 or 3% of ${isLand ? "As-Is Value" : "ARV"} — override with a smaller number if you've negotiated one down for this deal)</span></label>
+          <input type="number" id="wholesale-fee-input" placeholder="$">
 
-        ${isOnMarket ? `
-          <p class="hint" style="margin-top:16px;"><em>Pricing guidance: for best results, aim for around 70% of
-          the price posted online for an accepted offer. Only use our highest MAO as a last resort, and round
-          down to the nearest $5,000. The tighter the deal, the less likely it is to sell.</em></p>
-        ` : ""}
+          ${isOnMarket ? `
+            <p class="hint" style="margin-top:16px;"><em>Pricing guidance: for best results, aim for around 70% of
+            the price posted online for an accepted offer. Only use our highest MAO as a last resort, and round
+            down to the nearest $5,000. The tighter the deal, the less likely it is to sell.</em></p>
+          ` : ""}
 
-        <div class="banner warn" id="max-offer-banner" hidden style="margin-top:16px;"></div>
-        <div class="banner warn" id="assessed-max-offer-banner" hidden style="margin-top:16px;"></div>
+          <div class="banner warn" id="max-offer-banner" hidden style="margin-top:16px;"></div>
+          <div class="banner warn" id="assessed-max-offer-banner" hidden style="margin-top:16px;"></div>
+        ` : `
+          <div class="banner info" style="margin-top:16px;">This goes to admin along with the seller
+          financing terms from later steps to structure the offer — no need to calculate an offer
+          yourself here.</div>
+        `}
       `;
       root.querySelector("#arv-input").value = answers.arv || "";
       root.querySelector("#pictures-link-input").value = answers.picturesLink || "";
@@ -912,7 +935,7 @@ const steps = [
       root.querySelector("#assessed-value-input").value = answers.countyAssessedValue || "";
       root.querySelector("#bottom-dollar-input").value = answers.bottomDollarPrice || "";
       root.querySelector("#cash-notes-input").value = answers.cashDealNotes || "";
-      root.querySelector("#wholesale-fee-input").value = answers.wholesaleFee || "";
+      if (!isSellerFinancing) root.querySelector("#wholesale-fee-input").value = answers.wholesaleFee || "";
       // Once a fee is already on file (fresh input, or restored from a save/resume link) treat it as
       // deliberately set and stop auto-overwriting it as ARV changes -- only a truly untouched field
       // keeps tracking the formula live.
@@ -956,74 +979,76 @@ const steps = [
           }
         }
 
-        const feeInput = root.querySelector("#wholesale-fee-input");
-        const formulaFee = arv ? Math.max(25000, 0.03 * arv) : 0;
-        if (!feeManuallyEdited) feeInput.value = formulaFee || "";
-        const wholesaleFee = Number(feeInput.value) || formulaFee;
+        if (!isSellerFinancing) {
+          const feeInput = root.querySelector("#wholesale-fee-input");
+          const formulaFee = arv ? Math.max(25000, 0.03 * arv) : 0;
+          if (!feeManuallyEdited) feeInput.value = formulaFee || "";
+          const wholesaleFee = Number(feeInput.value) || formulaFee;
 
-        const maxOfferBanner = root.querySelector("#max-offer-banner");
-        const maoSuite = computeMaoSuite(arv, rehab, answers.assetType, wholesaleFee);
-        if (!maoSuite) {
-          maxOfferBanner.hidden = true;
-        } else {
-          const fmt = n => "$" + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
-          maxOfferBanner.hidden = false;
-          maxOfferBanner.innerHTML = `
-            <strong>Cash Buyer MAO:</strong> ${fmt(maoSuite.maoCash)}
-            <br><span class="small-muted">(${maoSuite.cashExplanation})</span>
-            <hr style="border: none; border-top: 1px solid currentColor; opacity: 0.2; margin: 10px 0;">
-            <strong>Hard Money Buyer MAO (${maoSuite.hm10Label} Down):</strong> ${fmt(maoSuite.maoHardMoney10)}
-            <br><span class="small-muted">(${maoSuite.hm10Explanation})</span>
-            <hr style="border: none; border-top: 1px solid currentColor; opacity: 0.2; margin: 10px 0;">
-            <strong>Hard Money Buyer MAO (${maoSuite.hm20Label} Down):</strong> ${fmt(maoSuite.maoHardMoney20)}
-            <br><span class="small-muted">(${maoSuite.hm20Explanation})</span>
-            <br><br><strong>Start well below the Cash Buyer number and try to close there in negotiation.</strong>
-            <br><span class="small-muted">The hard money numbers show what a leveraged buyer could still pay and
-            hit the same target return, since less of their own cash is tied up in the deal — useful when
-            presenting to a hard-money buyer, or to justify going higher if the seller won't move off a price
-            above the Cash Buyer number after you've already started low. This can take a while — use
-            "Save My Progress" at the top of the page to pause here and come back once the seller has agreed
-            to a number.</span>
-          `;
-        }
+          const maxOfferBanner = root.querySelector("#max-offer-banner");
+          const maoSuite = computeMaoSuite(arv, rehab, answers.assetType, wholesaleFee);
+          if (!maoSuite) {
+            maxOfferBanner.hidden = true;
+          } else {
+            const fmt = n => "$" + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
+            maxOfferBanner.hidden = false;
+            maxOfferBanner.innerHTML = `
+              <strong>Cash Buyer MAO:</strong> ${fmt(maoSuite.maoCash)}
+              <br><span class="small-muted">(${maoSuite.cashExplanation})</span>
+              <hr style="border: none; border-top: 1px solid currentColor; opacity: 0.2; margin: 10px 0;">
+              <strong>Hard Money Buyer MAO (${maoSuite.hm10Label} Down):</strong> ${fmt(maoSuite.maoHardMoney10)}
+              <br><span class="small-muted">(${maoSuite.hm10Explanation})</span>
+              <hr style="border: none; border-top: 1px solid currentColor; opacity: 0.2; margin: 10px 0;">
+              <strong>Hard Money Buyer MAO (${maoSuite.hm20Label} Down):</strong> ${fmt(maoSuite.maoHardMoney20)}
+              <br><span class="small-muted">(${maoSuite.hm20Explanation})</span>
+              <br><br><strong>Start well below the Cash Buyer number and try to close there in negotiation.</strong>
+              <br><span class="small-muted">The hard money numbers show what a leveraged buyer could still pay and
+              hit the same target return, since less of their own cash is tied up in the deal — useful when
+              presenting to a hard-money buyer, or to justify going higher if the seller won't move off a price
+              above the Cash Buyer number after you've already started low. This can take a while — use
+              "Save My Progress" at the top of the page to pause here and come back once the seller has agreed
+              to a number.</span>
+            `;
+          }
 
-        // Off-market negotiating strategy: county assessed value if we have it, otherwise fall
-        // back to As-Is Value (ARV minus repairs) as the alternative base. This is a
-        // talking-point number for working an off-market seller down, not the internal ceiling
-        // -- county/as-is values are usually higher than a true ARV-based max offer, so cite the
-        // high end of the repair estimate against this bigger, official-sounding number to
-        // justify why the price needs to land near it. Only relevant off-market: on-market deals
-        // already have a real listing/comps to negotiate against, so this trick doesn't apply.
-        // County assessed value is a raw pre-repair-style figure (repairs get subtracted below);
-        // As-Is Value already has repairs baked in, so it doesn't get subtracted again.
-        const isOffMarket = answers.marketStatus === "Off-Market";
-        const assessedValue = Number(root.querySelector("#assessed-value-input").value) || 0;
-        const asIsValue = arv ? Math.max(arv - rehab, 0) : 0;
-        const usingAssessed = assessedValue > 0;
-        const negotiationBase = usingAssessed ? assessedValue : asIsValue;
-        const negotiationLabel = usingAssessed ? "county assessed value" : (isLand ? "As-Is Value" : "As-Is Value (ARV minus repairs)");
-        const assessedMaxOfferBanner = root.querySelector("#assessed-max-offer-banner");
-        if (!isOffMarket || !negotiationBase) {
-          assessedMaxOfferBanner.hidden = true;
-        } else {
-          const discountedBase = 0.90 * negotiationBase;
-          // Same 8% selling costs (realtor commission + escrow/title fees) the main MAO formula
-          // subtracts from ARV -- this banner was missing it entirely, which overstated the ceiling.
-          const ceilingSellingCosts = 0.08 * negotiationBase;
-          const negotiationOffer = usingAssessed
-            ? (discountedBase - rehab - ceilingSellingCosts - wholesaleFee)
-            : (discountedBase - ceilingSellingCosts - wholesaleFee);
-          assessedMaxOfferBanner.hidden = false;
-          assessedMaxOfferBanner.innerHTML = `
-            <strong>Off-Market Negotiating Ceiling:</strong> $${negotiationOffer.toLocaleString(undefined, {maximumFractionDigits: 0})}
-            <span class="small-muted">(90% of $${negotiationBase.toLocaleString()} ${negotiationLabel},
-            ${(usingAssessed && !isLand) ? `minus $${rehab.toLocaleString()} repairs, ` : ""}minus $${ceilingSellingCosts.toLocaleString(undefined, {maximumFractionDigits: 0})}
-            selling costs (8% of ${negotiationLabel} — realtor commission plus escrow/title fees), minus your
-            $${wholesaleFee.toLocaleString(undefined, {maximumFractionDigits: 0})} wholesale fee)</span>
-            <br><span class="small-muted">This is a negotiating tool for off-market deals, not a hard cap like
-            the Max Offer above. Use the ${negotiationLabel} as your ceiling with the seller and cite the high end
-            of your repair estimate to make the case for why the price needs to come down near here.</span>
-          `;
+          // Off-market negotiating strategy: county assessed value if we have it, otherwise fall
+          // back to As-Is Value (ARV minus repairs) as the alternative base. This is a
+          // talking-point number for working an off-market seller down, not the internal ceiling
+          // -- county/as-is values are usually higher than a true ARV-based max offer, so cite the
+          // high end of the repair estimate against this bigger, official-sounding number to
+          // justify why the price needs to land near it. Only relevant off-market: on-market deals
+          // already have a real listing/comps to negotiate against, so this trick doesn't apply.
+          // County assessed value is a raw pre-repair-style figure (repairs get subtracted below);
+          // As-Is Value already has repairs baked in, so it doesn't get subtracted again.
+          const isOffMarket = answers.marketStatus === "Off-Market";
+          const assessedValue = Number(root.querySelector("#assessed-value-input").value) || 0;
+          const asIsValue = arv ? Math.max(arv - rehab, 0) : 0;
+          const usingAssessed = assessedValue > 0;
+          const negotiationBase = usingAssessed ? assessedValue : asIsValue;
+          const negotiationLabel = usingAssessed ? "county assessed value" : (isLand ? "As-Is Value" : "As-Is Value (ARV minus repairs)");
+          const assessedMaxOfferBanner = root.querySelector("#assessed-max-offer-banner");
+          if (!isOffMarket || !negotiationBase) {
+            assessedMaxOfferBanner.hidden = true;
+          } else {
+            const discountedBase = 0.90 * negotiationBase;
+            // Same 8% selling costs (realtor commission + escrow/title fees) the main MAO formula
+            // subtracts from ARV -- this banner was missing it entirely, which overstated the ceiling.
+            const ceilingSellingCosts = 0.08 * negotiationBase;
+            const negotiationOffer = usingAssessed
+              ? (discountedBase - rehab - ceilingSellingCosts - wholesaleFee)
+              : (discountedBase - ceilingSellingCosts - wholesaleFee);
+            assessedMaxOfferBanner.hidden = false;
+            assessedMaxOfferBanner.innerHTML = `
+              <strong>Off-Market Negotiating Ceiling:</strong> $${negotiationOffer.toLocaleString(undefined, {maximumFractionDigits: 0})}
+              <span class="small-muted">(90% of $${negotiationBase.toLocaleString()} ${negotiationLabel},
+              ${(usingAssessed && !isLand) ? `minus $${rehab.toLocaleString()} repairs, ` : ""}minus $${ceilingSellingCosts.toLocaleString(undefined, {maximumFractionDigits: 0})}
+              selling costs (8% of ${negotiationLabel} — realtor commission plus escrow/title fees), minus your
+              $${wholesaleFee.toLocaleString(undefined, {maximumFractionDigits: 0})} wholesale fee)</span>
+              <br><span class="small-muted">This is a negotiating tool for off-market deals, not a hard cap like
+              the Max Offer above. Use the ${negotiationLabel} as your ceiling with the seller and cite the high end
+              of your repair estimate to make the case for why the price needs to come down near here.</span>
+            `;
+          }
         }
       };
       const recomputeTriggerSelectors = ["#arv-input", "#pictures-link-input", "#assessed-value-input"];
@@ -1031,10 +1056,12 @@ const steps = [
       recomputeTriggerSelectors.forEach(sel => {
         root.querySelector(sel).oninput = recomputeCashDeal;
       });
-      root.querySelector("#wholesale-fee-input").oninput = () => {
-        feeManuallyEdited = true;
-        recomputeCashDeal();
-      };
+      if (!isSellerFinancing) {
+        root.querySelector("#wholesale-fee-input").oninput = () => {
+          feeManuallyEdited = true;
+          recomputeCashDeal();
+        };
+      }
 
       if (!isLand) {
         root.querySelector("#repair-prompt-copy-btn").onclick = () => {
@@ -1117,7 +1144,7 @@ Search live for 3 to 5 properties that meet ALL of these rules:
 1. Sold within the last 12 months — strongly prefer comps sold within the last 6 months if there are enough to choose from. Comps older than 12 months don't count, no exceptions.
 2. Within a MAXIMUM of 1-mile STRAIGHT-LINE distance from the subject address (as the crow flies, not driving distance) — this is a hard limit, not a target, closer is always better. State your estimated straight-line distance for each one explicitly, and flag it clearly if you had to go close to the 1-mile edge because nothing closer was available.
 3. In excellent, fully remodeled, or brand-new condition — skip anything described as a fixer-upper, needing TLC, sold as-is, or a renovation/investment project.
-4. Same bedroom and bathroom count as the subject property (or as close as possible) — this is a wholesale deal, so no bedroom or bathroom additions or conversions will happen before resale, meaning a comp with more beds or baths would overstate what this property can actually sell for as-is. Also ideally a small starter home or bungalow, similar in size and character to the subject property.
+4. Same bedroom and bathroom count as the subject property (or as close as possible) — no bedroom or bathroom additions or conversions are planned, so a comp with more beds or baths would overstate what this property can actually sell for as-is. Also ideally a small starter home or bungalow, similar in size and character to the subject property.
 
 If this is a non-disclosure state and you can't find actual sold prices, use active for-sale listings instead that meet the other three rules, and clearly label them as asking prices, not confirmed sale prices.
 
@@ -1226,14 +1253,23 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
         answers.asIsValue = Number(answers.arv) - (Number(answers.rehabEstimate) || 0);
       }
       const arvNum = Number(answers.arv) || 0;
-      const feeInputVal = root.querySelector("#wholesale-fee-input").value;
-      answers.wholesaleFee = feeInputVal || (arvNum ? Math.max(25000, 0.03 * arvNum) : "");
-      const maoSuite = computeMaoSuite(arvNum, Number(answers.rehabEstimate) || 0, answers.assetType, answers.wholesaleFee);
-      if (maoSuite) {
-        answers.maoCash = Math.round(maoSuite.maoCash);
-        answers.maoHardMoney10 = Math.round(maoSuite.maoHardMoney10);
-        answers.maoHardMoney20 = Math.round(maoSuite.maoHardMoney20);
-        answers.maoBreakdown = maoSuite.fullBreakdown;
+      const isSellerFinancing = answers.dealType !== "Cash Deal";
+      // Admin makes the offer/terms for these Seller Financing deals, not the associate -- skip the
+      // wholesale-fee/MAO math entirely (and clear any stale values from a prior dealType) rather
+      // than showing offer-ceiling numbers nobody here is supposed to act on.
+      if (isSellerFinancing) {
+        answers.wholesaleFee = "";
+        answers.maoCash = ""; answers.maoHardMoney10 = ""; answers.maoHardMoney20 = ""; answers.maoBreakdown = "";
+      } else {
+        const feeInputVal = root.querySelector("#wholesale-fee-input").value;
+        answers.wholesaleFee = feeInputVal || (arvNum ? Math.max(25000, 0.03 * arvNum) : "");
+        const maoSuite = computeMaoSuite(arvNum, Number(answers.rehabEstimate) || 0, answers.assetType, answers.wholesaleFee);
+        if (maoSuite) {
+          answers.maoCash = Math.round(maoSuite.maoCash);
+          answers.maoHardMoney10 = Math.round(maoSuite.maoHardMoney10);
+          answers.maoHardMoney20 = Math.round(maoSuite.maoHardMoney20);
+          answers.maoBreakdown = maoSuite.fullBreakdown;
+        }
       }
       let ok = true;
       // Residential ARV is no longer a hard requirement: Chase is the primary source, but if it
