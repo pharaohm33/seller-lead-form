@@ -3453,8 +3453,10 @@ function openOutreachSop() {
     <br>Commercial multifamily (5+ units): deal-dependent close, seller-financing payoff within 2 years.</p>
 
     <h3 style="margin-top:22px;">7. Follow up</h3>
-    <p class="hint">If an offer is out and unsigned, check back roughly every 7 days by phone or text.
-    Log every counter or objection in the lead's notes — admin uses it to decide how to adjust either offer.</p>
+    <p class="hint">Default to following up every <strong>3 days</strong> while an offer is out and unsigned
+    — only stretch to day 7 if the conversation itself makes that the smarter call (e.g. the seller said
+    they need more time, or you're waiting on something specific from them). Log every counter or objection
+    in the lead's notes — admin uses it to decide how to adjust either offer.</p>
   `;
   panel.querySelector("#close-outreach-sop-btn").onclick = () => overlay.hidden = true;
 }
