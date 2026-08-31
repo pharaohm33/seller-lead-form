@@ -663,9 +663,12 @@ const steps = [
     progress: true,
     // Only relevant for residential Seller Financing deals -- Cash Deals already get the full
     // ARV/rehab/comps workflow unconditionally, and this question doesn't map cleanly onto
-    // Commercial/Business/Land the way it does a rental house.
+    // Commercial/Business/Land the way it does a rental house. A Seller filling this out about
+    // their own property always sees it regardless of which Deal Type they picked -- we want both
+    // the cash and seller-financing question sets from them either way, since admin (not the
+    // seller's initial guess) decides which structure the deal actually ends up using.
     skip() {
-      return answers.dealType !== "Seller Financing / Creative Finance"
+      return (answers.dealType !== "Seller Financing / Creative Finance" && answers.role !== "Seller")
         || answers.assetType !== "Residential Property (1-4 units)";
     },
     render(root) {
@@ -1325,7 +1328,10 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
   {
     key: "seniorLoan",
     progress: true,
-    skip() { return answers.dealType === "Cash Deal"; },
+    // A Seller filling this out about their own property sees this regardless of Deal Type -- we
+    // want the seller-financing question set from them either way, not just when they happened to
+    // pick that option (admin decides the actual structure, not the seller's initial guess).
+    skip() { return answers.dealType === "Cash Deal" && answers.role !== "Seller"; },
     render(root) {
       root.innerHTML = `
         <h2 class="step-title">New Senior Financing</h2>
@@ -1360,7 +1366,7 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
   {
     key: "paymentStructure",
     progress: true,
-    skip() { return answers.dealType === "Cash Deal"; },
+    skip() { return answers.dealType === "Cash Deal" && answers.role !== "Seller"; },
     render(root) {
       root.innerHTML = `
         <h2 class="step-title">Payment Structure</h2>
@@ -1395,7 +1401,7 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
   },
   {
     key: "downPayment",
-    skip() { return answers.dealType === "Cash Deal"; },
+    skip() { return answers.dealType === "Cash Deal" && answers.role !== "Seller"; },
     progress: true,
     render(root) {
       root.innerHTML = `
@@ -1458,7 +1464,7 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
   {
     key: "income",
     progress: true,
-    skip() { return answers.dealType === "Cash Deal"; },
+    skip() { return answers.dealType === "Cash Deal" && answers.role !== "Seller"; },
     render(root) {
       const disclaimer = `
         <div class="banner warn">
@@ -2348,7 +2354,7 @@ function buildAnswerRows() {
       }
     }
   }
-  if (answers.dealType !== "Cash Deal") {
+  if (answers.dealType !== "Cash Deal" || answers.role === "Seller") {
     if (answers.assetType === "Residential Property (1-4 units)") {
       rows.push(["Rent Ready", answers.propertyRentReady || "—"]);
       if (answers.propertyRentReady === "No") {
@@ -2846,10 +2852,12 @@ function showStatusView() {
   document.getElementById("status-view").hidden = false;
   document.getElementById("status-email-input").value = answers.email || "";
   document.getElementById("status-leads-container").innerHTML = "";
+  document.getElementById("status-pagination").innerHTML = "";
   document.getElementById("status-message").hidden = true;
   document.getElementById("status-email-error").classList.remove("show");
   statusSearchQuery = "";
   statusSortMode = "default";
+  statusPage = 1;
   statusLeadsAll = [];
   statusLeadsEmail = "";
   document.getElementById("status-search-input").value = "";
@@ -2867,11 +2875,13 @@ document.getElementById("status-back-btn").onclick = hideStatusView;
 
 document.getElementById("status-search-input").oninput = (e) => {
   statusSearchQuery = e.target.value.trim();
+  statusPage = 1;
   renderStatusResultsTable(statusLeadsEmail, statusLeadsAll);
 };
 
 document.getElementById("status-sort-select").onchange = (e) => {
   statusSortMode = e.target.value;
+  statusPage = 1;
   renderStatusResultsTable(statusLeadsEmail, statusLeadsAll);
 };
 
@@ -2884,6 +2894,7 @@ document.getElementById("status-lookup-btn").onclick = async () => {
   if (!emailOk) return;
 
   statusSearchQuery = "";
+  statusPage = 1;
   document.getElementById("status-search-input").value = "";
 
   const msgEl = document.getElementById("status-message");
@@ -2975,7 +2986,7 @@ function buildLeadFields(lead) {
       }
     }
   }
-  if (lead["Deal Type"] !== "Cash Deal") {
+  if (lead["Deal Type"] !== "Cash Deal" || lead["Role"] === "Seller") {
     if (lead["Asset Type"] === "Residential Property (1-4 units)") {
       fields.push(["Rent Ready", lead["Rent Ready"] || "—"]);
       const buyerIntendsToSell = lead["Rent Ready"] === "No" && lead["Buyer Intends To Sell"] === "Yes";
@@ -3048,6 +3059,33 @@ let statusLeadsAll = [];
 let statusLeadsEmail = "";
 let statusSearchQuery = "";
 let statusSortMode = "default";
+let statusPage = 1;
+
+// Shared between the admin CRM and a user's own "check status" lead list -- both can otherwise
+// grow into an endless-scroll table once someone's been submitting leads for a while.
+const LEADS_PAGE_SIZE = 100;
+
+// containerId: element to render Prev/Next controls into. page/totalItems/pageSize: current state.
+// onChange(newPage): called with the page to switch to; caller re-renders its own table.
+function renderPaginationControls(containerId, page, totalItems, pageSize, onChange) {
+  const container = document.getElementById(containerId);
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  if (totalPages <= 1) { container.innerHTML = ""; return; }
+  const startItem = (page - 1) * pageSize + 1;
+  const endItem = Math.min(page * pageSize, totalItems);
+  container.innerHTML = `
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:12px; flex-wrap:wrap;">
+      <span class="small-muted">Showing ${startItem}&ndash;${endItem} of ${totalItems}</span>
+      <div style="display:flex; align-items:center; gap:10px;">
+        <button type="button" class="btn secondary" id="${containerId}-prev" ${page <= 1 ? "disabled" : ""}>Previous</button>
+        <span class="small-muted">Page ${page} of ${totalPages}</span>
+        <button type="button" class="btn secondary" id="${containerId}-next" ${page >= totalPages ? "disabled" : ""}>Next</button>
+      </div>
+    </div>
+  `;
+  container.querySelector(`#${containerId}-prev`).onclick = () => onChange(page - 1);
+  container.querySelector(`#${containerId}-next`).onclick = () => onChange(page + 1);
+}
 
 function leadMatchesAddressSearch(lead, query) {
   if (!query) return true;
@@ -3060,19 +3098,26 @@ function renderStatusResultsTable(email, leads) {
   statusLeadsAll = leads;
   statusLeadsEmail = email;
   const container = document.getElementById("status-leads-container");
+  const paginationEl = document.getElementById("status-pagination");
   const searchInput = document.getElementById("status-search-input");
   const sortSelect = document.getElementById("status-sort-select");
   searchInput.hidden = leads.length <= 1;
   sortSelect.hidden = leads.length <= 1;
 
-  const visibleLeads = leads
+  const filteredLeads = leads
     .filter(lead => leadMatchesAddressSearch(lead, statusSearchQuery))
     .sort(leadSortComparator(statusSortMode, statusSortIndex));
 
-  if (visibleLeads.length === 0) {
+  if (filteredLeads.length === 0) {
     container.innerHTML = `<p class="small-muted" style="padding:12px;">${leads.length === 0 ? "No leads found for that email address." : "No leads match your search."}</p>`;
+    paginationEl.innerHTML = "";
     return;
   }
+
+  const totalPages = Math.max(1, Math.ceil(filteredLeads.length / LEADS_PAGE_SIZE));
+  if (statusPage > totalPages) statusPage = totalPages;
+  const pageStart = (statusPage - 1) * LEADS_PAGE_SIZE;
+  const visibleLeads = filteredLeads.slice(pageStart, pageStart + LEADS_PAGE_SIZE);
 
   container.innerHTML = `
     <table class="crm-table">
@@ -3100,6 +3145,11 @@ function renderStatusResultsTable(email, leads) {
   `).join("");
   tbody.querySelectorAll("tr").forEach(tr => {
     tr.onclick = () => openStatusDetail(visibleLeads[Number(tr.dataset.idx)], email, leads);
+  });
+
+  renderPaginationControls("status-pagination", statusPage, filteredLeads.length, LEADS_PAGE_SIZE, (newPage) => {
+    statusPage = newPage;
+    renderStatusResultsTable(email, leads);
   });
 }
 
@@ -3283,11 +3333,13 @@ document.getElementById("outreach-sop-btn").onclick = openOutreachSop;
 
 document.getElementById("crm-search-input").oninput = (e) => {
   crmSearchQuery = e.target.value.trim();
+  crmPage = 1;
   renderCrmTable();
 };
 
 document.getElementById("crm-sort-select").onchange = (e) => {
   crmSortMode = e.target.value;
+  crmPage = 1;
   renderCrmTable();
 };
 
@@ -3306,12 +3358,14 @@ function adminMessage(text, type) {
 
 let crmSearchQuery = "";
 let crmSortMode = "default";
+let crmPage = 1;
 
 async function loadLeads() {
   adminMessage("Loading leads...", "info");
   const res = await api("getLeads", { token: sessionToken });
   if (!res.ok) { adminMessage(res.error, "danger"); return; }
   currentLeads = res.leads;
+  crmPage = 1;
   adminMessage("", "info");
   renderCrmTable();
 }
@@ -3328,20 +3382,28 @@ function leadMatchesSearch(l, query) {
 function renderCrmTable() {
   const tbody = document.getElementById("crm-tbody");
   const emptyEl = document.getElementById("crm-empty");
+  const paginationEl = document.getElementById("crm-pagination");
 
-  const visibleLeads = currentLeads
+  const filteredLeads = currentLeads
     .filter(l => leadMatchesSearch(l, crmSearchQuery))
     .sort(leadSortComparator(crmSortMode, adminStatusSortIndex));
 
-  if (visibleLeads.length === 0) {
+  if (filteredLeads.length === 0) {
     tbody.innerHTML = "";
     emptyEl.hidden = false;
     emptyEl.textContent = currentLeads.length === 0
       ? "No leads yet."
       : "No leads match your search.";
+    paginationEl.innerHTML = "";
     return;
   }
   emptyEl.hidden = true;
+
+  const totalPages = Math.max(1, Math.ceil(filteredLeads.length / LEADS_PAGE_SIZE));
+  if (crmPage > totalPages) crmPage = totalPages;
+  const pageStart = (crmPage - 1) * LEADS_PAGE_SIZE;
+  const visibleLeads = filteredLeads.slice(pageStart, pageStart + LEADS_PAGE_SIZE);
+
   tbody.innerHTML = visibleLeads.map((l, i) => `
     <tr data-idx="${i}">
       <td>${formatDate(l["Submitted At"])}</td>
@@ -3359,6 +3421,11 @@ function renderCrmTable() {
   `).join("");
   tbody.querySelectorAll("tr").forEach(tr => {
     tr.onclick = () => openDetail(visibleLeads[Number(tr.dataset.idx)]);
+  });
+
+  renderPaginationControls("crm-pagination", crmPage, filteredLeads.length, LEADS_PAGE_SIZE, (newPage) => {
+    crmPage = newPage;
+    renderCrmTable();
   });
 }
 
