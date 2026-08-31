@@ -18,11 +18,11 @@ const LEAD_STATUSES = ["New", "Contacted", "Under Review", "Offer Sent", "Negoti
 const STATUS_COLORS = {
   "New": { bg: "#e5e7eb", fg: "#374151" },
   "Contacted": { bg: "#dbeafe", fg: "#1d4ed8" },
-  "Under Review": { bg: "#fdf3e2", fg: "#a5680f" },
+  "Under Review": { bg: "#f5e7db", fg: "#b4622a" },
   "Offer Sent": { bg: "#1e3a8a", fg: "#ffffff" },
   "Negotiation": { bg: "#111827", fg: "#ffffff" },
   "Verbally Accepted But Not Signed": { bg: "#d1fae5", fg: "#065f46" },
-  "Offer Signed By Seller": { bg: "#e7f4ef", fg: "#1f7a5c" },
+  "Offer Signed By Seller": { bg: "#e1efe7", fg: "#1f6f4a" },
   "In Escrow To Close": { bg: "#14532d", fg: "#ffffff" },
   "Closed": { bg: "#e5e7eb", fg: "#374151" },
   "Dead": { bg: "#fbeceb", fg: "#b3372c" }
@@ -365,10 +365,6 @@ const steps = [
     render(root) {
       root.innerHTML = `
         <h2 class="step-title">Asset Type</h2>
-        <div class="banner warn" id="income-req-banner">
-          The property or business must currently be generating monthly income — we're not able to help
-          with non-income-producing assets.
-        </div>
         <label class="field-label">Type <span class="req">*</span></label>
         <div class="choice-group" id="top-type-group">
           ${["Commercial Property","Business","Residential Property (1-4 units)","Land"]
@@ -378,18 +374,8 @@ const steps = [
         <div id="sub-fields"></div>
       `;
       const subFields = root.querySelector("#sub-fields");
-      const incomeBanner = root.querySelector("#income-req-banner");
 
       function renderSub() {
-        if (answers.assetType === "Land") {
-          incomeBanner.className = "banner info";
-          incomeBanner.textContent = "Land is the one exception to our income rule — vacant or "
-            + "non-income-producing land is fine here. We evaluate it as a straight value/comps play, not on cash flow.";
-        } else {
-          incomeBanner.className = "banner warn";
-          incomeBanner.textContent = "The property or business must currently be generating monthly income "
-            + "— we're not able to help with non-income-producing assets.";
-        }
         if (answers.assetType === "Commercial Property") {
           subFields.innerHTML = `
             <label class="field-label">Commercial subtype <span class="req">*</span></label>
@@ -713,10 +699,11 @@ const steps = [
     },
     render(root) {
       const isSeller = answers.role === "Seller";
-      // The only way this step ever renders for a non-Cash-Deal is the rentReadyCheck exception
-      // (Seller Financing, residential, not rent-ready) -- see this step's skip(). Admin makes the
-      // offer/terms for those deals, not the associate, so this path drops every piece of copy that
-      // instructs making or negotiating an offer, and skips the wholesale-fee/MAO math entirely.
+      // Seller Financing runs through this step too (see skip() above) so Make Your Offers always has
+      // real cash-offer numbers to work with. The Wholesale Fee input itself stays hidden here for
+      // Seller Financing (it always uses the standard formula, no manual override) but the resulting
+      // Cash Buyer MAO banner is shown either way -- the associate needs that number for the cash half
+      // of the dual offer script.
       const isSellerFinancing = answers.dealType !== "Cash Deal";
       if (isSeller) {
         // A seller filling this out about their own property has no reason to run ARV/repair
@@ -856,7 +843,7 @@ const steps = [
           <div id="comps-prompt-panel" hidden style="margin-top:10px;">
             <p class="hint">This is pre-filled with the address/${isLand ? "acreage or square footage" : "beds/baths/sqft"}
             already on file. Copy it, ${googleAiHow}, and paste it in.</p>
-            <textarea id="comps-prompt-text" readonly rows="16" style="width:100%; font-size:12px; font-family:monospace;"></textarea>
+            <textarea id="comps-prompt-text" readonly rows="16" style="width:100%; font-size:12px; font-family:'IBM Plex Mono', ui-monospace, monospace;"></textarea>
             <button type="button" class="btn secondary" id="comps-prompt-copy-btn" style="margin-top:8px;">Copy Prompt</button>
           </div>
 
@@ -921,20 +908,20 @@ const steps = [
           <label class="field-label" style="margin-top:16px;">Wholesale Fee
             <span class="small-muted">(auto-filled at the greater of $25,000 or 3% of ${isLand ? "As-Is Value" : "ARV"} — override with a smaller number if you've negotiated one down for this deal)</span></label>
           <input type="number" id="wholesale-fee-input" placeholder="$">
-
-          ${isOnMarket ? `
-            <p class="hint" style="margin-top:16px;"><em>Pricing guidance: for best results, aim for around 70% of
-            the price posted online for an accepted offer. Only use our highest MAO as a last resort, and round
-            down to the nearest $5,000. The tighter the deal, the less likely it is to sell.</em></p>
-          ` : ""}
-
-          <div class="banner warn" id="max-offer-banner" hidden style="margin-top:16px;"></div>
-          <div class="banner warn" id="assessed-max-offer-banner" hidden style="margin-top:16px;"></div>
         ` : `
-          <div class="banner info" style="margin-top:16px;">This goes to admin along with the seller
-          financing terms from later steps to structure the offer — no need to calculate an offer
-          yourself here.</div>
+          <div class="banner info" style="margin-top:16px;">Seller financing terms get structured from
+          later steps — the Cash Buyer MAO below is calculated automatically (standard wholesale fee
+          formula, no override) and feeds the cash-offer option in Make Your Offers.</div>
         `}
+
+        ${isOnMarket ? `
+          <p class="hint" style="margin-top:16px;"><em>Pricing guidance: for best results, aim for around 70% of
+          the price posted online for an accepted offer. Only use our highest MAO as a last resort, and round
+          down to the nearest $5,000. The tighter the deal, the less likely it is to sell.</em></p>
+        ` : ""}
+
+        <div class="banner warn" id="max-offer-banner" hidden style="margin-top:16px;"></div>
+        <div class="banner warn" id="assessed-max-offer-banner" hidden style="margin-top:16px;"></div>
       `;
       root.querySelector("#arv-input").value = answers.arv || "";
       if (isResidential) root.querySelector("#chase-estimate-input").value = answers.chaseEstimate || "";
@@ -990,11 +977,11 @@ const steps = [
           }
         }
 
-        if (!isSellerFinancing) {
-          const feeInput = root.querySelector("#wholesale-fee-input");
+        {
+          const feeInput = isSellerFinancing ? null : root.querySelector("#wholesale-fee-input");
           const formulaFee = arv ? Math.max(25000, 0.03 * arv) : 0;
-          if (!feeManuallyEdited) feeInput.value = formulaFee || "";
-          const wholesaleFee = Number(feeInput.value) || formulaFee;
+          if (feeInput && !feeManuallyEdited) feeInput.value = formulaFee || "";
+          const wholesaleFee = feeInput ? (Number(feeInput.value) || formulaFee) : formulaFee;
 
           const maxOfferBanner = root.querySelector("#max-offer-banner");
           const maoSuite = computeMaoSuite(arv, rehab, answers.assetType, wholesaleFee);
@@ -2080,12 +2067,26 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
       const maoCandidates = [answers.maoCash, answers.maoHardMoney10, answers.maoHardMoney20]
         .map(Number).filter(n => n > 0);
       const cashOfferAmt = maoCandidates.length ? Math.round(Math.min(...maoCandidates)) : 0;
+      const highestMao = maoCandidates.length ? Math.round(Math.max(...maoCandidates)) : 0;
+      const fmt = n => "$" + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
 
       root.innerHTML = `
         <h2 class="step-title">Make Your Offers</h2>
         <p class="step-sub">One text, two options by default — a cash purchase or a seller-financed
         alternative. Never mention who's buying or whether it's an investor — just ask. Only drop an
         option below if the seller has already said no to it.</p>
+        ${highestMao > 0 ? `
+          <div class="banner warn" style="margin-bottom:16px;">
+            <strong>Highest Max Allowable Offer:</strong> ${fmt(highestMao)}
+            <span class="small-muted">(the most you could offer this seller in cash and still hit a
+            target return under any buyer profile — the text below intentionally opens lower than this
+            so there's room to negotiate up)</span>
+          </div>
+        ` : `
+          <div class="banner warn" style="margin-bottom:16px;">No cash offer number yet — go back to
+          ${answers.dealType === "Cash Deal" ? "Cash Deal Details" : "Property Value & Repair Research"}
+          and enter an ARV so a cash offer can be included below.</div>
+        `}
         <div id="offer-script-wrap"></div>
       `;
       const wrap = root.querySelector("#offer-script-wrap");
@@ -2268,13 +2269,23 @@ function buildAnswerRows() {
       ["Bottom Dollar Price", answers.bottomDollarPrice || "—"],
       ["Notes (Why Sell / Good Lead)", answers.cashDealNotes || "—"]
     );
-    if (answers.role !== "Seller" && answers.dealType === "Cash Deal") {
-      rows.push(
-        ["Wholesale Fee", answers.wholesaleFee || "—"],
-        ["Under Contract", answers.underContract || "—"],
-        ["Seller Accepted Price", answers.sellerAcceptedPrice || "—"]
-      );
+    if (answers.role !== "Seller") {
+      if (answers.dealType === "Cash Deal") {
+        rows.push(
+          ["Wholesale Fee", answers.wholesaleFee || "—"],
+          ["Under Contract", answers.underContract || "—"],
+          ["Seller Accepted Price", answers.sellerAcceptedPrice || "—"]
+        );
+      }
+      // Make Your Offers runs for Cash Deal and Seller Financing alike (see dualOfferTemplates'
+      // skip()) so these fields, and the Highest MAO it's built around, need to show for both --
+      // previously gated to Cash Deal only, which silently hid all of this for Seller Financing.
       if (answers.assetType !== "Land" && answers.assetType !== "Business") {
+        const maoCandidates = [answers.maoCash, answers.maoHardMoney10, answers.maoHardMoney20]
+          .map(Number).filter(n => n > 0);
+        if (maoCandidates.length) {
+          rows.push(["Highest Max Allowable Offer", "$" + Math.round(Math.max(...maoCandidates)).toLocaleString()]);
+        }
         rows.push(
           ["Seller Declined Cash Offer", answers.sellerDeclinedCash ? "Yes" : "No"],
           ["Seller Declined Seller Financing", answers.sellerDeclinedSellerFinancing ? "Yes" : "No"],
@@ -2885,13 +2896,23 @@ function buildLeadFields(lead) {
       ["Bottom Dollar Price", lead["Bottom Dollar Price"] || "—"],
       ["Notes (Why Sell / Good Lead)", lead["Cash Deal Notes"] || "—"]
     );
-    if (lead["Role"] !== "Seller" && lead["Deal Type"] === "Cash Deal") {
-      fields.push(
-        ["Wholesale Fee", lead["Wholesale Fee"] || "—"],
-        ["Under Contract", lead["Under Contract"] || "—"],
-        ["Seller Accepted Price", lead["Seller Accepted Price"] || "—"]
-      );
+    if (lead["Role"] !== "Seller") {
+      if (lead["Deal Type"] === "Cash Deal") {
+        fields.push(
+          ["Wholesale Fee", lead["Wholesale Fee"] || "—"],
+          ["Under Contract", lead["Under Contract"] || "—"],
+          ["Seller Accepted Price", lead["Seller Accepted Price"] || "—"]
+        );
+      }
+      // Make Your Offers runs for Cash Deal and Seller Financing alike, so these fields (and the
+      // Highest MAO it's built around) need to show for both -- previously gated to Cash Deal only,
+      // which silently hid all of this for Seller Financing leads.
       if (lead["Asset Type"] !== "Land" && lead["Asset Type"] !== "Business") {
+        const maoCandidates = [lead["MAO Cash"], lead["MAO Hard Money (10% Down)"], lead["MAO Hard Money (20% Down)"]]
+          .map(Number).filter(n => n > 0);
+        if (maoCandidates.length) {
+          fields.push(["Highest Max Allowable Offer", "$" + Math.round(Math.max(...maoCandidates)).toLocaleString()]);
+        }
         fields.push(
           ["Seller Declined Cash Offer", lead["Seller Declined Cash"] || "No"],
           ["Seller Declined Seller Financing", lead["Seller Declined Seller Financing"] || "No"],
