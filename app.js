@@ -2049,6 +2049,125 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
     }
   },
   {
+    key: "dualOfferTemplates",
+    progress: true,
+    // Cash Deal only -- this is built on the MAO/As-Is Value numbers that step computes, which the
+    // not-rent-ready Seller Financing path deliberately skips (admin makes that offer, not the
+    // associate). Land/Business don't fit the "cash vs. seller-financed fix and flip" framing, and a
+    // Seller filling this out about their own property has no one to text these scripts to.
+    skip() {
+      return answers.dealType !== "Cash Deal"
+        || answers.assetType === "Land"
+        || answers.assetType === "Business"
+        || answers.role === "Seller";
+    },
+    render(root) {
+      const addressLine = `${answers.street || ""}, ${answers.city || ""}, ${answers.state || ""} ${answers.zip || ""}`.trim();
+      const sellerName = answers.sellerContactName || "[Name]";
+      const isLongTimeline = Number(answers.units) > 4;
+      const payoffWindow = isLongTimeline ? "2 years" : "1 year";
+      const baseValue = Number(answers.asIsValue) || Number(answers.arv) || 0;
+      const downAmt = Math.round(baseValue * 0.20);
+      const balanceAmt = baseValue - downAmt;
+      const maoCandidates = [answers.maoCash, answers.maoHardMoney10, answers.maoHardMoney20]
+        .map(Number).filter(n => n > 0);
+      const cashOfferAmt = maoCandidates.length ? Math.round(Math.min(...maoCandidates)) : 0;
+
+      root.innerHTML = `
+        <h2 class="step-title">Make Your Offers</h2>
+        <p class="step-sub">One text, two options by default — a cash purchase or a seller-financed
+        alternative. Never mention who's buying or whether it's an investor — just ask. Only drop an
+        option below if the seller has already said no to it.</p>
+        <div id="offer-script-wrap"></div>
+      `;
+      const wrap = root.querySelector("#offer-script-wrap");
+
+      // Kept as two independent flags (not one "which option" choice) because either can get ruled
+      // out on its own mid-conversation -- the script below adapts to whichever combination is live.
+      const renderOfferScript = () => {
+        const cashDeclined = !!answers.sellerDeclinedCash;
+        const financeDeclined = !!answers.sellerDeclinedSellerFinancing;
+        const cashClause = cashOfferAmt
+          ? `$${cashOfferAmt.toLocaleString()} cash to purchase outright, with a close in as little as 2 weeks`
+          : "";
+        const financeClause = baseValue
+          ? `$${downAmt.toLocaleString()} down now, with the remaining $${balanceAmt.toLocaleString()} — full appraised value — paid within ${payoffWindow}`
+          : "";
+
+        let script = "";
+        if (!cashDeclined && !financeDeclined && cashClause && financeClause) {
+          script = `Hi ${sellerName} — saw ${addressLine} is for sale. Would you be open to ${cashClause}? As another option, we could also do ${financeClause}. Let me know which works better for you.`;
+        } else if (!cashDeclined && cashClause) {
+          script = `Hi ${sellerName} — saw ${addressLine} is for sale. Would you be open to ${cashClause}?`;
+        } else if (!financeDeclined && financeClause) {
+          script = `Hi ${sellerName} — saw ${addressLine} is for sale. Would you be open to ${financeClause}?`;
+        }
+
+        const showFinanceFollowup = !financeDeclined && baseValue;
+
+        wrap.innerHTML = `
+          <label class="field-label" style="display:flex; align-items:center; gap:8px; font-weight:normal;">
+            <input type="checkbox" id="cash-declined-checkbox" ${cashDeclined ? "checked" : ""}>
+            Seller already said no to a cash offer
+          </label>
+          <label class="field-label" style="display:flex; align-items:center; gap:8px; font-weight:normal; margin-top:6px;">
+            <input type="checkbox" id="finance-declined-checkbox" ${financeDeclined ? "checked" : ""}>
+            Seller already said no to seller financing
+          </label>
+          ${script ? `
+            <div class="banner info" style="margin-top:14px;">
+              <strong>Text this:</strong>
+              <br><span class="small-muted">${script}</span>
+              <br><button type="button" class="btn secondary" id="offer-script-copy-btn" style="margin-top:8px;">Copy Text</button>
+            </div>
+          ` : (cashDeclined && financeDeclined) ? `
+            <p class="hint">Both options are marked declined — nothing left to send. Uncheck one above if that's not right.</p>
+          ` : `
+            <p class="hint">Enter an ARV in Cash Deal Details to generate an offer text.</p>
+          `}
+          ${showFinanceFollowup ? `
+            <p class="hint" style="margin-top:16px;"><strong>If they ask how much down:</strong> don't commit
+            to a number over text — just tell them you'll review and get back to them.
+            <br><span class="small-muted">"Good question — I'll put a real offer together for you rather than
+            guess over text. If 20% down isn't enough, let me know what you have in mind and we'll review it
+            and get back to you."</span>
+            <br><button type="button" class="btn secondary" id="down-payment-script-copy-btn" style="margin-top:8px;">Copy Text</button>
+            </p>
+            <label class="field-label" style="margin-top:16px;">Is the seller willing to accept 20% down for seller financing (fix &amp; flip)? <span class="small-muted">(optional — fill in once you've asked)</span></label>
+            <div class="choice-group" id="sf-accept-group">
+              ${["Yes", "No", "Negotiating"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
+            </div>
+            <label class="field-label" style="margin-top:12px;">What are they negotiating for / countering with? <span class="small-muted">(optional)</span></label>
+            <textarea id="sf-negotiation-notes" placeholder="e.g. wants 30% down instead of 20%, wants payoff in 6 months not 1 year..."></textarea>
+          ` : ""}
+        `;
+        wrap.querySelector("#cash-declined-checkbox").onchange = (e) => {
+          answers.sellerDeclinedCash = e.target.checked;
+          renderOfferScript();
+        };
+        wrap.querySelector("#finance-declined-checkbox").onchange = (e) => {
+          answers.sellerDeclinedSellerFinancing = e.target.checked;
+          renderOfferScript();
+        };
+        wireCopyPromptButton(wrap, "#offer-script-copy-btn", () => script);
+        const downPaymentResponse = "Good question — I'll put a real offer together for you rather than "
+          + "guess over text. If 20% down isn't enough, let me know what you have in mind and we'll review "
+          + "it and get back to you.";
+        wireCopyPromptButton(wrap, "#down-payment-script-copy-btn", () => downPaymentResponse);
+        if (showFinanceFollowup) {
+          bindChoiceGroup(wrap, "#sf-accept-group", "sellerFinancingAccepted");
+          const notesInput = wrap.querySelector("#sf-negotiation-notes");
+          notesInput.value = answers.sellerFinancingNegotiationNotes || "";
+          notesInput.oninput = (e) => { answers.sellerFinancingNegotiationNotes = e.target.value; };
+        }
+      };
+      renderOfferScript();
+    },
+    validate() {
+      return true; // informational/optional -- doesn't block submission either way
+    }
+  },
+  {
     key: "review",
     progress: true,
     render(root) {
@@ -2118,6 +2237,14 @@ function buildAnswerRows() {
         ["Under Contract", answers.underContract || "—"],
         ["Seller Accepted Price", answers.sellerAcceptedPrice || "—"]
       );
+      if (answers.assetType !== "Land" && answers.assetType !== "Business") {
+        rows.push(
+          ["Seller Declined Cash Offer", answers.sellerDeclinedCash ? "Yes" : "No"],
+          ["Seller Declined Seller Financing", answers.sellerDeclinedSellerFinancing ? "Yes" : "No"],
+          ["Seller Financing Accepted (20% Down)", answers.sellerFinancingAccepted || "—"],
+          ["Seller Financing Negotiation Notes", answers.sellerFinancingNegotiationNotes || "—"]
+        );
+      }
     }
   }
   if (answers.dealType !== "Cash Deal") {
@@ -2469,6 +2596,9 @@ async function submitLead(container) {
         maoCash: answers.maoCash, maoHardMoney10: answers.maoHardMoney10, maoHardMoney20: answers.maoHardMoney20,
         maoBreakdown: answers.maoBreakdown,
         underContract: answers.underContract, sellerAcceptedPrice: answers.sellerAcceptedPrice,
+        sellerDeclinedCash: answers.sellerDeclinedCash ? "Yes" : "",
+        sellerDeclinedSellerFinancing: answers.sellerDeclinedSellerFinancing ? "Yes" : "",
+        sellerFinancingAccepted: answers.sellerFinancingAccepted, sellerFinancingNegotiationNotes: answers.sellerFinancingNegotiationNotes,
         propertyRentReady: answers.propertyRentReady,
         buyerIntendsToSell: answers.buyerIntendsToSell ? "Yes" : "",
         occupiedStatus: answers.residentialOccupied, monthlyRentEstimate: answers.rentcastMonthlyRent,
@@ -2726,6 +2856,14 @@ function buildLeadFields(lead) {
         ["Under Contract", lead["Under Contract"] || "—"],
         ["Seller Accepted Price", lead["Seller Accepted Price"] || "—"]
       );
+      if (lead["Asset Type"] !== "Land" && lead["Asset Type"] !== "Business") {
+        fields.push(
+          ["Seller Declined Cash Offer", lead["Seller Declined Cash"] || "No"],
+          ["Seller Declined Seller Financing", lead["Seller Declined Seller Financing"] || "No"],
+          ["Seller Financing Accepted (20% Down)", lead["Seller Financing Accepted"] || "—"],
+          ["Seller Financing Negotiation Notes", lead["Seller Financing Negotiation Notes"] || "—"]
+        );
+      }
     }
   }
   if (lead["Deal Type"] !== "Cash Deal") {
@@ -3032,6 +3170,7 @@ document.getElementById("admin-logout-btn").onclick = () => {
 };
 
 document.getElementById("mao-calc-public-btn").onclick = openMaoCalculator;
+document.getElementById("outreach-sop-btn").onclick = openOutreachSop;
 
 document.getElementById("crm-search-input").oninput = (e) => {
   crmSearchQuery = e.target.value.trim();
@@ -3245,6 +3384,79 @@ function openMaoCalculator() {
       }
     };
   }
+}
+
+// FSBO cold-text SOP, open to anyone (same access pattern as the MAO Calculator) -- a reference
+// panel, not tied to the wizard's own state, so it's safe to open at any point in a submission.
+function openOutreachSop() {
+  const overlay = document.getElementById("outreach-sop-overlay");
+  const panel = document.getElementById("outreach-sop-panel");
+  overlay.hidden = false;
+  panel.innerHTML = `
+    <button class="link-btn" id="close-outreach-sop-btn" style="float:right;">Close ✕</button>
+    <h2>FSBO Outreach SOP</h2>
+    <p class="small-muted">Cold-text every For-Sale-By-Owner lead with two soft offers, cash and seller
+    financing, unless the seller's already ruled one out. <strong>Daily target: 50 new properties texted
+    per day.</strong></p>
+
+    <h3 style="margin-top:22px;">1. Source the lead</h3>
+    <p class="hint">Pull FSBO listings from Zillow (a Google search for "for sale by owner" in the target
+    city works as a backup source). City population <strong>50,000+</strong>. Primary focus: single-family
+    and small multifamily, <strong>1–4 units</strong>. Commercial multifamily (5+ units) is a secondary
+    track with a longer seller-financing payoff (see Step 6).</p>
+
+    <h3 style="margin-top:22px;">2. Screen for equity before you text</h3>
+    <p class="hint"><strong>1–4 units:</strong> run the address through PropWire and estimate the seller's
+    loan balance against the property's value. PropWire's equity/debt data only shows reliably for 1–4
+    unit properties.</p>
+    <div class="banner warn">
+      <strong>No data shows on a 1–4 unit property?</strong> Skip it and move to the next address — don't guess.
+      <br><strong>Debt below ~50% of value?</strong> Proceed with both offers (Step 4).
+      <br><strong>Debt at or above ~50%?</strong> Seller financing won't work here — go cash-only, offered
+      above the existing debt so the payoff is covered, start low, and leave room to go up (Step 4, cash only).
+    </div>
+    <p class="hint"><strong>5+ unit multifamily:</strong> PropWire won't have data here — that's expected,
+    not a reason to skip. Instead, ask the seller directly:
+    <br><span class="small-muted">"Does the property have under 50% debt compared to its total value?"</span>
+    <br>"Yes" &rarr; qualifies for seller financing, send both offers. "No" (or high debt) &rarr; cash offer
+    only, above the existing debt, start low.</p>
+
+    <h3 style="margin-top:22px;">3. Price it on SendMySeller before you text</h3>
+    <p class="hint">Run the address through the SendMySeller wizard for the low cash offer number (the
+    lowest of the calculated Max Allowable Offer figures) and the as-is/ARV value (used to frame the
+    seller-financing alternative). Always follow the site's guidance for the initial low cash offer —
+    don't estimate it by hand.</p>
+
+    <h3 style="margin-top:22px;">4. Text the offer(s)</h3>
+    <p class="hint">Never mention who's buying or whether it's an investor — just ask. Default to offering
+    both, unless Step 2 ruled seller financing out, or the seller has separately already said no to one.</p>
+    <div class="banner info">
+      <strong>Both live:</strong> "Hi [Name] — saw [Address] is for sale. Would you be open to $[cash] cash
+      to purchase outright, with a close in as little as 2 weeks? As another option, we could also do
+      $[20% down] down now, with the remaining $[balance] — full appraised value — paid within 1 year. Let
+      me know which works better for you."
+    </div>
+    <div class="banner info" style="margin-top:10px;">
+      <strong>Cash only</strong> (high debt, or seller financing already declined): "Hi [Name] — saw
+      [Address] is for sale. Would you be open to $[cash] cash to purchase outright, with a close in as
+      little as 2 weeks?"
+    </div>
+
+    <h3 style="margin-top:22px;">5. If they ask "how much down?"</h3>
+    <p class="hint">Don't quote a number or imply there's room to negotiate up. Just say you'll review:</p>
+    <div class="banner info">"Good question — I'll put a real offer together for you rather than guess
+    over text. If 20% down isn't enough, let me know what you have in mind and we'll review it and get
+    back to you."</div>
+
+    <h3 style="margin-top:22px;">6. Timelines</h3>
+    <p class="hint">Single-family / 1–4 units: ~2 week close, seller-financing payoff within 1 year.
+    <br>Commercial multifamily (5+ units): deal-dependent close, seller-financing payoff within 2 years.</p>
+
+    <h3 style="margin-top:22px;">7. Follow up</h3>
+    <p class="hint">If an offer is out and unsigned, check back roughly every 7 days by phone or text.
+    Log every counter or objection in the lead's notes — admin uses it to decide how to adjust either offer.</p>
+  `;
+  panel.querySelector("#close-outreach-sop-btn").onclick = () => overlay.hidden = true;
 }
 
 function formatDate(iso) {
