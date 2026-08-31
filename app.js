@@ -2003,17 +2003,22 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
       const renderOfferScript = () => {
         const cashDeclined = !!answers.sellerDeclinedCash;
         const financeDeclined = !!answers.sellerDeclinedSellerFinancing;
-        // Our written offer is a 30-day close for 1-4 units ("as fast as 2 weeks" is a capability to
-        // lean on if a seller needs speed, not the default) and a 45-60 day close for 5+ units,
-        // regardless of whether that deal needs rehab.
+        // Our written offer is a 30-day close for 1-4 units, full stop -- don't offer to move faster
+        // for this seller. We HAVE closed in under 2 weeks before, so that track record is fair to
+        // mention, but only as a past fact, not as a capability on offer for this particular deal.
+        // 5+ units get a 45-60 day close, regardless of whether that deal needs rehab.
         // No hyphens or em dashes in anything copy-pasted below -- reads more like a real text and
         // less like something generated. Number ranges spell out "to" instead of using a hyphen.
         const cashClause = !cashOfferAmt ? "" : isMultifamily5Plus
           ? `$${cashOfferAmt.toLocaleString()} cash to purchase outright, with a 45 to 60 day close`
-          : `$${cashOfferAmt.toLocaleString()} cash to purchase outright, with a 30 day close (we can move as fast as 2 weeks if you need to close sooner)`;
+          : `$${cashOfferAmt.toLocaleString()} cash to purchase outright, with a 30 day close (our requirement for deals like this, though we have closed in under 2 weeks before)`;
+        // Seller financing always gets framed as full asking price, contingent on the property
+        // appraising at or above that -- this is the whole pitch for why they'd take financing over
+        // a discounted cash offer, so it's baked into the clause itself rather than only mentioned
+        // when cash has been ruled out.
         const financeClause = !baseValue ? "" : needsRehab
-          ? `$${downAmt.toLocaleString()} down now, with the remaining $${balanceAmt.toLocaleString()} (full appraised value) paid within ${payoffWindow}`
-          : `seller financing, typically $${down20.toLocaleString()} to $${down50.toLocaleString()} down now, with the balance paid off over 5 to 15 years depending on terms`;
+          ? `$${downAmt.toLocaleString()} down now, with the remaining $${balanceAmt.toLocaleString()} paid within ${payoffWindow}, at your full asking price as long as it appraises at or above that`
+          : `seller financing, typically $${down20.toLocaleString()} to $${down50.toLocaleString()} down now, with the balance paid off over 5 to 15 years depending on terms, at your full asking price as long as it appraises at or above that`;
 
         let script = "";
         if (!cashDeclined && !financeDeclined && cashClause && financeClause) {
@@ -2021,11 +2026,7 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
         } else if (!cashDeclined && cashClause) {
           script = `Hi ${sellerName}, saw ${addressLine} is for sale. Would you be open to ${cashClause}?`;
         } else if (!financeDeclined && financeClause) {
-          // Cash specifically ruled out (e.g. the seller won't negotiate on price at all) means
-          // there's no discount backing this number -- it's full value, so it leans on a formal
-          // appraisal to confirm that value instead of a negotiated price.
-          const contingencyNote = cashDeclined ? ", contingent on a formal appraisal confirming that value" : "";
-          script = `Hi ${sellerName}, saw ${addressLine} is for sale. Would you be open to ${financeClause}${contingencyNote}?`;
+          script = `Hi ${sellerName}, saw ${addressLine} is for sale. Would you be open to ${financeClause}?`;
         }
 
         const showFinanceFollowup = !financeDeclined && baseValue;
@@ -3497,20 +3498,25 @@ function openOutreachSop() {
     This SOP assumes the property needs rehab — a turnkey property with nothing to fix uses a different,
     longer-horizon seller-financing structure (the wizard's Make Your Offers step switches to it
     automatically once no rehab estimate is entered).</p>
-    <p class="hint">Our written offer is a <strong>30-day close</strong> for single-family — "as fast as 2
-    weeks or less" is a capability to mention if a seller needs speed, not the default we lead with. For
+    <p class="hint">Our written offer is a <strong>30-day close</strong> for single-family, full stop — don't
+    offer to move faster for this seller. We have closed in under 2 weeks before, so that track record is
+    fair to mention, but only as a past fact, never as a capability on offer for this particular deal. For
     5+ unit deals, quote a <strong>45–60 day close</strong> instead, regardless of whether that deal needs
     rehab (see Step 6).</p>
+    <p class="hint">Seller financing is always framed as full asking price, contingent on the property
+    appraising at or above that — that's the pitch for why they'd take financing over a discounted cash
+    offer.</p>
     <div class="banner info">
       <strong>Both live:</strong> "Hi [Name] — saw [Address] is for sale. Would you be open to $[cash] cash
-      to purchase outright, with a 30-day close (we can move as fast as 2 weeks if you need to close
-      sooner)? As another option, we could also do $[20% down] down now, with the remaining $[balance] —
-      full appraised value — paid within 1 year. Let me know which works better for you."
+      to purchase outright, with a 30-day close (our requirement for deals like this, though we have closed
+      in under 2 weeks before)? As another option, we could also do $[20% down] down now, with the
+      remaining $[balance] paid within 1 year, at your full asking price as long as it appraises at or
+      above that. Let me know which works better for you."
     </div>
     <div class="banner info" style="margin-top:10px;">
       <strong>Cash only</strong> (high debt, or seller financing already declined): "Hi [Name] — saw
       [Address] is for sale. Would you be open to $[cash] cash to purchase outright, with a 30-day close
-      (we can move as fast as 2 weeks if you need to close sooner)?"
+      (our requirement for deals like this, though we have closed in under 2 weeks before)?"
     </div>
     <p class="hint" style="margin-top:14px;"><strong>5+ unit multifamily — if they ask how this actually
     gets sold:</strong></p>
