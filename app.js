@@ -127,6 +127,9 @@ const steps = [
         <p>Admin contact: <strong>${ADMIN_CONTACT_PHONE}</strong></p>
         <p class="hint">This should take about 5 minutes. You can identify yourself as the seller, or as a
         connector/bird dog, wholesaler, realtor, consultant, associate, or referral bringing us a seller.</p>
+        <p class="hint">Working with us on deal acquisitions? Use the <strong>Outreach SOP</strong> button at
+        the top of the page first — it's our full playbook for sourcing, screening, and pricing these deals.
+        If you're the seller yourself, no need, just continue below.</p>
         <p class="hint">If anything here is marked required and you don't have that information yet — for
         example, you're not the seller yourself and need to check with them — stop and use
         <strong>"Save My Progress"</strong> at the top of the page. That saves a link back to exactly where you
