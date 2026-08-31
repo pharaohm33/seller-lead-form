@@ -2098,24 +2098,26 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
         // Our written offer is a 30-day close for 1-4 units ("as fast as 2 weeks" is a capability to
         // lean on if a seller needs speed, not the default) and a 45-60 day close for 5+ units,
         // regardless of whether that deal needs rehab.
+        // No hyphens or em dashes in anything copy-pasted below -- reads more like a real text and
+        // less like something generated. Number ranges spell out "to" instead of using a hyphen.
         const cashClause = !cashOfferAmt ? "" : isMultifamily5Plus
-          ? `$${cashOfferAmt.toLocaleString()} cash to purchase outright, with a 45-60 day close`
-          : `$${cashOfferAmt.toLocaleString()} cash to purchase outright, with a 30-day close (we can move as fast as 2 weeks if you need to close sooner)`;
+          ? `$${cashOfferAmt.toLocaleString()} cash to purchase outright, with a 45 to 60 day close`
+          : `$${cashOfferAmt.toLocaleString()} cash to purchase outright, with a 30 day close (we can move as fast as 2 weeks if you need to close sooner)`;
         const financeClause = !baseValue ? "" : needsRehab
-          ? `$${downAmt.toLocaleString()} down now, with the remaining $${balanceAmt.toLocaleString()} — full appraised value — paid within ${payoffWindow}`
-          : `seller financing — typically $${down20.toLocaleString()} to $${down50.toLocaleString()} down now, with the balance paid off over 5 to 15 years depending on terms`;
+          ? `$${downAmt.toLocaleString()} down now, with the remaining $${balanceAmt.toLocaleString()} (full appraised value) paid within ${payoffWindow}`
+          : `seller financing, typically $${down20.toLocaleString()} to $${down50.toLocaleString()} down now, with the balance paid off over 5 to 15 years depending on terms`;
 
         let script = "";
         if (!cashDeclined && !financeDeclined && cashClause && financeClause) {
-          script = `Hi ${sellerName} — saw ${addressLine} is for sale. Would you be open to ${cashClause}? As another option, we could also do ${financeClause}. Let me know which works better for you.`;
+          script = `Hi ${sellerName}, saw ${addressLine} is for sale. Would you be open to ${cashClause}? As another option, we could also do ${financeClause}. Let me know which works better for you.`;
         } else if (!cashDeclined && cashClause) {
-          script = `Hi ${sellerName} — saw ${addressLine} is for sale. Would you be open to ${cashClause}?`;
+          script = `Hi ${sellerName}, saw ${addressLine} is for sale. Would you be open to ${cashClause}?`;
         } else if (!financeDeclined && financeClause) {
           // Cash specifically ruled out (e.g. the seller won't negotiate on price at all) means
           // there's no discount backing this number -- it's full value, so it leans on a formal
           // appraisal to confirm that value instead of a negotiated price.
           const contingencyNote = cashDeclined ? ", contingent on a formal appraisal confirming that value" : "";
-          script = `Hi ${sellerName} — saw ${addressLine} is for sale. Would you be open to ${financeClause}${contingencyNote}?`;
+          script = `Hi ${sellerName}, saw ${addressLine} is for sale. Would you be open to ${financeClause}${contingencyNote}?`;
         }
 
         const showFinanceFollowup = !financeDeclined && baseValue;
@@ -2123,12 +2125,12 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
           ? `Is the seller willing to accept 20% down for seller financing, paid off within ${payoffWindow}?`
           : "Is the seller willing to accept seller financing (20–50% down, 5–15 year payoff)?";
         const downPaymentResponse = needsRehab
-          ? "Good question — I'll put a real offer together for you rather than guess over text. If 20% down "
+          ? "Good question, I'll put a real offer together for you rather than guess over text. If 20% down "
             + "isn't enough, let me know what you have in mind and we'll review it and get back to you."
-          : "Good question — it really depends on the terms we land on together, typically 20-50% down with "
-            + "a 5-15 year payoff. Let me know what you're looking for and we'll put a real offer together for you.";
-        const mfCashScript = "We work with a partner who has a network of over 6 million buyers — that's how "
-          + "we'd get this property sold. It'd be a non-exclusive agreement, so you're free to keep marketing "
+          : "Good question, it really depends on the terms we land on together, typically 20 to 50% down with "
+            + "a 5 to 15 year payoff. Let me know what you're looking for and we'll put a real offer together for you.";
+        const mfCashScript = "We work with a partner who has a network of over 6 million buyers. That's how "
+          + "we'd get this property sold. It wouldn't be exclusive, so you're free to keep marketing "
           + "and selling it yourself while we bring a buyer forward.";
         const mfFinanceScript = "For seller financing, we already have a specific buyer ready to go.";
 
@@ -3489,8 +3491,8 @@ function openOutreachSop() {
     <p class="hint" style="margin-top:14px;"><strong>5+ unit multifamily — if they ask how this actually
     gets sold:</strong></p>
     <div class="banner info">
-      <strong>Cash:</strong> "We work with a partner who has a network of over 6 million buyers — that's
-      how we'd get this property sold. It'd be a non-exclusive agreement, so you're free to keep marketing
+      <strong>Cash:</strong> "We work with a partner who has a network of over 6 million buyers. That's
+      how we'd get this property sold. It wouldn't be exclusive, so you're free to keep marketing
       and selling it yourself while we bring a buyer forward."
     </div>
     <div class="banner info" style="margin-top:10px;">
