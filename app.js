@@ -1943,107 +1943,14 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
     }
   },
   {
-    key: "cashDealOutcome",
-    progress: true,
-    // This is written from the associate's side of a negotiation with a third-party seller --
-    // doesn't make sense to ask a seller "what price has the seller agreed to" about themselves.
-    skip() { return answers.dealType !== "Cash Deal" || answers.role === "Seller"; },
-    render(root) {
-      // Residential/commercial cash deals must pencil out under at least one buyer profile before
-      // they can be submitted -- Business isn't held to this since it doesn't get a comparable MAO
-      // suite the same way. Highest MAO = the most a buyer could still pay under ANY of the three
-      // profiles (Cash, Hard Money low/high Down -- 10%/20% for residential/commercial, 30%/50%
-      // for land); if the seller won't come down below that, the deal
-      // doesn't work under any scenario and there's nothing to submit yet.
-      const isEligibleAssetType = answers.assetType === "Residential Property (1-4 units)"
-        || answers.assetType === "Commercial Property" || answers.assetType === "Land";
-      const highestMao = Math.max(answers.maoCash || 0, answers.maoHardMoney10 || 0, answers.maoHardMoney20 || 0);
-      const fmt = n => "$" + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
-
-      root.innerHTML = `
-        <h2 class="step-title">Deal Status</h2>
-        <label class="field-label">Is this property currently under contract? <span class="req">*</span></label>
-        <div class="choice-group" id="under-contract-group">
-          ${["Yes", "No"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
-        </div>
-        <div class="error-text" id="under-contract-error">Please choose one.</div>
-        <p class="hint">Please don't put this under contract yourself — let admin handle that once we've
-        double-checked the numbers against our current buyer pool and confirmed it still looks good on our end.</p>
-
-        ${isEligibleAssetType && highestMao > 0 ? `
-          <div class="banner warn" style="margin-top:16px;">
-            <strong>Highest Max Allowable Offer:</strong> ${fmt(highestMao)}
-            <span class="small-muted">(the greater of the Cash Buyer / Hard Money ${answers.assetType === "Land" ? "30%" : "10%"} Down / Hard Money ${answers.assetType === "Land" ? "50%" : "20%"}
-            Down numbers from the Cash Deal Details step)</span>
-            <br><span class="small-muted">The seller's accepted price has to land below this number to submit
-            this lead. If they won't come down that far yet, keep negotiating before submitting.</span>
-          </div>
-        ` : ""}
-
-        <label class="field-label" style="margin-top:16px;">What price has the seller agreed to accept?
-          ${isEligibleAssetType
-            ? `<span class="req">*</span>`
-            : `<span class="small-muted">(optional — fill this in once you have it, even if that means coming back later)</span>`}
-        </label>
-        <input type="number" id="accepted-price-input" placeholder="$">
-        <div class="error-text" id="accepted-price-error"></div>
-        <p class="hint">Once you enter an accepted price, admin will reach out to you with next steps for
-        sending a formal offer (assuming it's not already under contract).</p>
-      `;
-      root.querySelector("#accepted-price-input").value = answers.sellerAcceptedPrice || "";
-      bindChoiceGroup(root, "#under-contract-group", "underContract");
-
-      if (isEligibleAssetType && highestMao > 0) {
-        root.querySelector("#accepted-price-input").oninput = (e) => {
-          const price = Number(e.target.value) || 0;
-          const errorEl = root.querySelector("#accepted-price-error");
-          if (price && price >= highestMao) {
-            errorEl.textContent = `This is at or above the highest Max Allowable Offer (${fmt(highestMao)}) -- negotiate the price down further before submitting.`;
-            errorEl.classList.add("show");
-          } else {
-            errorEl.classList.remove("show");
-          }
-        };
-      }
-    },
-    validate(root) {
-      const isEligibleAssetType = answers.assetType === "Residential Property (1-4 units)"
-        || answers.assetType === "Commercial Property" || answers.assetType === "Land";
-      const highestMao = Math.max(answers.maoCash || 0, answers.maoHardMoney10 || 0, answers.maoHardMoney20 || 0);
-      const fmt = n => "$" + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
-
-      answers.sellerAcceptedPrice = root.querySelector("#accepted-price-input").value;
-      let ok = !!answers.underContract;
-      toggleError(root, "#under-contract-error", !answers.underContract);
-
-      const priceErrorEl = root.querySelector("#accepted-price-error");
-      if (isEligibleAssetType) {
-        const price = Number(answers.sellerAcceptedPrice) || 0;
-        if (!answers.sellerAcceptedPrice) {
-          priceErrorEl.textContent = "Required -- the seller needs to agree to a price before this lead can be submitted.";
-          priceErrorEl.classList.add("show");
-          ok = false;
-        } else if (highestMao > 0 && price >= highestMao) {
-          priceErrorEl.textContent = `This is at or above the highest Max Allowable Offer (${fmt(highestMao)}) -- negotiate the price down further before submitting.`;
-          priceErrorEl.classList.add("show");
-          ok = false;
-        } else {
-          priceErrorEl.classList.remove("show");
-        }
-      } else {
-        priceErrorEl.classList.remove("show");
-      }
-      return ok;
-    }
-  },
-  {
     key: "dualOfferTemplates",
     progress: true,
     // Runs for Cash Deal and Seller Financing alike -- cashDealDetails now computes the MAO/As-Is
     // Value numbers for both, so a cash offer can always be paired with the seller-financing one
     // regardless of which dealType this lead is. Land/Business don't fit the "cash vs.
     // seller-financed" framing, and a Seller filling this out about their own property has no one to
-    // text these scripts to.
+    // text these scripts to. Runs BEFORE cashDealOutcome (Deal Status) -- the associate needs the
+    // actual offer text to send before they can have anything to report an outcome on.
     skip() {
       return (answers.dealType !== "Cash Deal" && answers.dealType !== "Seller Financing / Creative Finance")
         || answers.assetType === "Land"
@@ -2153,7 +2060,7 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
           ` : (cashDeclined && financeDeclined) ? `
             <p class="hint">Both options are marked declined — nothing left to send. Uncheck one above if that's not right.</p>
           ` : `
-            <p class="hint">Enter an ARV in Cash Deal Details to generate an offer text.</p>
+            <p class="hint">Enter an ARV in ${answers.dealType === "Cash Deal" ? "Cash Deal Details" : "Property Value & Repair Research"} to generate an offer text.</p>
           `}
           ${isMultifamily5Plus && (!cashDeclined || !financeDeclined) ? `
             <div style="margin-top:16px;">
@@ -2205,6 +2112,102 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
     },
     validate() {
       return true; // informational/optional -- doesn't block submission either way
+    }
+  },
+  {
+    key: "cashDealOutcome",
+    progress: true,
+    // This is written from the associate's side of a negotiation with a third-party seller --
+    // doesn't make sense to ask a seller "what price has the seller agreed to" about themselves.
+    // Runs AFTER dualOfferTemplates (Make Your Offers) -- the associate needs the offer text from
+    // that step to actually text the seller before there's any outcome to report here.
+    skip() { return answers.dealType !== "Cash Deal" || answers.role === "Seller"; },
+    render(root) {
+      // Residential/commercial cash deals must pencil out under at least one buyer profile before
+      // they can be submitted -- Business isn't held to this since it doesn't get a comparable MAO
+      // suite the same way. Highest MAO = the most a buyer could still pay under ANY of the three
+      // profiles (Cash, Hard Money low/high Down -- 10%/20% for residential/commercial, 30%/50%
+      // for land); if the seller won't come down below that, the deal
+      // doesn't work under any scenario and there's nothing to submit yet.
+      const isEligibleAssetType = answers.assetType === "Residential Property (1-4 units)"
+        || answers.assetType === "Commercial Property" || answers.assetType === "Land";
+      const highestMao = Math.max(answers.maoCash || 0, answers.maoHardMoney10 || 0, answers.maoHardMoney20 || 0);
+      const fmt = n => "$" + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
+
+      root.innerHTML = `
+        <h2 class="step-title">Deal Status</h2>
+        <label class="field-label">Is this property currently under contract? <span class="req">*</span></label>
+        <div class="choice-group" id="under-contract-group">
+          ${["Yes", "No"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
+        </div>
+        <div class="error-text" id="under-contract-error">Please choose one.</div>
+        <p class="hint">Please don't put this under contract yourself — let admin handle that once we've
+        double-checked the numbers against our current buyer pool and confirmed it still looks good on our end.</p>
+
+        ${isEligibleAssetType && highestMao > 0 ? `
+          <div class="banner warn" style="margin-top:16px;">
+            <strong>Highest Max Allowable Offer:</strong> ${fmt(highestMao)}
+            <span class="small-muted">(the greater of the Cash Buyer / Hard Money ${answers.assetType === "Land" ? "30%" : "10%"} Down / Hard Money ${answers.assetType === "Land" ? "50%" : "20%"}
+            Down numbers from the Cash Deal Details step)</span>
+            <br><span class="small-muted">The seller's accepted price has to land below this number to submit
+            this lead. If they won't come down that far yet, keep negotiating before submitting.</span>
+          </div>
+        ` : ""}
+
+        <label class="field-label" style="margin-top:16px;">What price has the seller agreed to accept?
+          ${isEligibleAssetType
+            ? `<span class="req">*</span>`
+            : `<span class="small-muted">(optional — fill this in once you have it, even if that means coming back later)</span>`}
+        </label>
+        <input type="number" id="accepted-price-input" placeholder="$">
+        <div class="error-text" id="accepted-price-error"></div>
+        <p class="hint">Once you enter an accepted price, admin will reach out to you with next steps for
+        sending a formal offer (assuming it's not already under contract).</p>
+      `;
+      root.querySelector("#accepted-price-input").value = answers.sellerAcceptedPrice || "";
+      bindChoiceGroup(root, "#under-contract-group", "underContract");
+
+      if (isEligibleAssetType && highestMao > 0) {
+        root.querySelector("#accepted-price-input").oninput = (e) => {
+          const price = Number(e.target.value) || 0;
+          const errorEl = root.querySelector("#accepted-price-error");
+          if (price && price >= highestMao) {
+            errorEl.textContent = `This is at or above the highest Max Allowable Offer (${fmt(highestMao)}) -- negotiate the price down further before submitting.`;
+            errorEl.classList.add("show");
+          } else {
+            errorEl.classList.remove("show");
+          }
+        };
+      }
+    },
+    validate(root) {
+      const isEligibleAssetType = answers.assetType === "Residential Property (1-4 units)"
+        || answers.assetType === "Commercial Property" || answers.assetType === "Land";
+      const highestMao = Math.max(answers.maoCash || 0, answers.maoHardMoney10 || 0, answers.maoHardMoney20 || 0);
+      const fmt = n => "$" + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
+
+      answers.sellerAcceptedPrice = root.querySelector("#accepted-price-input").value;
+      let ok = !!answers.underContract;
+      toggleError(root, "#under-contract-error", !answers.underContract);
+
+      const priceErrorEl = root.querySelector("#accepted-price-error");
+      if (isEligibleAssetType) {
+        const price = Number(answers.sellerAcceptedPrice) || 0;
+        if (!answers.sellerAcceptedPrice) {
+          priceErrorEl.textContent = "Required -- the seller needs to agree to a price before this lead can be submitted.";
+          priceErrorEl.classList.add("show");
+          ok = false;
+        } else if (highestMao > 0 && price >= highestMao) {
+          priceErrorEl.textContent = `This is at or above the highest Max Allowable Offer (${fmt(highestMao)}) -- negotiate the price down further before submitting.`;
+          priceErrorEl.classList.add("show");
+          ok = false;
+        } else {
+          priceErrorEl.classList.remove("show");
+        }
+      } else {
+        priceErrorEl.classList.remove("show");
+      }
+      return ok;
     }
   },
   {
