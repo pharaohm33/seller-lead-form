@@ -2064,11 +2064,17 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
     render(root) {
       const addressLine = `${answers.street || ""}, ${answers.city || ""}, ${answers.state || ""} ${answers.zip || ""}`.trim();
       const sellerName = answers.sellerContactName || "[Name]";
-      const isLongTimeline = Number(answers.units) > 4;
-      const payoffWindow = isLongTimeline ? "2 years" : "1 year";
+      const isMultifamily5Plus = Number(answers.units) > 4;
+      // This whole "fix and flip" seller-financing structure (down now, payoff within a year or two)
+      // assumes the property needs work. A turnkey property with no rehab gets a different, longer-
+      // horizon structure instead -- rehabEstimate is already 0/blank whenever nothing was entered.
+      const needsRehab = Number(answers.rehabEstimate) > 0;
+      const payoffWindow = isMultifamily5Plus ? "2 years" : "1 year";
       const baseValue = Number(answers.asIsValue) || Number(answers.arv) || 0;
       const downAmt = Math.round(baseValue * 0.20);
       const balanceAmt = baseValue - downAmt;
+      const down20 = Math.round(baseValue * 0.20);
+      const down50 = Math.round(baseValue * 0.50);
       const maoCandidates = [answers.maoCash, answers.maoHardMoney10, answers.maoHardMoney20]
         .map(Number).filter(n => n > 0);
       const cashOfferAmt = maoCandidates.length ? Math.round(Math.min(...maoCandidates)) : 0;
@@ -2090,9 +2096,9 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
         const cashClause = cashOfferAmt
           ? `$${cashOfferAmt.toLocaleString()} cash to purchase outright, with a close in as little as 2 weeks`
           : "";
-        const financeClause = baseValue
+        const financeClause = !baseValue ? "" : needsRehab
           ? `$${downAmt.toLocaleString()} down now, with the remaining $${balanceAmt.toLocaleString()} — full appraised value — paid within ${payoffWindow}`
-          : "";
+          : `seller financing — typically $${down20.toLocaleString()} to $${down50.toLocaleString()} down now, with the balance paid off over 5 to 15 years depending on terms`;
 
         let script = "";
         if (!cashDeclined && !financeDeclined && cashClause && financeClause) {
@@ -2104,6 +2110,18 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
         }
 
         const showFinanceFollowup = !financeDeclined && baseValue;
+        const sfQuestionLabel = needsRehab
+          ? `Is the seller willing to accept 20% down for seller financing, paid off within ${payoffWindow}?`
+          : "Is the seller willing to accept seller financing (20–50% down, 5–15 year payoff)?";
+        const downPaymentResponse = needsRehab
+          ? "Good question — I'll put a real offer together for you rather than guess over text. If 20% down "
+            + "isn't enough, let me know what you have in mind and we'll review it and get back to you."
+          : "Good question — it really depends on the terms we land on together, typically 20-50% down with "
+            + "a 5-15 year payoff. Let me know what you're looking for and we'll put a real offer together for you.";
+        const mfCashScript = "We work with a partner who has a network of over 6 million buyers — that's how "
+          + "we'd get this property sold. It'd be a non-exclusive agreement, so you're free to keep marketing "
+          + "and selling it yourself while we bring a buyer forward.";
+        const mfFinanceScript = "For seller financing, we already have a specific buyer ready to go.";
 
         wrap.innerHTML = `
           <label class="field-label" style="display:flex; align-items:center; gap:8px; font-weight:normal;">
@@ -2125,20 +2143,31 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
           ` : `
             <p class="hint">Enter an ARV in Cash Deal Details to generate an offer text.</p>
           `}
+          ${isMultifamily5Plus && (!cashDeclined || !financeDeclined) ? `
+            <div style="margin-top:16px;">
+              <p class="hint"><strong>If they ask how this actually gets sold (5+ unit deals):</strong></p>
+              ${!cashDeclined ? `
+                <p class="hint"><span class="small-muted">Cash: "${mfCashScript}"</span>
+                <br><button type="button" class="btn secondary" id="mf-cash-script-copy-btn" style="margin-top:6px;">Copy Text</button></p>
+              ` : ""}
+              ${!financeDeclined ? `
+                <p class="hint" style="margin-top:${!cashDeclined ? "10px" : "0"};"><span class="small-muted">Seller Financing: "${mfFinanceScript}"</span>
+                <br><button type="button" class="btn secondary" id="mf-finance-script-copy-btn" style="margin-top:6px;">Copy Text</button></p>
+              ` : ""}
+            </div>
+          ` : ""}
           ${showFinanceFollowup ? `
             <p class="hint" style="margin-top:16px;"><strong>If they ask how much down:</strong> don't commit
             to a number over text — just tell them you'll review and get back to them.
-            <br><span class="small-muted">"Good question — I'll put a real offer together for you rather than
-            guess over text. If 20% down isn't enough, let me know what you have in mind and we'll review it
-            and get back to you."</span>
+            <br><span class="small-muted">"${downPaymentResponse}"</span>
             <br><button type="button" class="btn secondary" id="down-payment-script-copy-btn" style="margin-top:8px;">Copy Text</button>
             </p>
-            <label class="field-label" style="margin-top:16px;">Is the seller willing to accept 20% down for seller financing (fix &amp; flip)? <span class="small-muted">(optional — fill in once you've asked)</span></label>
+            <label class="field-label" style="margin-top:16px;">${sfQuestionLabel} <span class="small-muted">(optional — fill in once you've asked)</span></label>
             <div class="choice-group" id="sf-accept-group">
               ${["Yes", "No", "Negotiating"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
             </div>
             <label class="field-label" style="margin-top:12px;">What are they negotiating for / countering with? <span class="small-muted">(optional)</span></label>
-            <textarea id="sf-negotiation-notes" placeholder="e.g. wants 30% down instead of 20%, wants payoff in 6 months not 1 year..."></textarea>
+            <textarea id="sf-negotiation-notes" placeholder="e.g. wants 30% down instead of 20%, wants a shorter payoff term..."></textarea>
           ` : ""}
         `;
         wrap.querySelector("#cash-declined-checkbox").onchange = (e) => {
@@ -2150,10 +2179,9 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
           renderOfferScript();
         };
         wireCopyPromptButton(wrap, "#offer-script-copy-btn", () => script);
-        const downPaymentResponse = "Good question — I'll put a real offer together for you rather than "
-          + "guess over text. If 20% down isn't enough, let me know what you have in mind and we'll review "
-          + "it and get back to you.";
         wireCopyPromptButton(wrap, "#down-payment-script-copy-btn", () => downPaymentResponse);
+        wireCopyPromptButton(wrap, "#mf-cash-script-copy-btn", () => mfCashScript);
+        wireCopyPromptButton(wrap, "#mf-finance-script-copy-btn", () => mfFinanceScript);
         if (showFinanceFollowup) {
           bindChoiceGroup(wrap, "#sf-accept-group", "sellerFinancingAccepted");
           const notesInput = wrap.querySelector("#sf-negotiation-notes");
