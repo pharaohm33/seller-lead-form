@@ -2095,9 +2095,12 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
       const renderOfferScript = () => {
         const cashDeclined = !!answers.sellerDeclinedCash;
         const financeDeclined = !!answers.sellerDeclinedSellerFinancing;
-        const cashClause = cashOfferAmt
-          ? `$${cashOfferAmt.toLocaleString()} cash to purchase outright, with a close in as little as 2 weeks`
-          : "";
+        // Our written offer is a 30-day close -- "as fast as 2 weeks" is a capability we can lean
+        // on if a seller needs speed, not the default we lead with. Doesn't apply to 5+ unit deals,
+        // which are already deal-dependent on timeline (see the multifamily scripts below).
+        const cashClause = !cashOfferAmt ? "" : isMultifamily5Plus
+          ? `$${cashOfferAmt.toLocaleString()} cash to purchase outright`
+          : `$${cashOfferAmt.toLocaleString()} cash to purchase outright, with a 30-day close (we can move as fast as 2 weeks if you need to close sooner)`;
         const financeClause = !baseValue ? "" : needsRehab
           ? `$${downAmt.toLocaleString()} down now, with the remaining $${balanceAmt.toLocaleString()} — full appraised value — paid within ${payoffWindow}`
           : `seller financing — typically $${down20.toLocaleString()} to $${down50.toLocaleString()} down now, with the balance paid off over 5 to 15 years depending on terms`;
@@ -3468,16 +3471,19 @@ function openOutreachSop() {
     This SOP assumes the property needs rehab — a turnkey property with nothing to fix uses a different,
     longer-horizon seller-financing structure (the wizard's Make Your Offers step switches to it
     automatically once no rehab estimate is entered).</p>
+    <p class="hint">Our written offer is a <strong>30-day close</strong> for single-family — "as fast as 2
+    weeks or less" is a capability to mention if a seller needs speed, not the default we lead with. This
+    doesn't apply to 5+ unit deals, which stay deal-dependent on timeline (see Step 6).</p>
     <div class="banner info">
       <strong>Both live:</strong> "Hi [Name] — saw [Address] is for sale. Would you be open to $[cash] cash
-      to purchase outright, with a close in as little as 2 weeks? As another option, we could also do
-      $[20% down] down now, with the remaining $[balance] — full appraised value — paid within 1 year. Let
-      me know which works better for you."
+      to purchase outright, with a 30-day close (we can move as fast as 2 weeks if you need to close
+      sooner)? As another option, we could also do $[20% down] down now, with the remaining $[balance] —
+      full appraised value — paid within 1 year. Let me know which works better for you."
     </div>
     <div class="banner info" style="margin-top:10px;">
       <strong>Cash only</strong> (high debt, or seller financing already declined): "Hi [Name] — saw
-      [Address] is for sale. Would you be open to $[cash] cash to purchase outright, with a close in as
-      little as 2 weeks?"
+      [Address] is for sale. Would you be open to $[cash] cash to purchase outright, with a 30-day close
+      (we can move as fast as 2 weeks if you need to close sooner)?"
     </div>
     <p class="hint" style="margin-top:14px;"><strong>5+ unit multifamily — if they ask how this actually
     gets sold:</strong></p>
@@ -3500,8 +3506,8 @@ function openOutreachSop() {
     payoff. Let me know what you're looking for and we'll put a real offer together for you."</p>
 
     <h3 style="margin-top:22px;">6. Timelines</h3>
-    <p class="hint">Single-family / 1–4 units needing rehab: ~2 week close, seller-financing payoff within
-    1 year.
+    <p class="hint">Single-family / 1–4 units needing rehab: <strong>30-day close</strong> (as fast as 2
+    weeks or less if needed), seller-financing payoff within 1 year.
     <br>Commercial multifamily (5+ units) needing rehab: deal-dependent close, seller-financing payoff
     within 2 years.
     <br>Turnkey / no rehab needed, either size: seller-financing payoff over 5–15 years instead.</p>
