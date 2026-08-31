@@ -703,11 +703,13 @@ const steps = [
   {
     key: "cashDealDetails",
     progress: true,
+    // Runs for both deal types now -- Seller Financing leads need the same ARV/rehab/comps data Cash
+    // Deals do, since Make Your Offers (below) generates a cash offer alongside the seller-financing
+    // one regardless of which dealType was picked. The wholesale-fee/MAO ceiling UI still stays
+    // hidden from the associate for Seller Financing (see isSellerFinancing in render()/validate())
+    // -- that's a display choice, not a reason to skip gathering the underlying numbers.
     skip() {
-      const isRentReadyException = answers.dealType === "Seller Financing / Creative Finance"
-        && answers.assetType === "Residential Property (1-4 units)"
-        && answers.propertyRentReady === "No";
-      return answers.dealType !== "Cash Deal" && !isRentReadyException;
+      return answers.dealType !== "Cash Deal" && answers.dealType !== "Seller Financing / Creative Finance";
     },
     render(root) {
       const isSeller = answers.role === "Seller";
@@ -907,7 +909,7 @@ const steps = [
         <br><button type="button" class="btn secondary" id="assessed-value-prompt-copy-btn" style="margin-top:8px;">Copy Prompt</button>
         </p>
 
-        <label class="field-label">Price they'd accept to close quickly <span class="small-muted">(their bottom dollar — we'll see if we can make that work, optional)</span></label>
+        <label class="field-label">Lowest price they'd accept to close quickly <span class="small-muted">(their bottom dollar — we'll see if we can make that work with the acquisition team, optional)</span></label>
         <input type="number" id="bottom-dollar-input" placeholder="$">
 
         <label class="field-label">Notes: why does the seller want to sell / what makes this a good lead?
@@ -1267,22 +1269,21 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
       }
       const arvNum = Number(answers.arv) || 0;
       const isSellerFinancing = answers.dealType !== "Cash Deal";
-      // Admin makes the offer/terms for these Seller Financing deals, not the associate -- skip the
-      // wholesale-fee/MAO math entirely (and clear any stale values from a prior dealType) rather
-      // than showing offer-ceiling numbers nobody here is supposed to act on.
-      if (isSellerFinancing) {
-        answers.wholesaleFee = "";
-        answers.maoCash = ""; answers.maoHardMoney10 = ""; answers.maoHardMoney20 = ""; answers.maoBreakdown = "";
-      } else {
-        const feeInputVal = root.querySelector("#wholesale-fee-input").value;
-        answers.wholesaleFee = feeInputVal || (arvNum ? Math.max(25000, 0.03 * arvNum) : "");
-        const maoSuite = computeMaoSuite(arvNum, Number(answers.rehabEstimate) || 0, answers.assetType, answers.wholesaleFee);
-        if (maoSuite) {
-          answers.maoCash = Math.round(maoSuite.maoCash);
-          answers.maoHardMoney10 = Math.round(maoSuite.maoHardMoney10);
-          answers.maoHardMoney20 = Math.round(maoSuite.maoHardMoney20);
-          answers.maoBreakdown = maoSuite.fullBreakdown;
-        }
+      // The wholesale-fee input and MAO/ceiling banners stay hidden from the associate for Seller
+      // Financing (admin structures that deal, not the associate) -- but the underlying numbers
+      // still get computed either way, since Make Your Offers needs a cash figure to text out
+      // regardless of which dealType this lead is. Seller Financing has no visible fee input to
+      // read, so it always uses the plain formula fee instead of a manual override.
+      const formulaFee = arvNum ? Math.max(25000, 0.03 * arvNum) : "";
+      answers.wholesaleFee = isSellerFinancing
+        ? formulaFee
+        : (root.querySelector("#wholesale-fee-input").value || formulaFee);
+      const maoSuite = computeMaoSuite(arvNum, Number(answers.rehabEstimate) || 0, answers.assetType, answers.wholesaleFee);
+      if (maoSuite) {
+        answers.maoCash = Math.round(maoSuite.maoCash);
+        answers.maoHardMoney10 = Math.round(maoSuite.maoHardMoney10);
+        answers.maoHardMoney20 = Math.round(maoSuite.maoHardMoney20);
+        answers.maoBreakdown = maoSuite.fullBreakdown;
       }
       let ok = true;
       // Residential ARV is no longer a hard requirement: Chase is the primary source, but if it
@@ -2051,12 +2052,13 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
   {
     key: "dualOfferTemplates",
     progress: true,
-    // Cash Deal only -- this is built on the MAO/As-Is Value numbers that step computes, which the
-    // not-rent-ready Seller Financing path deliberately skips (admin makes that offer, not the
-    // associate). Land/Business don't fit the "cash vs. seller-financed fix and flip" framing, and a
-    // Seller filling this out about their own property has no one to text these scripts to.
+    // Runs for Cash Deal and Seller Financing alike -- cashDealDetails now computes the MAO/As-Is
+    // Value numbers for both, so a cash offer can always be paired with the seller-financing one
+    // regardless of which dealType this lead is. Land/Business don't fit the "cash vs.
+    // seller-financed" framing, and a Seller filling this out about their own property has no one to
+    // text these scripts to.
     skip() {
-      return answers.dealType !== "Cash Deal"
+      return (answers.dealType !== "Cash Deal" && answers.dealType !== "Seller Financing / Creative Finance")
         || answers.assetType === "Land"
         || answers.assetType === "Business"
         || answers.role === "Seller";
@@ -2106,7 +2108,11 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
         } else if (!cashDeclined && cashClause) {
           script = `Hi ${sellerName} — saw ${addressLine} is for sale. Would you be open to ${cashClause}?`;
         } else if (!financeDeclined && financeClause) {
-          script = `Hi ${sellerName} — saw ${addressLine} is for sale. Would you be open to ${financeClause}?`;
+          // Cash specifically ruled out (e.g. the seller won't negotiate on price at all) means
+          // there's no discount backing this number -- it's full value, so it leans on a formal
+          // appraisal to confirm that value instead of a negotiated price.
+          const contingencyNote = cashDeclined ? ", contingent on a formal appraisal confirming that value" : "";
+          script = `Hi ${sellerName} — saw ${addressLine} is for sale. Would you be open to ${financeClause}${contingencyNote}?`;
         }
 
         const showFinanceFollowup = !financeDeclined && baseValue;
@@ -2126,7 +2132,7 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
         wrap.innerHTML = `
           <label class="field-label" style="display:flex; align-items:center; gap:8px; font-weight:normal;">
             <input type="checkbox" id="cash-declined-checkbox" ${cashDeclined ? "checked" : ""}>
-            Seller already said no to a cash offer
+            Seller already said no to a cash offer <span class="small-muted">(e.g. won't negotiate on price at all)</span>
           </label>
           <label class="field-label" style="display:flex; align-items:center; gap:8px; font-weight:normal; margin-top:6px;">
             <input type="checkbox" id="finance-declined-checkbox" ${financeDeclined ? "checked" : ""}>
@@ -2239,12 +2245,10 @@ function buildAnswerRows() {
   if (answers.assetType === "Land") {
     rows.push(["Zoning", answers.landZoning || "—"]);
   }
-  // Seller Financing deals on a not-rent-ready residential property collect the same ARV/rehab/comps
-  // data Cash Deals do (see rentReadyCheck + cashDealDetails' skip()), so admin has both that AND the
-  // income/NOI numbers below to structure a blended hard money + seller carryback offer -- these two
+  // Seller Financing deals now collect the same ARV/rehab/comps data Cash Deals do (see
+  // cashDealDetails' skip()), so admin has both that AND the income/NOI numbers below -- these two
   // blocks are independent (not else-if) specifically to allow that overlap.
-  const showsCashDealFields = answers.dealType === "Cash Deal"
-    || (answers.dealType === "Seller Financing / Creative Finance" && answers.propertyRentReady === "No");
+  const showsCashDealFields = answers.dealType === "Cash Deal" || answers.dealType === "Seller Financing / Creative Finance";
   if (showsCashDealFields) {
     rows.push(
       ["Chase Bank Estimated Value", answers.chaseEstimate || "—"],
@@ -2859,11 +2863,9 @@ function buildLeadFields(lead) {
   if (lead["Asset Type"] === "Land") {
     fields.push(["Zoning", lead["Land Zoning"] || "—"]);
   }
-  // Mirrors buildAnswerRows() -- Seller Financing deals on a not-rent-ready residential property
-  // collect both the ARV/rehab/comps block AND the income/NOI block, so these two ifs are
-  // independent (not else-if) to let both show for that case.
-  const showsCashDealFields = lead["Deal Type"] === "Cash Deal"
-    || (lead["Deal Type"] === "Seller Financing / Creative Finance" && lead["Rent Ready"] === "No");
+  // Mirrors buildAnswerRows() -- Seller Financing deals now collect both the ARV/rehab/comps block
+  // AND the income/NOI block, so these two ifs are independent (not else-if) to let both show.
+  const showsCashDealFields = lead["Deal Type"] === "Cash Deal" || lead["Deal Type"] === "Seller Financing / Creative Finance";
   if (showsCashDealFields) {
     fields.push(
       ["Chase Bank Estimated Value", lead["Chase Estimated Value"] || "—"],
@@ -3422,14 +3424,14 @@ function openOutreachSop() {
   overlay.hidden = false;
   panel.innerHTML = `
     <button class="link-btn" id="close-outreach-sop-btn" style="float:right;">Close ✕</button>
-    <h2>FSBO Outreach SOP</h2>
+    <h2>FSBO + On Market Acquisition SOP</h2>
     <p class="small-muted">This SOP is for deals that need rehab/renovation (fix and flip). Cold-text every
     lead with two soft offers, cash and seller financing, unless the seller's already ruled one out.
     <strong>Daily target: 50 new properties texted per day.</strong></p>
 
     <h3 style="margin-top:22px;">1. Source the lead</h3>
-    <p class="hint"><strong>1–4 units:</strong> Zillow FSBO listings (a Google search for "for sale by
-    owner" in the target city works as a backup source).
+    <p class="hint"><strong>1–4 units:</strong> Zillow and Redfin For-Sale-By-Owner listings around the
+    US — <strong>single-family only, up to 4 units, no condos or apartments.</strong>
     <br><strong>5+ unit multifamily:</strong> Crexi or LoopNet instead — FSBO sites aren't where commercial
     listings live.</p>
     <p class="hint">City population <strong>50,000+</strong>. We can go up to <strong>$90M</strong> on
