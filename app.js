@@ -3423,17 +3423,19 @@ function openOutreachSop() {
   panel.innerHTML = `
     <button class="link-btn" id="close-outreach-sop-btn" style="float:right;">Close ✕</button>
     <h2>FSBO Outreach SOP</h2>
-    <p class="small-muted">Cold-text every For-Sale-By-Owner lead with two soft offers, cash and seller
-    financing, unless the seller's already ruled one out. <strong>Daily target: 50 new properties texted
-    per day.</strong></p>
+    <p class="small-muted">This SOP is for deals that need rehab/renovation (fix and flip). Cold-text every
+    lead with two soft offers, cash and seller financing, unless the seller's already ruled one out.
+    <strong>Daily target: 50 new properties texted per day.</strong></p>
 
     <h3 style="margin-top:22px;">1. Source the lead</h3>
-    <p class="hint">Pull FSBO listings from Zillow (a Google search for "for sale by owner" in the target
-    city works as a backup source). City population <strong>50,000+</strong>. Primary focus: single-family
-    and small multifamily, <strong>1–4 units</strong>. Commercial multifamily (5+ units) is a secondary
-    track with a longer seller-financing payoff (see Step 6).</p>
+    <p class="hint"><strong>1–4 units:</strong> Zillow FSBO listings (a Google search for "for sale by
+    owner" in the target city works as a backup source).
+    <br><strong>5+ unit multifamily:</strong> Crexi or LoopNet instead — FSBO sites aren't where commercial
+    listings live.</p>
+    <p class="hint">City population <strong>50,000+</strong>. We can go up to <strong>$90M</strong> on
+    commercial deals, but for simplicity, stick to deals <strong>under $20M</strong>.</p>
 
-    <h3 style="margin-top:22px;">2. Screen for equity before you text</h3>
+    <h3 style="margin-top:22px;">2. Screen before you text</h3>
     <p class="hint"><strong>1–4 units:</strong> run the address through PropWire and estimate the seller's
     loan balance against the property's value. PropWire's equity/debt data only shows reliably for 1–4
     unit properties.</p>
@@ -3447,7 +3449,10 @@ function openOutreachSop() {
     not a reason to skip. Instead, ask the seller directly:
     <br><span class="small-muted">"Does the property have under 50% debt compared to its total value?"</span>
     <br>"Yes" &rarr; qualifies for seller financing, send both offers. "No" (or high debt) &rarr; cash offer
-    only, above the existing debt, start low.</p>
+    only, above the existing debt, start low.
+    <br><strong>Skip any 5+ unit listing that requires an NDA to see financials if no NOI is shown AND the
+    property is generating income</strong> — too much friction for a cold-outreach volume play. A vacant
+    property is fine to pursue either way, NDA or not.</p>
 
     <h3 style="margin-top:22px;">3. Price it on SendMySeller before you text</h3>
     <p class="hint">Run the address through the SendMySeller wizard for the low cash offer number (the
@@ -3457,7 +3462,10 @@ function openOutreachSop() {
 
     <h3 style="margin-top:22px;">4. Text the offer(s)</h3>
     <p class="hint">Never mention who's buying or whether it's an investor — just ask. Default to offering
-    both, unless Step 2 ruled seller financing out, or the seller has separately already said no to one.</p>
+    both, unless Step 2 ruled seller financing out, or the seller has separately already said no to one.
+    This SOP assumes the property needs rehab — a turnkey property with nothing to fix uses a different,
+    longer-horizon seller-financing structure (the wizard's Make Your Offers step switches to it
+    automatically once no rehab estimate is entered).</p>
     <div class="banner info">
       <strong>Both live:</strong> "Hi [Name] — saw [Address] is for sale. Would you be open to $[cash] cash
       to purchase outright, with a close in as little as 2 weeks? As another option, we could also do
@@ -3469,16 +3477,32 @@ function openOutreachSop() {
       [Address] is for sale. Would you be open to $[cash] cash to purchase outright, with a close in as
       little as 2 weeks?"
     </div>
+    <p class="hint" style="margin-top:14px;"><strong>5+ unit multifamily — if they ask how this actually
+    gets sold:</strong></p>
+    <div class="banner info">
+      <strong>Cash:</strong> "We work with a partner who has a network of over 6 million buyers — that's
+      how we'd get this property sold. It'd be a non-exclusive agreement, so you're free to keep marketing
+      and selling it yourself while we bring a buyer forward."
+    </div>
+    <div class="banner info" style="margin-top:10px;">
+      <strong>Seller financing:</strong> "For seller financing, we already have a specific buyer ready to go."
+    </div>
 
     <h3 style="margin-top:22px;">5. If they ask "how much down?"</h3>
     <p class="hint">Don't quote a number or imply there's room to negotiate up. Just say you'll review:</p>
     <div class="banner info">"Good question — I'll put a real offer together for you rather than guess
     over text. If 20% down isn't enough, let me know what you have in mind and we'll review it and get
     back to you."</div>
+    <p class="hint" style="margin-top:10px;"><strong>Turnkey / no rehab needed instead:</strong> "Good
+    question — it really depends on the terms we land on together, typically 20-50% down with a 5-15 year
+    payoff. Let me know what you're looking for and we'll put a real offer together for you."</p>
 
     <h3 style="margin-top:22px;">6. Timelines</h3>
-    <p class="hint">Single-family / 1–4 units: ~2 week close, seller-financing payoff within 1 year.
-    <br>Commercial multifamily (5+ units): deal-dependent close, seller-financing payoff within 2 years.</p>
+    <p class="hint">Single-family / 1–4 units needing rehab: ~2 week close, seller-financing payoff within
+    1 year.
+    <br>Commercial multifamily (5+ units) needing rehab: deal-dependent close, seller-financing payoff
+    within 2 years.
+    <br>Turnkey / no rehab needed, either size: seller-financing payoff over 5–15 years instead.</p>
 
     <h3 style="margin-top:22px;">7. Follow up</h3>
     <p class="hint">Default to following up every <strong>3 days</strong> while an offer is out and unsigned
