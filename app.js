@@ -13,6 +13,10 @@ const ADMIN_CONTACT_PHONE = "+1 520 633 6437";
 // insurance they enter.
 const STR_EXPENSE_RATIO = 25;
 
+// How close ARV can be to asking price (as a fraction below it) and still count as "close enough"
+// for the no-rehab seller-financing-only pivot in cashDealDetails -- a judgment call, tune here.
+const ARV_VS_ASKING_CLOSE_PCT = 0.05;
+
 const LEAD_STATUSES = ["New", "Contacted", "Under Review", "Offer Sent", "Negotiation", "Verbally Accepted But Not Signed", "Offer Signed By Seller", "In Escrow To Close", "Closed", "Dead"];
 
 const STATUS_COLORS = {
@@ -863,6 +867,11 @@ const steps = [
           <label class="field-label">Chase Bank Estimated Value
             <span class="small-muted">(optional — the raw number from Chase's Home Value Estimator, for admin's reference alongside the ARV below)</span></label>
           <input type="number" id="chase-estimate-input" placeholder="$">
+
+          <label class="field-label">Asking Price <span class="req">*</span>
+            <span class="small-muted">(what the seller is asking/listing for)</span></label>
+          <input type="number" id="asking-price-input" placeholder="$">
+          <div class="error-text" id="asking-price-error">Required.</div>
         ` : ""}
 
         <label class="field-label">${isLand ? "As-Is Value" : "ARV"}
@@ -873,6 +882,7 @@ const steps = [
           <p class="hint">${googleAiHow}, copy a listing link if you have one (or just use the address), then ask:
           <br><span class="small-muted">"${arvPrompt}"</span></p>
         ` : ""}
+        ${isResidential ? `<div class="banner danger" id="arv-vs-asking-banner" hidden style="margin-top:12px;"></div>` : ""}
 
         <label class="field-label">Pictures Link <span class="small-muted">(optional, if available)</span></label>
         <input type="text" id="pictures-link-input" placeholder="https://...">
@@ -930,7 +940,10 @@ const steps = [
         <div class="banner warn" id="assessed-max-offer-banner" hidden style="margin-top:16px;"></div>
       `;
       root.querySelector("#arv-input").value = answers.arv || "";
-      if (isResidential) root.querySelector("#chase-estimate-input").value = answers.chaseEstimate || "";
+      if (isResidential) {
+        root.querySelector("#chase-estimate-input").value = answers.chaseEstimate || "";
+        root.querySelector("#asking-price-input").value = answers.askingPrice || "";
+      }
       root.querySelector("#pictures-link-input").value = answers.picturesLink || "";
       if (!isLand) {
         root.querySelector("#rehab-low-input").value = answers.rehabEstimateLow || "";
@@ -980,6 +993,50 @@ const steps = [
               asIsBanner.innerHTML = `<strong>As-Is Value:</strong> $${(arv - rehab).toLocaleString(undefined, {maximumFractionDigits: 0})}
                 <span class="small-muted">(ARV minus the repair estimate)</span>`;
             }
+          }
+        }
+
+        // A rehab deal needs ARV meaningfully ABOVE asking (that gap is the whole value-add play,
+        // and it backs the 1-year seller-financing balloon at full appraised value). A no-rehab deal
+        // has no way to raise value above asking (as-is value and ARV are the same thing), so it's
+        // only viable if ARV lands AT OR very near asking -- that's exactly the case the 5-15 year
+        // full-asking-price seller-financing balloon is built for. Below that gap either way, there's
+        // no margin for a cash purchase and no case for a seller-financing pivot -- stop the deal.
+        // "Very close" is a judgment call, set at 5% here; adjust ARV_VS_ASKING_CLOSE_PCT if that's
+        // too tight or too loose in practice.
+        if (isResidential) {
+          const askingPrice = Number(root.querySelector("#asking-price-input").value) || 0;
+          const arvVsAskingBanner = root.querySelector("#arv-vs-asking-banner");
+          const needsRehabLive = rehab > 0;
+          if (!arv || !askingPrice) {
+            arvVsAskingBanner.hidden = true;
+            answers.arvBelowAskingBlocked = false;
+            answers.forcedSellerFinancingOnly = false;
+          } else if (arv < askingPrice) {
+            const gapPct = (askingPrice - arv) / askingPrice;
+            if (!needsRehabLive && gapPct <= ARV_VS_ASKING_CLOSE_PCT) {
+              arvVsAskingBanner.hidden = false;
+              arvVsAskingBanner.className = "banner warn";
+              arvVsAskingBanner.innerHTML = `<strong>ARV is close to asking price and this property needs
+                no rehab.</strong> A cash offer will not work here -- moving forward switches this to a
+                seller financing offer only, at full asking price, and only works if the property will
+                cash flow as a long term or short term rental (checked on the next income step).`;
+              answers.arvBelowAskingBlocked = false;
+              answers.forcedSellerFinancingOnly = true;
+            } else {
+              arvVsAskingBanner.hidden = false;
+              arvVsAskingBanner.className = "banner danger";
+              arvVsAskingBanner.innerHTML = `<strong>This deal does not pencil.</strong> ARV needs to be at
+                or above the asking price${needsRehabLive ? ", and meaningfully higher once rehab is factored in," : ""}
+                for this to work as either a cash purchase or a seller financing offer. Stop here and move
+                on to another opportunity -- this lead can't be submitted with these numbers.`;
+              answers.arvBelowAskingBlocked = true;
+              answers.forcedSellerFinancingOnly = false;
+            }
+          } else {
+            arvVsAskingBanner.hidden = true;
+            answers.arvBelowAskingBlocked = false;
+            answers.forcedSellerFinancingOnly = false;
           }
         }
 
@@ -1057,6 +1114,7 @@ const steps = [
       };
       const recomputeTriggerSelectors = ["#arv-input", "#pictures-link-input", "#assessed-value-input"];
       if (!isLand) recomputeTriggerSelectors.push("#rehab-low-input", "#rehab-high-input");
+      if (isResidential) recomputeTriggerSelectors.push("#asking-price-input");
       recomputeTriggerSelectors.forEach(sel => {
         root.querySelector(sel).oninput = recomputeCashDeal;
       });
@@ -1296,6 +1354,44 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
       } else {
         toggleError(root, "#cash-notes-error", false);
       }
+
+      if (isResidential) {
+        answers.askingPrice = root.querySelector("#asking-price-input").value;
+        const askingOk = !!answers.askingPrice;
+        toggleError(root, "#asking-price-error", !askingOk); if (!askingOk) ok = false;
+
+        const askingPriceNum = Number(answers.askingPrice) || 0;
+        const needsRehabNow = (Number(answers.rehabEstimate) || 0) > 0;
+        answers.forcedSellerFinancingOnly = false;
+        if (arvNum && askingPriceNum && arvNum < askingPriceNum) {
+          const gapPct = (askingPriceNum - arvNum) / askingPriceNum;
+          if (!needsRehabNow && gapPct <= ARV_VS_ASKING_CLOSE_PCT) {
+            // Close enough with no rehab -- pivot to seller-financing-only (cashflow requirement is
+            // enforced in the income step). Only auto-flip a Cash Deal pick; leave an associate's own
+            // Seller Financing pick alone, and remember we did this so it can be un-done below if the
+            // numbers change back before submission.
+            answers.forcedSellerFinancingOnly = true;
+            if (answers.dealType === "Cash Deal") {
+              answers.dealType = "Seller Financing / Creative Finance";
+              answers.dealTypeAutoPivoted = true;
+            }
+          } else {
+            const arvVsAskingBanner = root.querySelector("#arv-vs-asking-banner");
+            arvVsAskingBanner.hidden = false;
+            arvVsAskingBanner.className = "banner danger";
+            arvVsAskingBanner.innerHTML = `<strong>This deal does not pencil.</strong> ARV needs to be at
+              or above the asking price${needsRehabNow ? ", and meaningfully higher once rehab is factored in," : ""}
+              for this to work as either a cash purchase or a seller financing offer. Stop here and move
+              on to another opportunity -- this lead can't be submitted with these numbers.`;
+            ok = false;
+          }
+        } else if (answers.dealTypeAutoPivoted) {
+          // ARV came back above asking (or one of the numbers got cleared) -- undo the earlier
+          // auto-pivot rather than leaving the lead stuck as Seller Financing for no reason.
+          answers.dealType = "Cash Deal";
+          answers.dealTypeAutoPivoted = false;
+        }
+      }
       return ok;
     }
   },
@@ -1499,6 +1595,14 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
         }
         root.innerHTML = `
           <h2 class="step-title">Property Income (NOI)</h2>
+          ${answers.forcedSellerFinancingOnly ? `
+            <div class="banner danger">ARV came in too close to asking price with no rehab needed, so
+            this can only move forward as a seller financing offer if it actually cash flows as a long
+            term or short term rental. If the NOI below isn't positive, stop here and move on to another
+            opportunity -- this lead won't be submittable otherwise.</div>
+            <div class="error-text" id="cashflow-required-error">This deal needs a positive NOI (long term
+            or short term rental) to move forward -- it can't work as a cash purchase with these numbers.</div>
+          ` : ""}
           ${showsSellSkip ? `
             <div style="margin-bottom:16px;">
               <button type="button" class="btn ghost-small" id="buyer-sells-btn">Admin's buyer intends to sell property (ask admin if unsure)</button>
@@ -1885,6 +1989,18 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
         const ok1 = !!answers.residentialOccupied;
         toggleError(root, "#occupied-error", !ok1);
         if (!ok1) return false;
+
+        // forcedSellerFinancingOnly (set in cashDealDetails when ARV lands too close to asking with
+        // no rehab needed) means this deal only works if it actually cash flows as a rental -- checked
+        // once this step's own required fields are satisfied, regardless of which occupied/vacant
+        // sub-path produced the NOI numbers.
+        const cashflowGateOk = () => {
+          if (!answers.forcedSellerFinancingOnly) return true;
+          const okCashflow = (Number(answers.residentialNOI) || 0) > 0 || (Number(answers.strNOI) || 0) > 0;
+          toggleError(root, "#cashflow-required-error", !okCashflow);
+          return okCashflow;
+        };
+
         if (answers.residentialOccupied === "Occupied (has a landlord/tenant)") {
           const occUnits = Number(answers.units) || 1;
           answers.residentialNOI = root.querySelector("#noi-input").value;
@@ -1906,7 +2022,8 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
           } else {
             answers.strNoiPerUnit = root.querySelector("#str-noi-per-unit-input").value;
           }
-          return okOcc;
+          const okCashflow = cashflowGateOk();
+          return okOcc && okCashflow;
         }
         // Vacant (no tenant) -- always computes both LTR and STR so admin can compare
         const vacantUnits = Number(answers.units) || 1;
@@ -1934,7 +2051,8 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
         toggleError(root, "#insurance-error", !answers.annualInsurance); if (!answers.annualInsurance) ok = false;
         toggleError(root, "#rent-error", !answers.rentcastMonthlyRent); if (!answers.rentcastMonthlyRent) ok = false;
         toggleError(root, "#str-revenue-error", !strRevenueEntered); if (!strRevenueEntered) ok = false;
-        return ok;
+        const okCashflow = cashflowGateOk();
+        return ok && okCashflow;
       } else if (answers.assetType === "Commercial Property") {
         answers.commercialNOI = root.querySelector("#noi-input").value;
         const ok = !!answers.commercialNOI;
@@ -1991,7 +2109,12 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
         <p class="step-sub">One text, two options by default — a cash purchase or a seller-financed
         alternative. Never mention who's buying or whether it's an investor — just ask. Only drop an
         option below if the seller has already said no to it.</p>
-        ${highestMao > 0 ? `
+        ${answers.forcedSellerFinancingOnly ? `
+          <div class="banner warn" style="margin-bottom:16px;">ARV came in too close to asking price
+          with no rehab needed on this one, so a cash offer isn't on the table -- this can only move
+          forward as a seller financing offer at full asking price, contingent on it cash flowing as a
+          rental (checked on the next step).</div>
+        ` : highestMao > 0 ? `
           <div class="banner warn" style="margin-bottom:16px;">
             <strong>Highest Max Allowable Offer:</strong> ${fmt(highestMao)}
             <span class="small-muted">(the most you could offer this seller in cash and still hit a
@@ -2010,7 +2133,10 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
       // Kept as two independent flags (not one "which option" choice) because either can get ruled
       // out on its own mid-conversation -- the script below adapts to whichever combination is live.
       const renderOfferScript = () => {
-        const cashDeclined = !!answers.sellerDeclinedCash;
+        // forcedSellerFinancingOnly (set in cashDealDetails when ARV lands too close to asking with
+        // no rehab needed) rules cash out the same way a seller's own "no" does -- fold it into the
+        // same flag rather than threading a second condition through every branch below.
+        const cashDeclined = !!answers.sellerDeclinedCash || !!answers.forcedSellerFinancingOnly;
         const financeDeclined = !!answers.sellerDeclinedSellerFinancing;
         // Our written offer is a 30-day close for 1-4 units, full stop -- don't offer to move faster
         // for this seller. We HAVE closed in under 2 weeks before, so that track record is fair to
@@ -2053,10 +2179,12 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
         const mfFinanceScript = "For seller financing, we already have a specific buyer ready to go.";
 
         wrap.innerHTML = `
-          <label class="field-label" style="display:flex; align-items:center; gap:8px; font-weight:normal;">
-            <input type="checkbox" id="cash-declined-checkbox" ${cashDeclined ? "checked" : ""}>
-            Seller already said no to a cash offer <span class="small-muted">(e.g. won't negotiate on price at all)</span>
-          </label>
+          ${answers.forcedSellerFinancingOnly ? "" : `
+            <label class="field-label" style="display:flex; align-items:center; gap:8px; font-weight:normal;">
+              <input type="checkbox" id="cash-declined-checkbox" ${cashDeclined ? "checked" : ""}>
+              Seller already said no to a cash offer <span class="small-muted">(e.g. won't negotiate on price at all)</span>
+            </label>
+          `}
           <label class="field-label" style="display:flex; align-items:center; gap:8px; font-weight:normal; margin-top:6px;">
             <input type="checkbox" id="finance-declined-checkbox" ${financeDeclined ? "checked" : ""}>
             Seller already said no to seller financing
@@ -2099,10 +2227,12 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
             <textarea id="sf-negotiation-notes" placeholder="e.g. wants 30% down instead of 20%, wants a shorter payoff term..."></textarea>
           ` : ""}
         `;
-        wrap.querySelector("#cash-declined-checkbox").onchange = (e) => {
-          answers.sellerDeclinedCash = e.target.checked;
-          renderOfferScript();
-        };
+        if (!answers.forcedSellerFinancingOnly) {
+          wrap.querySelector("#cash-declined-checkbox").onchange = (e) => {
+            answers.sellerDeclinedCash = e.target.checked;
+            renderOfferScript();
+          };
+        }
         wrap.querySelector("#finance-declined-checkbox").onchange = (e) => {
           answers.sellerDeclinedSellerFinancing = e.target.checked;
           renderOfferScript();
@@ -2317,6 +2447,7 @@ function buildAnswerRows() {
   if (showsCashDealFields) {
     rows.push(
       ["Chase Bank Estimated Value", answers.chaseEstimate || "—"],
+      ["Asking Price", answers.askingPrice || "—"],
       ["ARV", answers.arv || "—"],
       ["As-Is Value", answers.asIsValue || "—"],
       ["Pictures Link", answers.picturesLink || "—"],
@@ -2949,6 +3080,7 @@ function buildLeadFields(lead) {
   if (showsCashDealFields) {
     fields.push(
       ["Chase Bank Estimated Value", lead["Chase Estimated Value"] || "—"],
+      ["Asking Price", lead["Asking Price"] || "—"],
       ["ARV", lead["ARV"] || "—"],
       ["As-Is Value", lead["As-Is Value"] || "—"],
       ["Pictures Link", lead["Pictures Link"] || "—"],
