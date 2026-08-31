@@ -2095,11 +2095,11 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
       const renderOfferScript = () => {
         const cashDeclined = !!answers.sellerDeclinedCash;
         const financeDeclined = !!answers.sellerDeclinedSellerFinancing;
-        // Our written offer is a 30-day close -- "as fast as 2 weeks" is a capability we can lean
-        // on if a seller needs speed, not the default we lead with. Doesn't apply to 5+ unit deals,
-        // which are already deal-dependent on timeline (see the multifamily scripts below).
+        // Our written offer is a 30-day close for 1-4 units ("as fast as 2 weeks" is a capability to
+        // lean on if a seller needs speed, not the default) and a 45-60 day close for 5+ units,
+        // regardless of whether that deal needs rehab.
         const cashClause = !cashOfferAmt ? "" : isMultifamily5Plus
-          ? `$${cashOfferAmt.toLocaleString()} cash to purchase outright`
+          ? `$${cashOfferAmt.toLocaleString()} cash to purchase outright, with a 45-60 day close`
           : `$${cashOfferAmt.toLocaleString()} cash to purchase outright, with a 30-day close (we can move as fast as 2 weeks if you need to close sooner)`;
         const financeClause = !baseValue ? "" : needsRehab
           ? `$${downAmt.toLocaleString()} down now, with the remaining $${balanceAmt.toLocaleString()} — full appraised value — paid within ${payoffWindow}`
@@ -3472,8 +3472,9 @@ function openOutreachSop() {
     longer-horizon seller-financing structure (the wizard's Make Your Offers step switches to it
     automatically once no rehab estimate is entered).</p>
     <p class="hint">Our written offer is a <strong>30-day close</strong> for single-family — "as fast as 2
-    weeks or less" is a capability to mention if a seller needs speed, not the default we lead with. This
-    doesn't apply to 5+ unit deals, which stay deal-dependent on timeline (see Step 6).</p>
+    weeks or less" is a capability to mention if a seller needs speed, not the default we lead with. For
+    5+ unit deals, quote a <strong>45–60 day close</strong> instead, regardless of whether that deal needs
+    rehab (see Step 6).</p>
     <div class="banner info">
       <strong>Both live:</strong> "Hi [Name] — saw [Address] is for sale. Would you be open to $[cash] cash
       to purchase outright, with a 30-day close (we can move as fast as 2 weeks if you need to close
@@ -3508,9 +3509,10 @@ function openOutreachSop() {
     <h3 style="margin-top:22px;">6. Timelines</h3>
     <p class="hint">Single-family / 1–4 units needing rehab: <strong>30-day close</strong> (as fast as 2
     weeks or less if needed), seller-financing payoff within 1 year.
-    <br>Commercial multifamily (5+ units) needing rehab: deal-dependent close, seller-financing payoff
-    within 2 years.
-    <br>Turnkey / no rehab needed, either size: seller-financing payoff over 5–15 years instead.</p>
+    <br>Commercial multifamily (5+ units) needing rehab: <strong>45–60 day close</strong>, seller-financing
+    payoff within 2 years.
+    <br>Turnkey / no rehab needed: same close timelines as above by size, seller-financing payoff over
+    5–15 years instead.</p>
 
     <h3 style="margin-top:22px;">7. Follow up</h3>
     <p class="hint">Default to following up every <strong>3 days</strong> while an offer is out and unsigned
