@@ -2134,9 +2134,19 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
         || answers.assetType === "Commercial Property" || answers.assetType === "Land";
       const highestMao = Math.max(answers.maoCash || 0, answers.maoHardMoney10 || 0, answers.maoHardMoney20 || 0);
       const fmt = n => "$" + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
+      // Reuses sellerDeclinedCash (also set on Make Your Offers) rather than a separate field --
+      // "seller's floor is above our MAO" and "seller won't negotiate at all" both mean the same
+      // thing downstream: no viable cash deal, pivot to a seller-financing-only offer at full
+      // asking price with an appraisal contingency. Setting it here also updates what Make Your
+      // Offers would generate if the associate goes back to it.
+      const cashRejected = !!answers.sellerDeclinedCash;
 
       root.innerHTML = `
         <h2 class="step-title">Deal Status</h2>
+        <p class="hint">This page is for cash offers. If the seller's lowest acceptable price comes in
+        above the Max Allowable Offer below, this isn't a cash deal anymore — use the button below
+        instead of negotiating further, and we'll structure it as seller financing only, at the
+        seller's full asking price with an appraisal contingency.</p>
         <label class="field-label">Is this property currently under contract? <span class="req">*</span></label>
         <div class="choice-group" id="under-contract-group">
           ${["Yes", "No"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
@@ -2150,35 +2160,49 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
             <strong>Highest Max Allowable Offer:</strong> ${fmt(highestMao)}
             <span class="small-muted">(the greater of the Cash Buyer / Hard Money ${answers.assetType === "Land" ? "30%" : "10%"} Down / Hard Money ${answers.assetType === "Land" ? "50%" : "20%"}
             Down numbers from the Cash Deal Details step)</span>
-            <br><span class="small-muted">The seller's accepted price has to land below this number to submit
-            this lead. If they won't come down that far yet, keep negotiating before submitting.</span>
+            <br><span class="small-muted">The seller's accepted price has to land below this number for
+            a cash offer to work.</span>
           </div>
+          <div style="margin-top:12px;">
+            <button type="button" class="btn ghost-small${cashRejected ? " active" : ""}" id="cash-rejected-btn">Seller did not agree to a cash price below MAO</button>
+          </div>
+          ${cashRejected ? `
+            <div class="banner info" style="margin-top:12px;">This will submit as a seller financing
+            offer only, at the seller's full asking price with an appraisal contingency, instead of a
+            cash deal.</div>
+          ` : ""}
         ` : ""}
 
-        <label class="field-label" style="margin-top:16px;">What price has the seller agreed to accept?
+        <label class="field-label" style="margin-top:16px;">${cashRejected ? "What price is the seller asking for the property?" : "What price has the seller agreed to accept?"}
           ${isEligibleAssetType
             ? `<span class="req">*</span>`
             : `<span class="small-muted">(optional — fill this in once you have it, even if that means coming back later)</span>`}
         </label>
         <input type="number" id="accepted-price-input" placeholder="$">
         <div class="error-text" id="accepted-price-error"></div>
-        <p class="hint">Once you enter an accepted price, admin will reach out to you with next steps for
+        <p class="hint">Once you enter ${cashRejected ? "an asking price" : "an accepted price"}, admin will reach out to you with next steps for
         sending a formal offer (assuming it's not already under contract).</p>
       `;
       root.querySelector("#accepted-price-input").value = answers.sellerAcceptedPrice || "";
       bindChoiceGroup(root, "#under-contract-group", "underContract");
 
       if (isEligibleAssetType && highestMao > 0) {
-        root.querySelector("#accepted-price-input").oninput = (e) => {
-          const price = Number(e.target.value) || 0;
-          const errorEl = root.querySelector("#accepted-price-error");
-          if (price && price >= highestMao) {
-            errorEl.textContent = `This is at or above the highest Max Allowable Offer (${fmt(highestMao)}) -- negotiate the price down further before submitting.`;
-            errorEl.classList.add("show");
-          } else {
-            errorEl.classList.remove("show");
-          }
+        root.querySelector("#cash-rejected-btn").onclick = () => {
+          answers.sellerDeclinedCash = !answers.sellerDeclinedCash;
+          renderStep();
         };
+        if (!cashRejected) {
+          root.querySelector("#accepted-price-input").oninput = (e) => {
+            const price = Number(e.target.value) || 0;
+            const errorEl = root.querySelector("#accepted-price-error");
+            if (price && price >= highestMao) {
+              errorEl.textContent = `This is at or above the highest Max Allowable Offer (${fmt(highestMao)}) -- use the "Seller did not agree to a cash price below MAO" button above instead of negotiating further.`;
+              errorEl.classList.add("show");
+            } else {
+              errorEl.classList.remove("show");
+            }
+          };
+        }
       }
     },
     validate(root) {
@@ -2186,6 +2210,7 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
         || answers.assetType === "Commercial Property" || answers.assetType === "Land";
       const highestMao = Math.max(answers.maoCash || 0, answers.maoHardMoney10 || 0, answers.maoHardMoney20 || 0);
       const fmt = n => "$" + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
+      const cashRejected = !!answers.sellerDeclinedCash;
 
       answers.sellerAcceptedPrice = root.querySelector("#accepted-price-input").value;
       let ok = !!answers.underContract;
@@ -2195,11 +2220,13 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
       if (isEligibleAssetType) {
         const price = Number(answers.sellerAcceptedPrice) || 0;
         if (!answers.sellerAcceptedPrice) {
-          priceErrorEl.textContent = "Required -- the seller needs to agree to a price before this lead can be submitted.";
+          priceErrorEl.textContent = cashRejected
+            ? "Required -- enter the seller's asking price so admin can structure the seller financing offer."
+            : "Required -- the seller needs to agree to a price before this lead can be submitted.";
           priceErrorEl.classList.add("show");
           ok = false;
-        } else if (highestMao > 0 && price >= highestMao) {
-          priceErrorEl.textContent = `This is at or above the highest Max Allowable Offer (${fmt(highestMao)}) -- negotiate the price down further before submitting.`;
+        } else if (!cashRejected && highestMao > 0 && price >= highestMao) {
+          priceErrorEl.textContent = `This is at or above the highest Max Allowable Offer (${fmt(highestMao)}) -- use the "Seller did not agree to a cash price below MAO" button above instead of negotiating further.`;
           priceErrorEl.classList.add("show");
           ok = false;
         } else {
