@@ -888,15 +888,17 @@ const steps = [
         <input type="text" id="pictures-link-input" placeholder="https://...">
 
         ${!isLand ? `
+          <div class="banner warn" style="margin:16px 0;">
+            <strong>⭐ If the property is currently generating income and/or needs no rehab to generate
+            cash flow, enter 0 here</strong> rather than leaving it blank or guessing a small number —
+            the site's logic for what text goes to the seller/realtor only works correctly when a true
+            no-rehab deal reads as exactly 0. If it's below 50% occupancy and does need rehab, go ahead
+            and enter a real rehab amount from the AI prompt results below.
+          </div>
           <label class="field-label">Rehab Estimate — Low <span class="small-muted">(optional, if known)</span></label>
           <input type="number" id="rehab-low-input" placeholder="$">
           <label class="field-label">Rehab Estimate — High</label>
           <input type="number" id="rehab-high-input" placeholder="$">
-          <p class="hint">If the property is currently generating income and/or needs no rehab to
-          generate cash flow, enter <strong>0</strong> here rather than leaving it blank or guessing a
-          small number — the site's logic for what text goes to the seller/realtor only works correctly
-          when a true no-rehab deal reads as exactly 0. If it's below 50% occupancy and does need rehab,
-          go ahead and enter a real rehab amount from the AI prompt results below.</p>
           <p class="hint">To estimate this, ${googleAiHow}. It's important to also give it the for-sale listing
           link or a link to pictures of the property so it can actually see the property's condition — a repair
           estimate without pictures is just a guess.${isResidential ? ` <strong>No bedroom or bathroom
@@ -1427,6 +1429,52 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
     }
   },
   {
+    key: "paymentStructure",
+    progress: true,
+    // Runs before seniorLoan now -- asking about the down-now/monthly/balloon structure first sets
+    // up why the next question (letting a buyer place a new senior loan) is even being asked.
+    skip() { return answers.dealType === "Cash Deal" && answers.role !== "Seller"; },
+    render(root) {
+      const structureScript = "Would you be open to a structure where the buyer pays some money down up "
+        + "front, makes monthly payments after that, and pays off the remaining balance within an agreed "
+        + "amount of time?";
+      root.innerHTML = `
+        <h2 class="step-title">Payment Structure</h2>
+        <p class="step-sub">Would the seller accept: some down payment now, some paid monthly, and the
+        remainder between the agreed purchase price and the down payment paid within a specific timeframe
+        agreed by both parties? We need a yes or a no here to accept the lead.</p>
+        <p class="hint">Ask them (text it or read it over the phone):
+        <br><span class="small-muted">"${structureScript}"</span>
+        <br><button type="button" class="btn secondary" id="structure-script-copy-btn" style="margin-top:8px;">Copy Text</button>
+        </p>
+        <div class="choice-group" id="structure-group">
+          ${["Yes","No"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
+        </div>
+        <div class="error-text" id="structure-error">Please choose Yes or No.</div>
+        <div class="banner danger" id="structure-block-banner" ${answers.paymentStructureWilling === "No" ? "" : "hidden"}>
+          We currently don't accept leads where the seller isn't willing to consider seller carry / seller
+          financing (a down payment now, monthly payments, and the remainder paid over an agreed timeframe).
+        </div>
+      `;
+      wireCopyPromptButton(root, "#structure-script-copy-btn", () => structureScript);
+      root.querySelectorAll("#structure-group .choice-btn").forEach(btn => {
+        if (btn.dataset.value === answers.paymentStructureWilling) btn.classList.add("selected");
+        btn.onclick = () => {
+          root.querySelectorAll("#structure-group .choice-btn").forEach(b => b.classList.remove("selected"));
+          btn.classList.add("selected");
+          answers.paymentStructureWilling = btn.dataset.value;
+          root.querySelector("#structure-block-banner").hidden = btn.dataset.value !== "No";
+          toggleError(root, "#structure-error", false);
+        };
+      });
+    },
+    validate(root) {
+      const ok = !!answers.paymentStructureWilling;
+      toggleError(root, "#structure-error", !ok);
+      return ok && answers.paymentStructureWilling === "Yes";
+    }
+  },
+  {
     key: "seniorLoan",
     progress: true,
     // A Seller filling this out about their own property sees this regardless of Deal Type -- we
@@ -1469,50 +1517,6 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
       const ok = !!answers.seniorLoanWilling;
       toggleError(root, "#senior-error", !ok);
       return ok && answers.seniorLoanWilling === "Yes";
-    }
-  },
-  {
-    key: "paymentStructure",
-    progress: true,
-    skip() { return answers.dealType === "Cash Deal" && answers.role !== "Seller"; },
-    render(root) {
-      const structureScript = "Would you be open to a structure where the buyer pays some money down up "
-        + "front, makes monthly payments after that, and pays off the remaining balance within an agreed "
-        + "amount of time?";
-      root.innerHTML = `
-        <h2 class="step-title">Payment Structure</h2>
-        <p class="step-sub">Would the seller accept: some down payment now, some paid monthly, and the
-        remainder between the agreed purchase price and the down payment paid within a specific timeframe
-        agreed by both parties? We need a yes or a no here to accept the lead.</p>
-        <p class="hint">Ask them (text it or read it over the phone):
-        <br><span class="small-muted">"${structureScript}"</span>
-        <br><button type="button" class="btn secondary" id="structure-script-copy-btn" style="margin-top:8px;">Copy Text</button>
-        </p>
-        <div class="choice-group" id="structure-group">
-          ${["Yes","No"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
-        </div>
-        <div class="error-text" id="structure-error">Please choose Yes or No.</div>
-        <div class="banner danger" id="structure-block-banner" ${answers.paymentStructureWilling === "No" ? "" : "hidden"}>
-          We currently don't accept leads where the seller isn't willing to consider seller carry / seller
-          financing (a down payment now, monthly payments, and the remainder paid over an agreed timeframe).
-        </div>
-      `;
-      wireCopyPromptButton(root, "#structure-script-copy-btn", () => structureScript);
-      root.querySelectorAll("#structure-group .choice-btn").forEach(btn => {
-        if (btn.dataset.value === answers.paymentStructureWilling) btn.classList.add("selected");
-        btn.onclick = () => {
-          root.querySelectorAll("#structure-group .choice-btn").forEach(b => b.classList.remove("selected"));
-          btn.classList.add("selected");
-          answers.paymentStructureWilling = btn.dataset.value;
-          root.querySelector("#structure-block-banner").hidden = btn.dataset.value !== "No";
-          toggleError(root, "#structure-error", false);
-        };
-      });
-    },
-    validate(root) {
-      const ok = !!answers.paymentStructureWilling;
-      toggleError(root, "#structure-error", !ok);
-      return ok && answers.paymentStructureWilling === "Yes";
     }
   },
   {
@@ -1717,6 +1721,7 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
               sub.querySelector("#str-noi-per-unit-input").value = answers.strNoiPerUnit || "";
             }
             sub.querySelector("#lease-term-input").value = answers.currentLeaseTerm || "";
+            wireMoneyEchoesIn(sub);
 
             const plSub = sub.querySelector("#pl-sub");
             const renderPlSub = () => {
@@ -1783,6 +1788,7 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
                 strSub.querySelector("#occ-str-revenue-input").value = occIsMultiUniform && answers.strAnnualRevenue
                   ? (Number(answers.strAnnualRevenue) / occUnits)
                   : (answers.strAnnualRevenue || "");
+                wireMoneyEchoesIn(strSub);
                 const recomputeOccStr = () => {
                   const taxes = Number(sub.querySelector("#occ-taxes-input").value) || 0;
                   const insurance = Number(sub.querySelector("#occ-insurance-input").value) || 0;
@@ -1896,6 +1902,7 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
             sub.querySelector("#str-revenue-input").value = isMultiUniform && answers.strAnnualRevenue
               ? (Number(answers.strAnnualRevenue) / units)
               : (answers.strAnnualRevenue || "");
+            wireMoneyEchoesIn(sub);
             const recompute = () => {
               const taxes = Number(sub.querySelector("#taxes-input").value) || 0;
               const insurance = Number(sub.querySelector("#insurance-input").value) || 0;
@@ -2592,6 +2599,37 @@ function wireCopyPromptButton(root, buttonSelector, getText) {
   };
 }
 
+// Live "$1,234,567" echo shown right under a dollar-amount <input type="number">, so a fat-
+// fingered extra or missing zero jumps out visually instead of silently feeding a wrong ARV/MAO/
+// offer number downstream. Deliberately additive -- never touches the input's own type or value,
+// so every existing Number(el.value) read elsewhere keeps working completely unchanged.
+function wireMoneyEcho(input) {
+  if (!input || input.dataset.moneyEchoWired) return;
+  input.dataset.moneyEchoWired = "1";
+  const echo = document.createElement("div");
+  echo.className = "small-muted";
+  echo.style.marginTop = "4px";
+  input.insertAdjacentElement("afterend", echo);
+  const update = () => {
+    const n = Number(input.value);
+    echo.textContent = (input.value !== "" && !isNaN(n)) ? "= $" + n.toLocaleString() : "";
+  };
+  input.addEventListener("input", update);
+  update();
+}
+
+// Auto-wires every dollar-amount number input within `root`. Money fields in this app all use
+// placeholder="$" by convention; MONEY_INPUT_IDS covers the handful that instead use a descriptive
+// placeholder (e.g. "Total debt amount") since they're standalone fields with no adjacent label
+// context. Exposed globally so nested sub-renders that swap in fresh inputs outside the normal
+// renderStep() flow (the income step's occupied/vacant sub-sections) can re-wire themselves too.
+const MONEY_INPUT_IDS = ["debt-input", "dp-input"];
+function wireMoneyEchoesIn(root) {
+  root.querySelectorAll('input[type="number"]').forEach(input => {
+    if (input.placeholder === "$" || MONEY_INPUT_IDS.includes(input.id)) wireMoneyEcho(input);
+  });
+}
+
 function bindChoiceGroup(root, selector, answerKey) {
   root.querySelectorAll(selector + " .choice-btn").forEach(btn => {
     if (btn.dataset.value === answers[answerKey]) btn.classList.add("selected");
@@ -2792,6 +2830,7 @@ function renderStep() {
   const container = document.getElementById("step-container");
   const step = steps[stepIndex];
   step.render(container);
+  wireMoneyEchoesIn(container);
   renderProgress();
 
   if (stepIndex === 0) return; // intro provides its own full navigation
@@ -3640,6 +3679,7 @@ function openMaoCalculator() {
   `;
 
   panel.querySelector("#close-mao-calc-btn").onclick = () => overlay.hidden = true;
+  wireMoneyEchoesIn(panel);
 
   const recompute = () => {
     const arv = Number(panel.querySelector("#mao-calc-arv").value) || 0;
