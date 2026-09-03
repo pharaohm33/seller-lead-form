@@ -892,6 +892,11 @@ const steps = [
           <input type="number" id="rehab-low-input" placeholder="$">
           <label class="field-label">Rehab Estimate — High</label>
           <input type="number" id="rehab-high-input" placeholder="$">
+          <p class="hint">If the property is currently generating income and/or needs no rehab to
+          generate cash flow, enter <strong>0</strong> here rather than leaving it blank or guessing a
+          small number — the site's logic for what text goes to the seller/realtor only works correctly
+          when a true no-rehab deal reads as exactly 0. If it's below 50% occupancy and does need rehab,
+          go ahead and enter a real rehab amount from the AI prompt results below.</p>
           <p class="hint">To estimate this, ${googleAiHow}. It's important to also give it the for-sale listing
           link or a link to pictures of the property so it can actually see the property's condition — a repair
           estimate without pictures is just a guess.${isResidential ? ` <strong>No bedroom or bathroom
@@ -1429,10 +1434,16 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
     // pick that option (admin decides the actual structure, not the seller's initial guess).
     skip() { return answers.dealType === "Cash Deal" && answers.role !== "Seller"; },
     render(root) {
+      const seniorLoanScript = "Would you be open to us bringing in outside financing that would sit in "
+        + "first position on the property, with your seller financing behind it in second position?";
       root.innerHTML = `
         <h2 class="step-title">New Senior Financing</h2>
         <p class="step-sub">Would the seller be willing to let a buyer place a new senior (1st position)
         mortgage on the property? We need a yes or a no here to accept the lead.</p>
+        <p class="hint">Ask them (text it or read it over the phone):
+        <br><span class="small-muted">"${seniorLoanScript}"</span>
+        <br><button type="button" class="btn secondary" id="senior-script-copy-btn" style="margin-top:8px;">Copy Text</button>
+        </p>
         <div class="choice-group" id="senior-group">
           ${["Yes","No"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
         </div>
@@ -1442,6 +1453,7 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
           senior (1st position) mortgage on the property.
         </div>
       `;
+      wireCopyPromptButton(root, "#senior-script-copy-btn", () => seniorLoanScript);
       root.querySelectorAll("#senior-group .choice-btn").forEach(btn => {
         if (btn.dataset.value === answers.seniorLoanWilling) btn.classList.add("selected");
         btn.onclick = () => {
@@ -1464,11 +1476,18 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
     progress: true,
     skip() { return answers.dealType === "Cash Deal" && answers.role !== "Seller"; },
     render(root) {
+      const structureScript = "Would you be open to a structure where the buyer pays some money down up "
+        + "front, makes monthly payments after that, and pays off the remaining balance within an agreed "
+        + "amount of time?";
       root.innerHTML = `
         <h2 class="step-title">Payment Structure</h2>
         <p class="step-sub">Would the seller accept: some down payment now, some paid monthly, and the
         remainder between the agreed purchase price and the down payment paid within a specific timeframe
         agreed by both parties? We need a yes or a no here to accept the lead.</p>
+        <p class="hint">Ask them (text it or read it over the phone):
+        <br><span class="small-muted">"${structureScript}"</span>
+        <br><button type="button" class="btn secondary" id="structure-script-copy-btn" style="margin-top:8px;">Copy Text</button>
+        </p>
         <div class="choice-group" id="structure-group">
           ${["Yes","No"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
         </div>
@@ -1478,6 +1497,7 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
           financing (a down payment now, monthly payments, and the remainder paid over an agreed timeframe).
         </div>
       `;
+      wireCopyPromptButton(root, "#structure-script-copy-btn", () => structureScript);
       root.querySelectorAll("#structure-group .choice-btn").forEach(btn => {
         if (btn.dataset.value === answers.paymentStructureWilling) btn.classList.add("selected");
         btn.onclick = () => {
