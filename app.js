@@ -826,18 +826,15 @@ const steps = [
           + `statistically due or overdue for replacement, and call that out explicitly.\n\n`
           + `Give a final range, not just one number, and briefly explain how you got there.`;
       };
-      // Dash-free (no hyphens/em dashes) like every other seller-facing script in this app.
+      // Dash-free (no hyphens/em dashes) like every other seller-facing script in this app. Broken
+      // into short paragraphs (blank line between each) so it reads easily as a text message instead
+      // of one dense block -- these are real newlines, so they carry through when copied/pasted.
       const buildPreforeclosureSellerScript = (purchaseYear) => {
-        return `Did you originally buy the house in ${purchaseYear || "[year]"}, and about how much have `
-          + `you put into general maintenance each year since then? It's okay if the answer is none, I `
-          + `just need to understand where things stand. If you can take pictures of the full house, `
-          + `inside and out, every room and every side, that lets me put together the most accurate `
-          + `offer. Without pictures or without your cooperation here, we have to assume the highest `
-          + `possible repair cost, which means a substantially lower offer for you. Being fully honest `
-          + `and getting me those pictures only helps you. If the numbers turn out inflated, we would `
-          + `have to come back and lower the offer later anyway, and time is not on your side right now. `
-          + `Full honesty gives you the fairest offer we can make, and a real shot at walking away with `
-          + `something instead of nothing if this goes to auction.`;
+        return `Did you originally buy the house in ${purchaseYear || "[year]"}, and about how much have you put into general maintenance each year since then?\n\n`
+          + `It's okay if the answer is none, I just need to understand where things stand. If you can take pictures of the full house, inside and out, every room and every side, that lets me put together the most accurate offer.\n\n`
+          + `Without pictures or without your cooperation here, we have to assume the highest possible repair cost, which means a substantially lower offer for you. Being fully honest and getting me those pictures only helps you.\n\n`
+          + `If the numbers turn out inflated, we would have to come back and lower the offer later anyway, and time is not on your side right now.\n\n`
+          + `Full honesty gives you the fairest offer we can make, and a real shot at walking away with something instead of nothing if this goes to auction.`;
       };
       const googleAiHow = `go to <strong>google.com</strong> and search anything (typing "ai" works fine, or just the
         address) — once results load, look at the row of tabs near the top of the page (next to "All", "Images",
@@ -984,7 +981,7 @@ const steps = [
             <input type="number" id="year-built-input" placeholder="e.g. 1998">
 
             <label class="field-label" style="margin-top:16px;">Purchase Year
-              <span class="small-muted">(the year the seller bought the property — verify on PropWire)</span></label>
+              <span class="small-muted">(the year the seller bought the property — verify on <a href="https://propwire.com/" target="_blank" rel="noopener">PropWire</a>)</span></label>
             <input type="number" id="purchase-year-input" placeholder="e.g. 2015">
 
             <label class="field-label" style="margin-top:16px;">Months Behind on Payments</label>
@@ -1003,8 +1000,13 @@ const steps = [
               <span class="small-muted">(from the seller, if they send any — optional but strongly encouraged)</span></label>
             <input type="file" id="property-photos-input" accept="image/*" multiple>
             <div id="property-photos-list" style="margin-top:8px;"></div>
+            <label class="field-label" style="margin-top:12px; font-weight:normal;">Or link to photos
+              <span class="small-muted">(a Google Photos/Drive album, Dropbox link, etc. -- instead of uploading files one by one)</span></label>
+            <input type="text" id="property-photos-link-input" placeholder="https://...">
+            <div class="error-text" id="property-photos-link-error"></div>
 
-            <p class="hint" style="margin-top:16px;">No pictures? ${googleAiHow}, then give it this instead:
+            <p class="hint" style="margin-top:16px;">Either way (photos or not), ${googleAiHow}, copy
+            this prompt, and paste it into Google AI for a repair estimate range:
             <br><span class="small-muted" id="preforeclosure-repair-prompt-hint"></span>
             <br><button type="button" class="btn secondary" id="preforeclosure-repair-prompt-copy-btn" style="margin-top:8px;">Copy Prompt</button>
             </p>
@@ -1051,13 +1053,15 @@ const steps = [
         <br><button type="button" class="btn secondary" id="assessed-value-prompt-copy-btn" style="margin-top:8px;">Copy Prompt</button>
         </p>
 
-        <label class="field-label">Lowest price they'd accept to close quickly <span class="small-muted">(their bottom dollar — we'll see if we can make that work with the acquisition team, optional)</span></label>
-        <input type="number" id="bottom-dollar-input" placeholder="$">
+        ${isPreforeclosureAuction ? "" : `
+          <label class="field-label">Lowest price they'd accept to close quickly <span class="small-muted">(their bottom dollar — we'll see if we can make that work with the acquisition team, optional)</span></label>
+          <input type="number" id="bottom-dollar-input" placeholder="$">
 
-        <label class="field-label">Notes: why does the seller want to sell / what makes this a good lead?
-          <span class="small-muted" id="cash-notes-hint"></span></label>
-        <textarea id="cash-notes-input" placeholder="e.g. motivated seller, inherited property, tired landlord, needs to relocate..."></textarea>
-        <div class="error-text" id="cash-notes-error">Since pictures${isLand ? "" : ", rehab estimate,"} and assessed value are all blank, please describe why this is a good lead.</div>
+          <label class="field-label">Notes: why does the seller want to sell / what makes this a good lead?
+            <span class="small-muted" id="cash-notes-hint"></span></label>
+          <textarea id="cash-notes-input" placeholder="e.g. motivated seller, inherited property, tired landlord, needs to relocate..."></textarea>
+          <div class="error-text" id="cash-notes-error">Since pictures${isLand ? "" : ", rehab estimate,"} and assessed value are all blank, please describe why this is a good lead.</div>
+        `}
 
         ${!isSellerFinancing ? `
           <label class="field-label" style="margin-top:16px;">Wholesale Fee
@@ -1101,14 +1105,18 @@ const steps = [
           inputSelector: "#property-photos-input", listSelector: "#property-photos-list",
           answersKey: "propertyPhotoUrls", address: addressLine
         });
+        root.querySelector("#property-photos-link-input").value = answers.propertyPhotosLink || "";
+        root.querySelector("#property-photos-link-input").oninput = (e) => { answers.propertyPhotosLink = e.target.value.trim(); };
       }
       if (!isLand) {
         root.querySelector("#rehab-low-input").value = answers.rehabEstimateLow || "";
         root.querySelector("#rehab-high-input").value = answers.rehabEstimateHigh || "";
       }
       root.querySelector("#assessed-value-input").value = answers.countyAssessedValue || "";
-      root.querySelector("#bottom-dollar-input").value = answers.bottomDollarPrice || "";
-      root.querySelector("#cash-notes-input").value = answers.cashDealNotes || "";
+      if (!isPreforeclosureAuction) {
+        root.querySelector("#bottom-dollar-input").value = answers.bottomDollarPrice || "";
+        root.querySelector("#cash-notes-input").value = answers.cashDealNotes || "";
+      }
       if (!isSellerFinancing) root.querySelector("#wholesale-fee-input").value = answers.wholesaleFee || "";
       // Once a fee is already on file (fresh input, or restored from a save/resume link) treat it as
       // deliberately set and stop auto-overwriting it as ARV changes -- only a truly untouched field
@@ -1123,16 +1131,21 @@ const steps = [
         const hasSupplementary = !!(root.querySelector("#pictures-link-input").value.trim()
           || rehabLow || rehabHigh
           || root.querySelector("#assessed-value-input").value);
-        root.querySelector("#cash-notes-hint").textContent = hasSupplementary
-          ? "(optional)"
-          : `(required since pictures${isLand ? "" : "/rehab estimate"}/assessed value are all blank)`;
+        if (!isPreforeclosureAuction) {
+          root.querySelector("#cash-notes-hint").textContent = hasSupplementary
+            ? "(optional)"
+            : `(required since pictures${isLand ? "" : "/rehab estimate"}/assessed value are all blank)`;
+        }
 
         const arv = Number(root.querySelector("#arv-input").value) || 0;
         const rehab = rehabLow && rehabHigh ? (rehabLow + rehabHigh) / 2 : (rehabLow || rehabHigh || 0);
 
         if (isResidential && isPreforeclosureAuction) {
-          root.querySelector("#preforeclosure-script-hint").textContent =
-            `"${buildPreforeclosureSellerScript(root.querySelector("#purchase-year-input").value)}"`;
+          // Real newlines in the script (see buildPreforeclosureSellerScript) need converting to <br>
+          // here so the paragraph breaks actually show on screen -- textContent would collapse them.
+          const sellerScriptText = buildPreforeclosureSellerScript(root.querySelector("#purchase-year-input").value);
+          root.querySelector("#preforeclosure-script-hint").innerHTML =
+            `"${sellerScriptText.split("\n\n").map(p => escapeHtml(p)).join("<br><br>")}"`;
           root.querySelector("#preforeclosure-repair-prompt-hint").textContent = `"${buildPreforeclosureRehabPrompt(
             arv,
             root.querySelector("#year-built-input").value,
@@ -1257,7 +1270,10 @@ const steps = [
           const negotiationBase = usingAssessed ? assessedValue : asIsValue;
           const negotiationLabel = usingAssessed ? "county assessed value" : (isLand ? "As-Is Value" : "As-Is Value (ARV minus repairs)");
           const assessedMaxOfferBanner = root.querySelector("#assessed-max-offer-banner");
-          if (!isOffMarket || !negotiationBase) {
+          // Auction/preforeclosure deals don't have time for this kind of drawn-out negotiation --
+          // these need to close in well under 20 days, which isn't realistic at a top-of-market price
+          // anyway, so skip the negotiating-ceiling tool entirely regardless of on/off-market status.
+          if (!isOffMarket || !negotiationBase || isPreforeclosureAuction) {
             assessedMaxOfferBanner.hidden = true;
           } else {
             const discountedBase = 0.90 * negotiationBase;
@@ -1471,8 +1487,12 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
     },
     validate(root) {
       const isSeller = answers.role === "Seller";
-      answers.cashDealNotes = root.querySelector("#cash-notes-input").value.trim();
-      answers.bottomDollarPrice = root.querySelector("#bottom-dollar-input").value;
+      // Not rendered at all for the preforeclosure category (see render()) -- guard against null
+      // rather than assuming these two always exist.
+      const notesEl = root.querySelector("#cash-notes-input");
+      const bottomDollarEl = root.querySelector("#bottom-dollar-input");
+      if (notesEl) answers.cashDealNotes = notesEl.value.trim();
+      if (bottomDollarEl) answers.bottomDollarPrice = bottomDollarEl.value;
       if (isSeller) {
         const ok = !!answers.cashDealNotes;
         toggleError(root, "#cash-notes-error", !ok);
@@ -1524,11 +1544,13 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
       } else {
         toggleError(root, "#arv-error", false);
       }
-      const hasSupplementary = !!(answers.picturesLink || answers.rehabEstimate || answers.countyAssessedValue);
-      if (!hasSupplementary) {
-        toggleError(root, "#cash-notes-error", !answers.cashDealNotes); if (!answers.cashDealNotes) ok = false;
-      } else {
-        toggleError(root, "#cash-notes-error", false);
+      if (!isPreforeclosureAuction) {
+        const hasSupplementary = !!(answers.picturesLink || answers.rehabEstimate || answers.countyAssessedValue);
+        if (!hasSupplementary) {
+          toggleError(root, "#cash-notes-error", !answers.cashDealNotes); if (!answers.cashDealNotes) ok = false;
+        } else {
+          toggleError(root, "#cash-notes-error", false);
+        }
       }
 
       if (isResidential && isPreforeclosureAuction) {
@@ -1536,6 +1558,7 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
         answers.purchaseYear = root.querySelector("#purchase-year-input").value;
         answers.monthsBehindOnPayments = root.querySelector("#months-behind-input").value;
         answers.annualMaintenanceSpend = root.querySelector("#annual-maintenance-input").value;
+        answers.propertyPhotosLink = root.querySelector("#property-photos-link-input").value.trim();
       }
       if (isResidential && !isPreforeclosureAuction) {
         answers.askingPrice = root.querySelector("#asking-price-input").value;
@@ -1580,6 +1603,10 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
   {
     key: "debt",
     progress: true,
+    // Duplicates what preforeclosureDebtCheck already asks (debt, plus arrears, PropWire guidance,
+    // and the seller refusal script) in more depth for that category -- skip this generic version
+    // there instead of asking about existing debt twice.
+    skip() { return answers.dealCategory === "Upcoming Auction/Preforeclosure Property"; },
     render(root) {
       root.innerHTML = `
         <h2 class="step-title">Existing Debt</h2>
@@ -2294,7 +2321,8 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
 
       root.innerHTML = `
         <h2 class="step-title">Existing Debt &amp; Arrears</h2>
-        <p class="step-sub">Look up the existing loan payoff for this property on PropWire.</p>
+        <p class="step-sub">Look up the existing loan payoff for this property on
+        <a href="https://propwire.com/" target="_blank" rel="noopener">PropWire</a>.</p>
         <label class="field-label">Existing Debt / Payoff Amount <span class="req">*</span></label>
         <input type="number" id="preforeclosure-debt-input" placeholder="$">
         <div class="error-text" id="preforeclosure-debt-error">Required.</div>
@@ -2334,8 +2362,8 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
             existing debt is below what we could pay under any buyer profile.`;
           const offerScript = cashOfferAmt
             ? `Hi ${sellerName}, saw ${addressLine} is coming up for auction soon. Would you be open `
-              + `to $${cashOfferAmt.toLocaleString()} cash to purchase outright, with a 30 day close `
-              + `(our requirement for deals like this, though we have closed in under 2 weeks before)?`
+              + `to $${cashOfferAmt.toLocaleString()} cash to purchase outright? We can close before `
+              + `the property goes to auction.`
             : "";
           branchContent.innerHTML = offerScript ? `
             <div class="banner info" style="margin-top:12px;">
@@ -2656,13 +2684,25 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
       // already ruled it out too (sellerDeclinedSellerFinancing, also from Make Your Offers), there's
       // no fallback structure at all, so this page has to stay a hard block until the cash price
       // actually comes down below MAO.
-      const financingAvailable = !answers.sellerDeclinedSellerFinancing;
-      const cashRejected = financingAvailable && !!answers.sellerDeclinedCash;
+      const isPreforeclosureAuction = answers.dealCategory === "Upcoming Auction/Preforeclosure Property";
+      // Preforeclosure has no seller-financing fallback at all (see dealType's comment) -- "seller
+      // won't accept a price below MAO" means the same thing preforeclosureDebtCheck already checks
+      // for (no equity), so the button there flags Subject To Only Possible instead of pivoting
+      // dealType to Seller Financing, which isn't a real option for this category.
+      const financingAvailable = !isPreforeclosureAuction && !answers.sellerDeclinedSellerFinancing;
+      const cashRejected = isPreforeclosureAuction
+        ? !!answers.subjectToOnlyPossible && answers.subjectToOnlyPossible !== "No"
+        : financingAvailable && !!answers.sellerDeclinedCash;
 
       root.innerHTML = `
         <h2 class="step-title">Deal Status</h2>
         <p class="hint">This page is for cash offers. Use the Max Allowable Offer below as your
-        negotiating target.${financingAvailable
+        negotiating target.${isPreforeclosureAuction
+          ? ` If the seller genuinely won't come down below it, let them know they'll get nothing if
+          this goes to auction -- they either need to agree to a price below this number to continue
+          as a cash deal, or use the button below to flag this as a subject-to lead instead, same as
+          the debt/equity check earlier.`
+          : financingAvailable
           ? ` If the seller genuinely won't come down below it, let them know we'd need to do this as
           seller financing instead, then use the button below to submit it that way, at the seller's
           full asking price with an appraisal contingency.`
@@ -2682,23 +2722,30 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
             <span class="small-muted">(the greater of the Cash Buyer / Hard Money ${answers.assetType === "Land" ? "30%" : "10%"} Down / Hard Money ${answers.assetType === "Land" ? "50%" : "20%"}
             Down numbers from the Cash Deal Details step)</span>
             <br><span class="small-muted">The seller's accepted price has to land below this number for
-            a cash offer to work. Negotiate toward it.${financingAvailable
+            a cash offer to work. Negotiate toward it.${isPreforeclosureAuction
+              ? ` If they won't come down that far, let them know they'll get nothing if this goes to
+              auction, then flag it as subject-to below if they still won't move.`
+              : financingAvailable
               ? ` If they won't come down that far, let them know we'd need to go with seller financing instead.`
               : ` The seller already declined seller financing, so there's no fallback here -- it has to land below this number.`}</span>
           </div>
-          ${financingAvailable ? `
+          ${isPreforeclosureAuction || financingAvailable ? `
             <div style="margin-top:12px;">
-              <button type="button" class="btn ghost-small${cashRejected ? " active" : ""}" id="cash-rejected-btn">Seller did not agree to a cash price below MAO</button>
+              <button type="button" class="btn ghost-small${cashRejected ? " active" : ""}" id="cash-rejected-btn">${isPreforeclosureAuction ? "Seller will not agree to a cash price below MAO" : "Seller did not agree to a cash price below MAO"}</button>
             </div>
             ${cashRejected ? `
-              <div class="banner info" style="margin-top:12px;">This will submit as a seller financing
-              offer only, at the seller's full asking price with an appraisal contingency, instead of a
-              cash deal.</div>
+              <div class="banner info" style="margin-top:12px;">${isPreforeclosureAuction
+                ? `This will submit as a <strong>Subject To - Only Possible</strong> lead instead of a
+                cash deal, same as picking "no equity" on the debt/equity check earlier.`
+                : `This will submit as a seller financing offer only, at the seller's full asking price
+                with an appraisal contingency, instead of a cash deal.`}</div>
             ` : ""}
           ` : ""}
         ` : ""}
 
-        <label class="field-label" style="margin-top:16px;">${cashRejected ? "What price is the seller asking for the property?" : "What price has the seller agreed to accept?"}
+        <label class="field-label" style="margin-top:16px;">${cashRejected
+          ? "What price is the seller asking for the property?"
+          : "What price has the seller agreed to accept?"}
           ${isEligibleAssetType
             ? `<span class="req">*</span>`
             : `<span class="small-muted">(optional — fill this in once you have it, even if that means coming back later)</span>`}
@@ -2712,9 +2759,13 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
       bindChoiceGroup(root, "#under-contract-group", "underContract");
 
       if (isEligibleAssetType && highestMao > 0) {
-        if (financingAvailable) {
+        if (isPreforeclosureAuction || financingAvailable) {
           root.querySelector("#cash-rejected-btn").onclick = () => {
-            answers.sellerDeclinedCash = !answers.sellerDeclinedCash;
+            if (isPreforeclosureAuction) {
+              answers.subjectToOnlyPossible = cashRejected ? "No" : "Yes";
+            } else {
+              answers.sellerDeclinedCash = !answers.sellerDeclinedCash;
+            }
             renderStep();
           };
         }
@@ -2723,7 +2774,9 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
             const price = Number(e.target.value) || 0;
             const errorEl = root.querySelector("#accepted-price-error");
             if (price && price >= highestMao) {
-              errorEl.textContent = financingAvailable
+              errorEl.textContent = isPreforeclosureAuction
+                ? `This is at or above the highest Max Allowable Offer (${fmt(highestMao)}) -- let the seller know they'll get nothing if this goes to auction. Keep negotiating toward that number, or press the "Seller will not agree to a cash price below MAO" button above to flag it as subject-to instead.`
+                : financingAvailable
                 ? `This is at or above the highest Max Allowable Offer (${fmt(highestMao)}) -- keep negotiating toward that number. If the seller genuinely won't come down below it, let them know we'd need to do this as seller financing instead, then press the "Seller did not agree to a cash price below MAO" button above.`
                 : `This is at or above the highest Max Allowable Offer (${fmt(highestMao)}) -- the seller already declined seller financing, so keep negotiating until this comes in below that number.`;
               errorEl.classList.add("show");
@@ -2739,8 +2792,11 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
         || answers.assetType === "Commercial Property" || answers.assetType === "Land";
       const highestMao = Math.max(answers.maoCash || 0, answers.maoHardMoney10 || 0, answers.maoHardMoney20 || 0);
       const fmt = n => "$" + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
-      const financingAvailable = !answers.sellerDeclinedSellerFinancing;
-      const cashRejected = financingAvailable && !!answers.sellerDeclinedCash;
+      const isPreforeclosureAuction = answers.dealCategory === "Upcoming Auction/Preforeclosure Property";
+      const financingAvailable = !isPreforeclosureAuction && !answers.sellerDeclinedSellerFinancing;
+      const cashRejected = isPreforeclosureAuction
+        ? !!answers.subjectToOnlyPossible && answers.subjectToOnlyPossible !== "No"
+        : financingAvailable && !!answers.sellerDeclinedCash;
 
       answers.sellerAcceptedPrice = root.querySelector("#accepted-price-input").value;
       let ok = !!answers.underContract;
@@ -2751,12 +2807,16 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
         const price = Number(answers.sellerAcceptedPrice) || 0;
         if (!answers.sellerAcceptedPrice) {
           priceErrorEl.textContent = cashRejected
-            ? "Required -- enter the seller's asking price so admin can structure the seller financing offer."
+            ? (isPreforeclosureAuction
+              ? "Required -- enter the seller's asking price so admin can structure the subject-to offer."
+              : "Required -- enter the seller's asking price so admin can structure the seller financing offer.")
             : "Required -- the seller needs to agree to a price before this lead can be submitted.";
           priceErrorEl.classList.add("show");
           ok = false;
         } else if (!cashRejected && highestMao > 0 && price >= highestMao) {
-          priceErrorEl.textContent = financingAvailable
+          priceErrorEl.textContent = isPreforeclosureAuction
+            ? `This is at or above the highest Max Allowable Offer (${fmt(highestMao)}) -- let the seller know they'll get nothing if this goes to auction. Keep negotiating toward that number, or press the "Seller will not agree to a cash price below MAO" button above to flag it as subject-to instead.`
+            : financingAvailable
             ? `This is at or above the highest Max Allowable Offer (${fmt(highestMao)}) -- keep negotiating toward that number. If the seller genuinely won't come down below it, let them know we'd need to do this as seller financing instead, then press the "Seller did not agree to a cash price below MAO" button above.`
             : `This is at or above the highest Max Allowable Offer (${fmt(highestMao)}) -- the seller already declined seller financing, so keep negotiating until this comes in below that number.`;
           priceErrorEl.classList.add("show");
@@ -2869,6 +2929,7 @@ function buildAnswerRows() {
       ["Months Behind on Payments", answers.monthsBehindOnPayments || "—"],
       ["Annual Maintenance Spend", answers.annualMaintenanceSpend || "—"],
       ["Property Photos", (answers.propertyPhotoUrls || []).join("\n") || "—"],
+      ["Property Photos Link", answers.propertyPhotosLink || "—"],
       ["Existing Debt / Payoff Amount", answers.preforeclosureDebt || "—"],
       ["Arrears Amount", answers.arrearsAmount || "—"],
       ["Subject To Only Possible", answers.subjectToOnlyPossible || "—"]
@@ -3360,7 +3421,8 @@ async function submitLead(container) {
         loanMonthlyInsurance: answers.loanMonthlyInsurance,
         yearBuilt: answers.yearBuilt, purchaseYear: answers.purchaseYear,
         monthsBehindOnPayments: answers.monthsBehindOnPayments, annualMaintenanceSpend: answers.annualMaintenanceSpend,
-        propertyPhotoUrls: (answers.propertyPhotoUrls || []).join("\n")
+        propertyPhotoUrls: (answers.propertyPhotoUrls || []).join("\n"),
+        propertyPhotosLink: answers.propertyPhotosLink
       }
     });
     if (!res.ok) throw new Error(res.error || "Something went wrong.");
@@ -3632,6 +3694,7 @@ function buildLeadFields(lead) {
       ["Months Behind on Payments", lead["Months Behind On Payments"] || "—"],
       ["Annual Maintenance Spend", lead["Annual Maintenance Spend"] || "—"],
       ["Property Photos", lead["Property Photo URLs"] || "—"],
+      ["Property Photos Link", lead["Property Photos Link"] || "—"],
       ["Existing Debt / Payoff Amount", lead["Preforeclosure Debt"] || "—"],
       ["Arrears Amount", lead["Arrears Amount"] || "—"],
       ["Subject To Only Possible", lead["Subject To Only Possible"] || "—"]
@@ -4292,7 +4355,7 @@ function openOutreachSop() {
     <h3 style="margin-top:22px;">4. Existing debt &amp; equity check</h3>
     <p class="hint"><strong>Single-family only</strong> — same as the rest of Option 1. Once they
     respond, run the address through the SendMySeller wizard for the MAO numbers (Asset Type:
-    Residential Property, 1-4 units), then check <strong>PropWire</strong> for their approximate
+    Residential Property, 1-4 units), then check <strong><a href="https://propwire.com/" target="_blank" rel="noopener">PropWire</a></strong> for their approximate
     existing debt (the wizard has a dedicated step for this once you pick "Upcoming
     Auction/Preforeclosure Property" as the deal type).</p>
     <p class="hint">If PropWire doesn't have it, ask the seller directly. If they're hesitant to share
@@ -4327,7 +4390,7 @@ function openOutreachSop() {
     commercial deals, but for simplicity, stick to deals <strong>under $20M</strong>.</p>
 
     <h3 style="margin-top:22px;">2. Screen before you text</h3>
-    <p class="hint"><strong>1–4 units:</strong> run the address through PropWire and estimate the seller's
+    <p class="hint"><strong>1–4 units:</strong> run the address through <a href="https://propwire.com/" target="_blank" rel="noopener">PropWire</a> and estimate the seller's
     loan balance against the property's value. PropWire's equity/debt data only shows reliably for 1–4
     unit properties.</p>
     <div class="banner warn">
