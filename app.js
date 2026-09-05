@@ -963,6 +963,34 @@ const steps = [
             cherry-pick the highest ARV in the area, since that usually doesn't sell.</p>
           `}
 
+          ${isCommercial ? `
+            <label class="field-label" style="margin-top:16px;">Current Occupancy <span class="req">*</span></label>
+            <div class="choice-group" id="occupancy-status-group">
+              ${["Fully Occupied", "Partially Occupied", "Vacant"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
+            </div>
+            <div class="error-text" id="occupancy-status-error">Please choose one.</div>
+
+            <div id="occupancy-detail-block" style="margin-top:10px;" ${answers.commercialOccupancyStatus === "Partially Occupied" ? "" : "hidden"}>
+              ${isMultifamilySubtype ? `
+                <label class="field-label">How many of the ${answers.units || "?"} units are currently occupied/rented? <span class="req">*</span></label>
+                <input type="number" id="occ-units-input" min="0" step="1" max="${answers.units || ""}">
+                <div class="error-text" id="occ-units-error">Required.</div>
+              ` : `
+                <label class="field-label">Approximate current occupancy %
+                  <span class="small-muted">(share of the building currently leased, by square footage or unit count)</span> <span class="req">*</span></label>
+                <input type="number" id="occ-pct-input" min="0" max="100" step="1" placeholder="e.g. 60">
+                <div class="error-text" id="occ-pct-error">Required.</div>
+              `}
+            </div>
+
+            <label class="field-label" style="margin-top:16px;">Annual NOI
+              <span class="small-muted">(current, as reported by the seller — feeds the Income Approach in the comps prompt below)</span></label>
+            <input type="number" id="noi-input" placeholder="$" ${answers.commercialNoiUnknown ? "disabled" : ""}>
+            <div style="margin-top:10px;">
+              <button type="button" class="btn ghost-small ${answers.commercialNoiUnknown ? "active" : ""}" id="unknown-noi-btn">I don't know</button>
+            </div>
+          ` : ""}
+
           <button type="button" class="link-btn" id="comps-prompt-toggle-btn">Get Comps Research Prompt for Google AI &#9662;</button>
           <div id="comps-prompt-panel" hidden style="margin-top:10px;">
             <p class="hint">This is pre-filled with the address/${isLand ? "acreage or square footage" : isCommercial ? "asset type/size" : "beds/baths/sqft"}
@@ -1336,6 +1364,10 @@ const steps = [
           }
         }
       };
+      // Assigned inside the hasCompsWorkflow block below, but declared out here so the isCommercial
+      // NOI/occupancy handlers (wired before that block runs, but only ever called after render()
+      // finishes) can call the real implementation through the same closure.
+      let updateCompsPromptText = () => {};
       const recomputeTriggerSelectors = ["#arv-input", "#pictures-link-input", "#assessed-value-input"];
       if (!isLand) recomputeTriggerSelectors.push("#rehab-low-input", "#rehab-high-input");
       if (isResidential) {
@@ -1373,6 +1405,40 @@ const steps = [
 
       wireCopyPromptButton(root, "#assessed-value-prompt-copy-btn", () => assessedValuePrompt);
 
+      if (isCommercial) {
+        const noiInput = root.querySelector("#noi-input");
+        noiInput.value = answers.commercialNOI || "";
+        noiInput.oninput = () => updateCompsPromptText();
+        root.querySelector("#unknown-noi-btn").onclick = () => {
+          answers.commercialNoiUnknown = !answers.commercialNoiUnknown;
+          if (answers.commercialNoiUnknown) answers.commercialNOI = "";
+          noiInput.value = answers.commercialNOI || "";
+          noiInput.disabled = answers.commercialNoiUnknown;
+          root.querySelector("#unknown-noi-btn").classList.toggle("active", answers.commercialNoiUnknown);
+          updateCompsPromptText();
+        };
+
+        const occStatusGroup = root.querySelector("#occupancy-status-group");
+        const occDetailBlock = root.querySelector("#occupancy-detail-block");
+        const occUnitsInput = root.querySelector("#occ-units-input");
+        const occPctInput = root.querySelector("#occ-pct-input");
+        if (occUnitsInput) occUnitsInput.value = answers.commercialUnitsOccupied || "";
+        if (occPctInput) occPctInput.value = answers.commercialOccupancyPct || "";
+        if (occUnitsInput) occUnitsInput.oninput = () => updateCompsPromptText();
+        if (occPctInput) occPctInput.oninput = () => updateCompsPromptText();
+        occStatusGroup.querySelectorAll(".choice-btn").forEach(btn => {
+          if (btn.dataset.value === answers.commercialOccupancyStatus) btn.classList.add("selected");
+          btn.onclick = () => {
+            occStatusGroup.querySelectorAll(".choice-btn").forEach(b => b.classList.remove("selected"));
+            btn.classList.add("selected");
+            answers.commercialOccupancyStatus = btn.dataset.value;
+            toggleError(root, "#occupancy-status-error", false);
+            occDetailBlock.hidden = answers.commercialOccupancyStatus !== "Partially Occupied";
+            updateCompsPromptText();
+          };
+        });
+      }
+
       if (hasCompsWorkflow) {
         const compsPromptToggleBtn = root.querySelector("#comps-prompt-toggle-btn");
         const compsPromptPanel = root.querySelector("#comps-prompt-panel");
@@ -1381,10 +1447,15 @@ const steps = [
           compsPromptToggleBtn.innerHTML = compsPromptPanel.hidden
             ? "Get Comps Research Prompt for Google AI &#9662;"
             : "Hide Comps Research Prompt &#9652;";
+          updateCompsPromptText();
         };
         // Address/beds/baths/sqft (or acreage, for land) are already on file by this point in the
         // wizard (collected in the address and asset type steps) -- pre-fill the prompt with them
-        // instead of leaving the associate to retype everything by hand.
+        // instead of leaving the associate to retype everything by hand. Commercial's NOI/occupancy
+        // fields live on this same step (unlike everything else here, set on an earlier step), so
+        // this whole thing is a function re-run on every relevant edit rather than computed once at
+        // initial render -- otherwise it would permanently show blank/stale NOI and occupancy.
+        updateCompsPromptText = () => {
         const detailsPart = isLand
           ? (answers.acreage
               ? `${answers.acreage} acre(s)${answers.sqft ? ` (${answers.sqft} square feet)` : ""}${answers.landZoning ? `, zoned ${answers.landZoning}` : ""}`
@@ -1398,6 +1469,26 @@ const steps = [
           : (answers.beds && answers.baths
               ? `${answers.beds} bedroom(s), ${answers.baths} bathroom(s), ${answers.sqft ? answers.sqft + " square feet" : "[SQUARE FEET]"}`
               : (answers.sqft ? `${answers.sqft} square feet` : "[BEDROOMS/BATHROOMS/SQUARE FEET]"));
+        // Feeds both the "Current occupancy" line and the Income Approach paragraph below -- an
+        // in-place NOI on a partially occupied or vacant property understates what it earns fully
+        // leased, so Google AI needs to know the occupancy behind whatever NOI number it's given.
+        // Reads the units/pct inputs straight from the DOM (like the ARV/rehab reads above) rather
+        // than from answers.commercialUnitsOccupied/commercialOccupancyPct, since those aren't
+        // written back to answers until validate() runs on Next.
+        const liveUnitsOccupied = root.querySelector("#occ-units-input")?.value;
+        const livePctOccupied = root.querySelector("#occ-pct-input")?.value;
+        const liveNOI = isCommercial && !answers.commercialNoiUnknown ? root.querySelector("#noi-input")?.value : "";
+        const occupancyPart = !isCommercial ? "" : answers.commercialOccupancyStatus === "Fully Occupied"
+          ? "Fully occupied (100%)"
+          : answers.commercialOccupancyStatus === "Vacant"
+          ? "Vacant (0% occupied)"
+          : answers.commercialOccupancyStatus === "Partially Occupied"
+          ? (isMultifamilySubtype && liveUnitsOccupied
+              ? `Partially occupied — ${liveUnitsOccupied} of ${answers.units || "?"} units currently occupied (~${Math.round((Number(liveUnitsOccupied) / (Number(answers.units) || 1)) * 100)}% occupancy)`
+              : livePctOccupied
+              ? `Partially occupied — approximately ${livePctOccupied}% occupied`
+              : "Partially occupied")
+          : "";
         // Land runs on its own template rather than sharing residential's via ternaries -- the
         // underlying methodology genuinely differs (utility/zoning-match-first, distance-second,
         // time-adjusted comps for land vs. a flat distance cutoff for homes), so weaving them
@@ -1440,8 +1531,9 @@ If the value comes out lower than what you might initially expect, say so plainl
 Find recent comparable SOLD properties and an estimated market value (ARV) for this property:
 - Address: ${addressLine || "[SUBJECT ADDRESS]"}
 - Asset Type: ${answers.assetSubtype || "[ASSET TYPE]"}
-- Size: ${detailsPart}${answers.commercialNOI ? `
-- Current reported annual NOI: $${Number(answers.commercialNOI).toLocaleString()}` : ""}
+- Size: ${detailsPart}${occupancyPart ? `
+- Current occupancy: ${occupancyPart}` : ""}${liveNOI ? `
+- Current reported annual NOI: $${Number(liveNOI).toLocaleString()}` : ""}
 
 Search live for 3 to 5 comparable SOLD properties that meet ALL of these rules:
 1. Same asset type as the subject (${answers.assetSubtype || "[ASSET TYPE]"}) — never comp a different commercial property type against this one (e.g. never comp retail against multifamily, or a small multifamily building against a large one)${isMultifamilySubtype ? `. For multifamily specifically, also match unit count within the same bracket (2 to 4, 5 to 9, 10 to 19, or 20+ units) and similar unit mix (studios, 1BR, 2BR, etc.) where you can find that detail` : ""}.
@@ -1462,7 +1554,9 @@ For each comp, list:
 After listing the comps, calculate BOTH approaches below and reconcile them if they meaningfully disagree:
 
 1. Sales Comparison Approach: Average Price per Square Foot (or Acre) of the comps x Subject Size = Estimated Value Range (give a range, not one number).
-2. Income Approach: ${answers.commercialNOI ? `Using the subject's current NOI of $${Number(answers.commercialNOI).toLocaleString()} and the average cap rate from the sold comps above, calculate Estimated Value = NOI ÷ Average Comp Cap Rate.` : `We don't have a confirmed current NOI for this property. If you can reasonably estimate one from market rents typical for this asset type and size, calculate an Income Approach value using that estimate and the average cap rate from the sold comps, but flag it clearly as an estimate rather than confirmed income. Otherwise, lean primarily on the Sales Comparison Approach above since there's no reliable income data to anchor an Income Approach.`}
+2. Income Approach: ${liveNOI
+  ? `Using the subject's current NOI of $${Number(liveNOI).toLocaleString()}${occupancyPart && answers.commercialOccupancyStatus !== "Fully Occupied" ? ` (in-place NOI — the property is only ${occupancyPart.toLowerCase()}, not fully occupied)` : ""} and the average cap rate from the sold comps above, calculate Estimated Value = NOI ÷ Average Comp Cap Rate.${occupancyPart && answers.commercialOccupancyStatus !== "Fully Occupied" ? ` Since it isn't fully occupied, also estimate a stabilized NOI at full occupancy using typical market rents for this asset type and size, and show that as a second Income Approach value alongside the in-place one.` : ""}`
+  : `We don't have a confirmed current NOI for this property${occupancyPart ? ` (currently ${occupancyPart.toLowerCase()})` : ""}. If you can reasonably estimate one from market rents typical for this asset type and size${occupancyPart && answers.commercialOccupancyStatus !== "Fully Occupied" ? `, accounting for that occupancy level` : ""}, calculate an Income Approach value using that estimate and the average cap rate from the sold comps, but flag it clearly as an estimate rather than confirmed income. Otherwise, lean primarily on the Sales Comparison Approach above since there's no reliable income data to anchor an Income Approach.`}
 
 If the two approaches disagree by more than roughly 15%, say so plainly and explain the likely reason (below-market in-place rents, deferred capital expenditures, a below-market lease in place, etc.) — that's an important finding, not something to smooth over.`
 : `Act as a professional real estate data analyst. Explain your math simply and avoid real estate jargon — I have no real estate experience.
@@ -1491,6 +1585,8 @@ After listing the comps, calculate and show your work:
 2. Estimated ARV: Average Price per Square Foot of the comps x Subject SqFt — give a final range, not just one number.
 
 If the ARV comes out lower than what a bank's automated home value estimate would show, say so plainly — that's an important finding, not something to smooth over.`;
+        };
+        updateCompsPromptText();
         root.querySelector("#comps-prompt-copy-btn").onclick = () => {
           const text = root.querySelector("#comps-prompt-text").value;
           if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -1671,6 +1767,37 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
           // auto-pivot rather than leaving the lead stuck as Seller Financing for no reason.
           answers.dealType = "Cash Deal";
           answers.dealTypeAutoPivoted = false;
+        }
+      }
+      const isCommercial = answers.assetType === "Commercial Property";
+      if (isCommercial) {
+        // NOI is optional either way (mirrors the "I don't know" debt field) -- occupancy status
+        // is the one hard requirement, since even a rough vacant/partial/full read is needed to make
+        // any sense of whatever NOI number (confirmed or estimated) ends up in the comps prompt.
+        if (!answers.commercialNoiUnknown) answers.commercialNOI = root.querySelector("#noi-input").value;
+        const isMultifamilySubtype = answers.assetSubtype === "Multifamily";
+        answers.commercialOccupancyStatus = answers.commercialOccupancyStatus || "";
+        toggleError(root, "#occupancy-status-error", !answers.commercialOccupancyStatus);
+        if (!answers.commercialOccupancyStatus) ok = false;
+        if (answers.commercialOccupancyStatus === "Partially Occupied") {
+          if (isMultifamilySubtype) {
+            answers.commercialUnitsOccupied = root.querySelector("#occ-units-input").value;
+            const unitsOccOk = answers.commercialUnitsOccupied !== "";
+            toggleError(root, "#occ-units-error", !unitsOccOk); if (!unitsOccOk) ok = false;
+            answers.commercialOccupancyPct = answers.units
+              ? String(Math.round((Number(answers.commercialUnitsOccupied) / Number(answers.units)) * 100))
+              : "";
+          } else {
+            answers.commercialOccupancyPct = root.querySelector("#occ-pct-input").value;
+            const pctOk = answers.commercialOccupancyPct !== "";
+            toggleError(root, "#occ-pct-error", !pctOk); if (!pctOk) ok = false;
+          }
+        } else if (answers.commercialOccupancyStatus === "Fully Occupied") {
+          answers.commercialOccupancyPct = "100";
+          answers.commercialUnitsOccupied = answers.units || "";
+        } else if (answers.commercialOccupancyStatus === "Vacant") {
+          answers.commercialOccupancyPct = "0";
+          answers.commercialUnitsOccupied = "0";
         }
       }
       return ok;
@@ -1862,7 +1989,10 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
   {
     key: "income",
     progress: true,
-    skip() { return answers.dealType === "Cash Deal" && answers.role !== "Seller"; },
+    // Commercial NOI (plus occupancy) is now collected earlier in cashDealDetails -- for every
+    // dealType, not just Seller Financing -- so Commercial no longer needs its own pass through
+    // this step; it would just be asking the same question twice.
+    skip() { return (answers.dealType === "Cash Deal" && answers.role !== "Seller") || answers.assetType === "Commercial Property"; },
     render(root) {
       const disclaimer = `
         <div class="banner warn">
@@ -2246,15 +2376,6 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
             renderIncomeSub();
           };
         });
-      } else if (answers.assetType === "Commercial Property") {
-        root.innerHTML = `
-          <h2 class="step-title">Net Operating Income (NOI)</h2>
-          ${disclaimer}
-          <label class="field-label">Annual NOI <span class="req">*</span></label>
-          <input type="number" id="noi-input" placeholder="$">
-          <div class="error-text" id="noi-error">Required.</div>
-        `;
-        root.querySelector("#noi-input").value = answers.commercialNOI || "";
       } else if (answers.assetType === "Business") {
         root.innerHTML = `
           <h2 class="step-title">Business Earnings</h2>
@@ -2358,11 +2479,6 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
         toggleError(root, "#str-revenue-error", !strRevenueEntered); if (!strRevenueEntered) ok = false;
         const okCashflow = cashflowGateOk();
         return ok && okCashflow;
-      } else if (answers.assetType === "Commercial Property") {
-        answers.commercialNOI = root.querySelector("#noi-input").value;
-        const ok = !!answers.commercialNOI;
-        toggleError(root, "#noi-error", !ok);
-        return ok;
       } else if (answers.assetType === "Business") {
         answers.businessRevenue = root.querySelector("#revenue-input").value;
         answers.businessEarnings = root.querySelector("#earnings-input").value;
@@ -2985,6 +3101,13 @@ function buildAnswerRows() {
       ["Bottom Dollar Price", answers.bottomDollarPrice || "—"],
       ["Notes (Why Sell / Good Lead)", answers.cashDealNotes || "—"]
     );
+    if (answers.assetType === "Commercial Property") {
+      rows.push(
+        ["Occupancy Status", answers.commercialOccupancyStatus || "—"],
+        ["Occupancy %", answers.commercialOccupancyPct || "—"],
+        ["NOI", answers.commercialNoiUnknown ? "Unknown" : (answers.commercialNOI || "—")]
+      );
+    }
     if (answers.role !== "Seller") {
       if (answers.dealType === "Cash Deal") {
         rows.push(
@@ -3079,8 +3202,6 @@ function buildAnswerRows() {
           );
         }
       }
-    } else if (answers.assetType === "Commercial Property") {
-      rows.push(["NOI", answers.commercialNOI || "—"]);
     } else if (answers.assetType === "Business") {
       rows.push(
         ["Annual Revenue", answers.businessRevenue || "—"],
@@ -3492,6 +3613,7 @@ async function submitLead(container) {
         leaseEndDate: answers.leaseEndDate, tenantWouldMoveEarly: answers.tenantWouldMoveEarly,
         strNoiPerUnit: answers.strNoiPerUnit,
         noi: answers.residentialNOI || answers.commercialNOI,
+        commercialOccupancyStatus: answers.commercialOccupancyStatus, commercialOccupancyPct: answers.commercialOccupancyPct,
         businessRevenue: answers.businessRevenue, businessEarningsType: answers.businessEarningsType,
         businessEarnings: answers.businessEarnings,
         totalDebt: answers.debtUnknown ? "" : answers.totalDebt,
@@ -3750,6 +3872,13 @@ function buildLeadFields(lead) {
       ["Bottom Dollar Price", lead["Bottom Dollar Price"] || "—"],
       ["Notes (Why Sell / Good Lead)", lead["Cash Deal Notes"] || "—"]
     );
+    if (lead["Asset Type"] === "Commercial Property") {
+      fields.push(
+        ["Occupancy Status", lead["Commercial Occupancy Status"] || "—"],
+        ["Occupancy %", lead["Commercial Occupancy %"] || "—"],
+        ["NOI", lead["NOI"] || "—"]
+      );
+    }
     if (lead["Role"] !== "Seller") {
       if (lead["Deal Type"] === "Cash Deal") {
         fields.push(
@@ -3845,8 +3974,6 @@ function buildLeadFields(lead) {
           );
         }
       }
-    } else if (lead["Asset Type"] === "Commercial Property") {
-      fields.push(["NOI", lead["NOI"] || "—"]);
     } else if (lead["Asset Type"] === "Business") {
       fields.push(
         ["Annual Revenue", lead["Business Revenue"] || "—"],

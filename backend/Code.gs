@@ -35,7 +35,7 @@ const LEAD_COLUMNS = [
   'Rent Ready', 'Buyer Intends To Sell', 'Occupied Status', 'Has Rent Rolls', 'Has P&L', 'Deliverable Vacant', 'Current Lease Term',
   'Lease End Date', 'Tenant Would Move Early', 'STR NOI Per Unit',
   'Monthly Rent Estimate', 'STR Annual Revenue', 'Annual Property Taxes', 'Annual Insurance', 'Expense Ratio %',
-  'NOI', 'STR NOI', 'Business Revenue', 'Business Earnings Type', 'Business Earnings',
+  'NOI', 'Commercial Occupancy Status', 'Commercial Occupancy %', 'STR NOI', 'Business Revenue', 'Business Earnings Type', 'Business Earnings',
   'Total Debt', 'Senior Loan Willing', 'Payment Structure Willing',
   'Price Sought', 'Price Reasoning', 'Down Payment Intent', 'Down Payment Needed', 'Down Payment Non-Negotiable',
   'Market Status', 'Source Link',
@@ -312,7 +312,13 @@ function submitLead(body) {
     'STR Annual Revenue': d.strAnnualRevenue || '',
     'Annual Property Taxes': d.annualPropertyTaxes || '', 'Annual Insurance': d.annualInsurance || '',
     'Expense Ratio %': d.expenseRatio || '',
-    'NOI': d.noi || '', 'STR NOI': d.strNOI || '', 'Business Revenue': d.businessRevenue || '',
+    // Commercial NOI has an explicit "I don't know" toggle on the front end (unlike Residential's
+    // required NOI) -- a blank value there always means unknown, not not-applicable, so it's worth
+    // persisting as 'Unknown' the same way Total Debt already does below, rather than leaving it
+    // indistinguishable from Land/Business's blank (genuinely no-NOI-concept) case.
+    'NOI': d.noi || (d.assetType === 'Commercial Property' ? 'Unknown' : ''),
+    'Commercial Occupancy Status': d.commercialOccupancyStatus || '', 'Commercial Occupancy %': d.commercialOccupancyPct || '',
+    'STR NOI': d.strNOI || '', 'Business Revenue': d.businessRevenue || '',
     'Business Earnings Type': d.businessEarningsType || '', 'Business Earnings': d.businessEarnings || '',
     'Total Debt': (d.totalDebt === undefined || d.totalDebt === null || d.totalDebt === '') ? 'Unknown' : d.totalDebt,
     'Senior Loan Willing': d.seniorLoanWilling, 'Payment Structure Willing': d.paymentStructureWilling,
