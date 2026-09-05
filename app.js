@@ -3762,7 +3762,7 @@ function openOutreachSop() {
   overlay.hidden = false;
   panel.innerHTML = `
     <button class="link-btn" id="close-outreach-sop-btn" style="float:right;">Close ✕</button>
-    <h2>FSBO + On Market Acquisition SOP</h2>
+    <h2>FSBO + On Market + Preforeclosure Auction SOP</h2>
     <p class="small-muted">This SOP is for deals that need rehab/renovation (fix and flip). Cold-text every
     lead with two soft offers, cash and seller financing, unless the seller's already ruled one out.
     <strong>Daily target: 50 new properties texted per day.</strong></p>
@@ -3859,6 +3859,30 @@ function openOutreachSop() {
     — only stretch to day 7 if the conversation itself makes that the smarter call (e.g. the seller said
     they need more time, or you're waiting on something specific from them). Log every counter or objection
     in the lead's notes — admin uses it to decide how to adjust either offer.</p>
+
+    <h3 style="margin-top:22px;">8. Preforeclosure Auction Outreach (auction.com)</h3>
+    <p class="hint">A separate volume play run alongside the FSBO/on-market outreach above — different
+    lead source, different offer logic. <strong>Single-family properties only.</strong></p>
+    <p class="hint"><strong>Source:</strong> auction.com. Filter for single-family preforeclosure
+    properties with <strong>27 to 30 days left</strong> until the auction date, and pull about 50 of them
+    into a spreadsheet/CSV per day.</p>
+    <p class="hint"><strong>Skip trace before texting</strong> — auction.com doesn't give you a phone
+    number. Look up each owner on <strong>truepeoplesearch.com</strong> (free, one at a time) or pay for a
+    bulk skip tracing service if you want to move through 50 at once faster.</p>
+    <p class="hint"><strong>Text this:</strong></p>
+    <div class="banner info">
+      "Hey [Name], this is [Your Name]. Would you consider an offer on [Address]? I couldn't help but
+      notice that its auction date is around the corner, next week or so. I was planning to go and bid on
+      it, but figured it wouldn't hurt to try and work something out with you before it's gone."
+    </div>
+    <p class="hint"><strong>Volume:</strong> 50 texts a day for 7 days (350 total) — at that volume you're
+    very likely to land a deal.</p>
+    <p class="hint"><strong>If they ask what you'd offer:</strong> run the address through the
+    SendMySeller wizard for the MAO numbers, and check <strong>PropWire</strong> for their approximate
+    existing debt. Offer the <strong>lowest MAO that still covers their existing debt and nets them at
+    least $10,000</strong>, more if the numbers allow it.</p>
+    <p class="hint">Once the seller agrees to a dollar amount, submit the lead through the wizard and
+    contact admin.</p>
   `;
   panel.querySelector("#close-outreach-sop-btn").onclick = () => overlay.hidden = true;
 }
