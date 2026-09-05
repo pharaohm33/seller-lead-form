@@ -755,6 +755,11 @@ const steps = [
       const isLand = answers.assetType === "Land";
       const hasCompsWorkflow = isResidential || isLand;
       const isOnMarket = answers.marketStatus === "On-Market";
+      // Auction/preforeclosure sellers have no asking price at all -- the offer is built purely off
+      // As-Is Value/ARV/repair, and since there's usually no listing or photos to research the
+      // property's condition from, repair cost has to be estimated from purchase year, home age, and
+      // what the seller says they've spent on upkeep instead (see the dedicated section below).
+      const isPreforeclosureAuction = answers.dealCategory === "Upcoming Auction/Preforeclosure Property";
       const addressLine = `${answers.street || ""}, ${answers.city || ""}, ${answers.state || ""} ${answers.zip || ""}`.trim();
       const arvPrompt = `how much is this worth at full market value (ARV): ${addressLine}`;
       const assessedValuePrompt = `what is the county assessed value for this property: ${addressLine}`;
@@ -775,6 +780,57 @@ const steps = [
           ? ` It's currently ${answers.beds} bed / ${answers.baths} bath -- estimate repair costs for that existing layout (however light or heavy the work actually is), with no bedroom or bathroom additions or conversions planned.`
           : "";
         return `how much fix and flip investor repair is needed at ${addressLine}${arvPart}?${bedBathPart} ${zillowSearchUrl}`;
+      };
+      // Auction/preforeclosure properties usually have no listing or photos to research condition
+      // from, so repair cost gets estimated from purchase year, home age, and reported maintenance
+      // spend instead. Assumes neglect starts the moment the seller fell behind on payments -- their
+      // reported annual spend is taken at face value only for the years before that.
+      const buildPreforeclosureRehabPrompt = (arv, yearBuilt, purchaseYear, monthsBehind, annualMaintenance) => {
+        const currentYear = new Date().getFullYear();
+        const yearsOwned = purchaseYear ? Math.max(currentYear - Number(purchaseYear), 0) : null;
+        const onePctPerYear = arv ? Math.round(Number(arv) * 0.01) : null;
+        return `Act as a professional home inspector and repair cost estimator. Explain your math simply, `
+          + `no real estate jargon.\n\n`
+          + `Estimate a realistic repair/rehab cost range (low to high) for this property, based on `
+          + `deferred maintenance rather than a full inspection:\n`
+          + `- Address: ${addressLine || "[SUBJECT ADDRESS]"}\n`
+          + `- Year built: ${yearBuilt || "[unknown -- estimate typical system ages for the area]"}\n`
+          + `- Current owner purchased the property in: ${purchaseYear || "[unknown]"}${yearsOwned ? ` (${yearsOwned} years ago)` : ""}\n`
+          + `- Owner reports spending approximately $${Number(annualMaintenance || 0).toLocaleString()} per year on `
+          + `general maintenance since they purchased the home\n`
+          + `- Owner has been behind on mortgage payments for approximately ${monthsBehind || 0} months\n`
+          + `- Estimated After Repair Value (ARV): $${Number(arv || 0).toLocaleString()}\n\n`
+          + `Use this logic:\n`
+          + `1. A well-maintained home typically needs about 1% of its value spent on maintenance every `
+          + `year (the "1% rule"). At this home's ARV, that's approximately $${onePctPerYear ? onePctPerYear.toLocaleString() : "[1% of ARV]"} per year that should have been spent.\n`
+          + `2. For the years the owner was current on their mortgage (before falling behind), take their `
+          + `reported annual maintenance spend at face value as what was actually spent.\n`
+          + `3. For the months the owner has been behind on payments, assume $0 was spent on maintenance `
+          + `during that period -- assume neglect starts the moment someone falls behind on their mortgage.\n`
+          + `4. For every year (or partial year) since purchase, calculate the shortfall between what `
+          + `should have been spent (1% of ARV) and what was actually spent (the owner's reported number, `
+          + `or $0 during the behind-on-payments period). Add up every year's shortfall for a cumulative `
+          + `deferred maintenance total.\n`
+          + `5. Give a LOW estimate assuming some of that deferred maintenance is cosmetic or `
+          + `non-critical, and a HIGH estimate assuming a larger share of it has become real, needed `
+          + `repairs (roofing, HVAC, plumbing, electrical, foundation) that tend to surface with age and `
+          + `neglect -- not just the raw shortfall number.\n`
+          + `6. Factor in the home's age for which major systems (roof, HVAC, water heater) are `
+          + `statistically due or overdue for replacement, and call that out explicitly.\n\n`
+          + `Give a final range, not just one number, and briefly explain how you got there.`;
+      };
+      // Dash-free (no hyphens/em dashes) like every other seller-facing script in this app.
+      const buildPreforeclosureSellerScript = (purchaseYear) => {
+        return `Did you originally buy the house in ${purchaseYear || "[year]"}, and about how much have `
+          + `you put into general maintenance each year since then? It's okay if the answer is none, I `
+          + `just need to understand where things stand. If you can take pictures of the full house, `
+          + `inside and out, every room and every side, that lets me put together the most accurate `
+          + `offer. Without pictures or without your cooperation here, we have to assume the highest `
+          + `possible repair cost, which means a substantially lower offer for you. Being fully honest `
+          + `and getting me those pictures only helps you. If the numbers turn out inflated, we would `
+          + `have to come back and lower the offer later anyway, and time is not on your side right now. `
+          + `Full honesty gives you the fairest offer we can make, and a real shot at walking away with `
+          + `something instead of nothing if this goes to auction.`;
       };
       const googleAiHow = `go to <strong>google.com</strong> and search anything (typing "ai" works fine, or just the
         address) — once results load, look at the row of tabs near the top of the page (next to "All", "Images",
@@ -884,10 +940,16 @@ const steps = [
             <span class="small-muted">(optional — the raw number from Chase's Home Value Estimator, for admin's reference alongside the ARV below)</span></label>
           <input type="number" id="chase-estimate-input" placeholder="$">
 
-          <label class="field-label">Asking Price <span class="req">*</span>
-            <span class="small-muted">(what the seller is asking/listing for)</span></label>
-          <input type="number" id="asking-price-input" placeholder="$">
-          <div class="error-text" id="asking-price-error">Required.</div>
+          ${isPreforeclosureAuction ? `
+            <div class="banner info" style="margin-top:16px;"><strong>No asking price here</strong> —
+            auction/preforeclosure sellers don't have one. The offer is built entirely off As-Is Value,
+            ARV, and the repair estimate below.</div>
+          ` : `
+            <label class="field-label">Asking Price <span class="req">*</span>
+              <span class="small-muted">(what the seller is asking/listing for)</span></label>
+            <input type="number" id="asking-price-input" placeholder="$">
+            <div class="error-text" id="asking-price-error">Required.</div>
+          `}
         ` : ""}
 
         <label class="field-label">${isLand ? "As-Is Value" : "ARV"}
@@ -898,10 +960,43 @@ const steps = [
           <p class="hint">${googleAiHow}, copy a listing link if you have one (or just use the address), then ask:
           <br><span class="small-muted">"${arvPrompt}"</span></p>
         ` : ""}
-        ${isResidential ? `<div class="banner danger" id="arv-vs-asking-banner" hidden style="margin-top:12px;"></div>` : ""}
+        ${isResidential && !isPreforeclosureAuction ? `<div class="banner danger" id="arv-vs-asking-banner" hidden style="margin-top:12px;"></div>` : ""}
 
         <label class="field-label">Pictures Link <span class="small-muted">(optional, if available)</span></label>
         <input type="text" id="pictures-link-input" placeholder="https://...">
+
+        ${isResidential && isPreforeclosureAuction ? `
+          <div style="margin-top:16px;">
+            <label class="field-label">Year Built</label>
+            <input type="number" id="year-built-input" placeholder="e.g. 1998">
+
+            <label class="field-label" style="margin-top:16px;">Purchase Year
+              <span class="small-muted">(the year the seller bought the property — verify on PropWire)</span></label>
+            <input type="number" id="purchase-year-input" placeholder="e.g. 2015">
+
+            <label class="field-label" style="margin-top:16px;">Months Behind on Payments</label>
+            <input type="number" id="months-behind-input" placeholder="e.g. 4">
+
+            <label class="field-label" style="margin-top:16px;">Annual Maintenance Spend
+              <span class="small-muted">(what the seller says they've put in per year since buying)</span></label>
+            <input type="number" id="annual-maintenance-input" placeholder="$">
+
+            <p class="hint">Ask the seller (text it or read it over the phone):
+            <br><span class="small-muted" id="preforeclosure-script-hint"></span>
+            <br><button type="button" class="btn secondary" id="preforeclosure-script-copy-btn" style="margin-top:8px;">Copy Text</button>
+            </p>
+
+            <label class="field-label" style="margin-top:16px;">Property Photos
+              <span class="small-muted">(from the seller, if they send any — optional but strongly encouraged)</span></label>
+            <input type="file" id="property-photos-input" accept="image/*" multiple>
+            <div id="property-photos-list" style="margin-top:8px;"></div>
+
+            <p class="hint" style="margin-top:16px;">No pictures? ${googleAiHow}, then give it this instead:
+            <br><span class="small-muted" id="preforeclosure-repair-prompt-hint"></span>
+            <br><button type="button" class="btn secondary" id="preforeclosure-repair-prompt-copy-btn" style="margin-top:8px;">Copy Prompt</button>
+            </p>
+          </div>
+        ` : ""}
 
         ${!isLand ? `
           <div class="banner warn" style="margin:16px 0;">
@@ -965,9 +1060,27 @@ const steps = [
       root.querySelector("#arv-input").value = answers.arv || "";
       if (isResidential) {
         root.querySelector("#chase-estimate-input").value = answers.chaseEstimate || "";
-        root.querySelector("#asking-price-input").value = answers.askingPrice || "";
+        if (!isPreforeclosureAuction) root.querySelector("#asking-price-input").value = answers.askingPrice || "";
       }
       root.querySelector("#pictures-link-input").value = answers.picturesLink || "";
+      if (isResidential && isPreforeclosureAuction) {
+        root.querySelector("#year-built-input").value = answers.yearBuilt || "";
+        root.querySelector("#purchase-year-input").value = answers.purchaseYear || "";
+        root.querySelector("#months-behind-input").value = answers.monthsBehindOnPayments || "";
+        root.querySelector("#annual-maintenance-input").value = answers.annualMaintenanceSpend || "";
+        wireCopyPromptButton(root, "#preforeclosure-script-copy-btn", () => buildPreforeclosureSellerScript(root.querySelector("#purchase-year-input").value));
+        wireCopyPromptButton(root, "#preforeclosure-repair-prompt-copy-btn", () => buildPreforeclosureRehabPrompt(
+          root.querySelector("#arv-input").value,
+          root.querySelector("#year-built-input").value,
+          root.querySelector("#purchase-year-input").value,
+          root.querySelector("#months-behind-input").value,
+          root.querySelector("#annual-maintenance-input").value
+        ));
+        wireScreenshotUpload(root, {
+          inputSelector: "#property-photos-input", listSelector: "#property-photos-list",
+          answersKey: "propertyPhotoUrls", address: addressLine
+        });
+      }
       if (!isLand) {
         root.querySelector("#rehab-low-input").value = answers.rehabEstimateLow || "";
         root.querySelector("#rehab-high-input").value = answers.rehabEstimateHigh || "";
@@ -995,6 +1108,18 @@ const steps = [
 
         const arv = Number(root.querySelector("#arv-input").value) || 0;
         const rehab = rehabLow && rehabHigh ? (rehabLow + rehabHigh) / 2 : (rehabLow || rehabHigh || 0);
+
+        if (isResidential && isPreforeclosureAuction) {
+          root.querySelector("#preforeclosure-script-hint").textContent =
+            `"${buildPreforeclosureSellerScript(root.querySelector("#purchase-year-input").value)}"`;
+          root.querySelector("#preforeclosure-repair-prompt-hint").textContent = `"${buildPreforeclosureRehabPrompt(
+            arv,
+            root.querySelector("#year-built-input").value,
+            root.querySelector("#purchase-year-input").value,
+            root.querySelector("#months-behind-input").value,
+            root.querySelector("#annual-maintenance-input").value
+          )}"`;
+        }
 
         if (!isLand) {
           root.querySelector("#repair-prompt-hint").textContent = `"${buildRepairPrompt(arv)}"`;
@@ -1027,7 +1152,7 @@ const steps = [
         // no margin for a cash purchase and no case for a seller-financing pivot -- stop the deal.
         // "Very close" is a judgment call, set at 5% here; adjust ARV_VS_ASKING_CLOSE_PCT if that's
         // too tight or too loose in practice.
-        if (isResidential) {
+        if (isResidential && !isPreforeclosureAuction) {
           const askingPrice = Number(root.querySelector("#asking-price-input").value) || 0;
           const arvVsAskingBanner = root.querySelector("#arv-vs-asking-banner");
           const needsRehabLive = rehab > 0;
@@ -1137,7 +1262,13 @@ const steps = [
       };
       const recomputeTriggerSelectors = ["#arv-input", "#pictures-link-input", "#assessed-value-input"];
       if (!isLand) recomputeTriggerSelectors.push("#rehab-low-input", "#rehab-high-input");
-      if (isResidential) recomputeTriggerSelectors.push("#asking-price-input");
+      if (isResidential) {
+        if (isPreforeclosureAuction) {
+          recomputeTriggerSelectors.push("#year-built-input", "#purchase-year-input", "#months-behind-input", "#annual-maintenance-input");
+        } else {
+          recomputeTriggerSelectors.push("#asking-price-input");
+        }
+      }
       recomputeTriggerSelectors.forEach(sel => {
         root.querySelector(sel).oninput = recomputeCashDeal;
       });
@@ -1366,6 +1497,7 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
       // AND making something up. Commercial/business have no Chase-equivalent fallback, so ARV
       // stays required there.
       const isResidential = answers.assetType === "Residential Property (1-4 units)";
+      const isPreforeclosureAuction = answers.dealCategory === "Upcoming Auction/Preforeclosure Property";
       if (!isResidential) {
         toggleError(root, "#arv-error", !answers.arv); if (!answers.arv) ok = false;
       } else {
@@ -1378,7 +1510,13 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
         toggleError(root, "#cash-notes-error", false);
       }
 
-      if (isResidential) {
+      if (isResidential && isPreforeclosureAuction) {
+        answers.yearBuilt = root.querySelector("#year-built-input").value;
+        answers.purchaseYear = root.querySelector("#purchase-year-input").value;
+        answers.monthsBehindOnPayments = root.querySelector("#months-behind-input").value;
+        answers.annualMaintenanceSpend = root.querySelector("#annual-maintenance-input").value;
+      }
+      if (isResidential && !isPreforeclosureAuction) {
         answers.askingPrice = root.querySelector("#asking-price-input").value;
         const askingOk = !!answers.askingPrice;
         toggleError(root, "#asking-price-error", !askingOk); if (!askingOk) ok = false;
@@ -2696,6 +2834,11 @@ function buildAnswerRows() {
   }
   if (answers.dealCategory === "Upcoming Auction/Preforeclosure Property") {
     rows.push(
+      ["Year Built", answers.yearBuilt || "—"],
+      ["Purchase Year", answers.purchaseYear || "—"],
+      ["Months Behind on Payments", answers.monthsBehindOnPayments || "—"],
+      ["Annual Maintenance Spend", answers.annualMaintenanceSpend || "—"],
+      ["Property Photos", (answers.propertyPhotoUrls || []).join("\n") || "—"],
       ["Existing Debt / Payoff Amount", answers.preforeclosureDebt || "—"],
       ["Arrears Amount", answers.arrearsAmount || "—"],
       ["Subject To Only Possible", answers.subjectToOnlyPossible || "—"]
@@ -3184,7 +3327,10 @@ async function submitLead(container) {
         payoffStatementNotes: answers.payoffStatementNotes,
         loanMonthlyPayment: answers.loanMonthlyPayment, loanMonthlyPrincipal: answers.loanMonthlyPrincipal,
         loanMonthlyInterest: answers.loanMonthlyInterest, loanMonthlyTaxes: answers.loanMonthlyTaxes,
-        loanMonthlyInsurance: answers.loanMonthlyInsurance
+        loanMonthlyInsurance: answers.loanMonthlyInsurance,
+        yearBuilt: answers.yearBuilt, purchaseYear: answers.purchaseYear,
+        monthsBehindOnPayments: answers.monthsBehindOnPayments, annualMaintenanceSpend: answers.annualMaintenanceSpend,
+        propertyPhotoUrls: (answers.propertyPhotoUrls || []).join("\n")
       }
     });
     if (!res.ok) throw new Error(res.error || "Something went wrong.");
@@ -3451,6 +3597,11 @@ function buildLeadFields(lead) {
   }
   if (lead["Deal Category"] === "Upcoming Auction/Preforeclosure Property") {
     fields.push(
+      ["Year Built", lead["Year Built"] || "—"],
+      ["Purchase Year", lead["Purchase Year"] || "—"],
+      ["Months Behind on Payments", lead["Months Behind On Payments"] || "—"],
+      ["Annual Maintenance Spend", lead["Annual Maintenance Spend"] || "—"],
+      ["Property Photos", lead["Property Photo URLs"] || "—"],
       ["Existing Debt / Payoff Amount", lead["Preforeclosure Debt"] || "—"],
       ["Arrears Amount", lead["Arrears Amount"] || "—"],
       ["Subject To Only Possible", lead["Subject To Only Possible"] || "—"]
@@ -4074,8 +4225,11 @@ function openOutreachSop() {
 
     <h3 style="margin-top:22px;">3. Text once, then call</h3>
     <p class="hint">Send the text below <strong>one time only</strong> — do not send multiple texts to
-    the same owner. After that initial text, switch to <strong>calling the owner and leaving
-    voicemails</strong> if they don't respond.</p>
+    the same owner. After that single opening text, switch to <strong>calling the owner and leaving
+    voicemails</strong>, and keep calling/leaving voicemails from there (no more texts) until they
+    respond. If there's still no response after <strong>3 to 7 total touch points</strong> (the text
+    plus calls/voicemails combined), stop and move on to different auction properties elsewhere in
+    the US.</p>
     <div class="banner info">
       "Hey [Name], this is [Your Name]. Would you consider an offer on [Address]? I couldn't help but
       notice that its auction date is around the corner, next week or so. I was planning to go and bid on
