@@ -981,8 +981,11 @@ const steps = [
             <input type="number" id="year-built-input" placeholder="e.g. 1998">
 
             <label class="field-label" style="margin-top:16px;">Purchase Year
-              <span class="small-muted">(the year the seller bought the property — verify on <a href="https://propwire.com/" target="_blank" rel="noopener">PropWire</a>)</span></label>
+              <span class="small-muted">(the year the seller bought the property)</span></label>
             <input type="number" id="purchase-year-input" placeholder="e.g. 2015">
+            <p class="hint">Verify this on <a href="https://propwire.com/" target="_blank" rel="noopener">PropWire</a>:
+            enter the address, then use the last sale date from the <strong>History</strong> tab right at
+            the top of the result. You may need to create a free account or sign in first.</p>
 
             <label class="field-label" style="margin-top:16px;">Months Behind on Payments</label>
             <input type="number" id="months-behind-input" placeholder="e.g. 4">
