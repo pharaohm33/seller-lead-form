@@ -841,6 +841,12 @@ const steps = [
       root.innerHTML = `
         <h2 class="step-title">${isSellerFinancing ? "Property Value & Repair Research" : "Cash Deal Details"}</h2>
 
+        ${isPreforeclosureAuction ? `
+          <p class="hint">You only reach this step once the seller has already responded to your
+          initial text and is open to selling — this isn't a cold lead anymore, so it's fine to move
+          straight into pricing.</p>
+        ` : ""}
+
         ${isResidential ? (isSellerFinancing ? `
           <p class="hint"><strong>Step 1 — get a baseline from Chase.</strong> Use
           <a href="https://www.chase.com/personal/mortgage/calculators-resources/home-value-estimator" target="_blank" rel="noopener">Chase's Home Value Estimator</a>
@@ -1003,11 +1009,19 @@ const steps = [
 
         ${!isLand ? `
           <div class="banner warn" style="margin:16px 0;">
-            <strong>⭐ If the property is currently generating income and/or needs no rehab to generate
-            cash flow, enter 0 here</strong> rather than leaving it blank or guessing a small number —
-            the site's logic for what text goes to the seller/realtor only works correctly when a true
-            no-rehab deal reads as exactly 0. If it's below 50% occupancy and does need rehab, go ahead
-            and enter a real rehab amount from the AI prompt results below.
+            ${isPreforeclosureAuction ? `
+              <strong>⭐ If the property needs no rehab, enter 0 here</strong> rather than leaving it
+              blank or guessing a small number — the site's logic for what text goes to the seller only
+              works correctly when a true no-rehab deal reads as exactly 0. A preforeclosure seller
+              isn't running this as an income property, so use the purchase-year/maintenance section
+              above (and the AI prompt it builds) to estimate a real rehab number if it does need work.
+            ` : `
+              <strong>⭐ If the property is currently generating income and/or needs no rehab to generate
+              cash flow, enter 0 here</strong> rather than leaving it blank or guessing a small number —
+              the site's logic for what text goes to the seller/realtor only works correctly when a true
+              no-rehab deal reads as exactly 0. If it's below 50% occupancy and does need rehab, go ahead
+              and enter a real rehab amount from the AI prompt results below.
+            `}
           </div>
           <label class="field-label">Rehab Estimate — Low <span class="small-muted">(optional, if known)</span></label>
           <input type="number" id="rehab-low-input" placeholder="$">
