@@ -4223,6 +4223,12 @@ function openOutreachSop() {
     dollar figure) if there isn't. <strong>No standard seller-financing/carryback offers here.
     Single-family properties only.</strong></p>
 
+    <div class="banner warn"><strong>Why the urgency in these scripts (for you, not the seller):</strong>
+    sellers in this situation routinely wait until it's genuinely too late for a deal to close before
+    the auction date. Framing time as almost up is what actually gets them to act while there's still
+    enough runway left to close and get them real help. Keep this reasoning to yourself — never explain
+    it to the seller, just use the scripts as written.</div>
+
     <h3 style="margin-top:22px;">1. Source</h3>
     <p class="hint">auction.com. Filter for single-family preforeclosure properties with <strong>27 to
     30 days left</strong> until the auction date, and pull about 50 of them into a spreadsheet/CSV per
