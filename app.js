@@ -1035,6 +1035,26 @@ const steps = [
         <label class="field-label">Pictures Link <span class="small-muted">(optional, if available)</span></label>
         <input type="text" id="pictures-link-input" placeholder="https://...">
 
+        ${isCommercial ? `
+          <div id="commercial-vacant-block" style="margin-top:16px;" ${answers.commercialOccupancyStatus === "Vacant" ? "" : "hidden"}>
+            ${isOnMarket ? `
+              <div class="banner info"><strong>This property isn't generating income right now.</strong>
+              Since it's on-market, use the listing link (Pictures Link above) with Google AI to estimate
+              rehab needs straight from the listing's own photos — see the rehab prompt below, no
+              separate photos needed from you.</div>
+            ` : `
+              <div class="banner warn"><strong>This property isn't generating income and is off-market
+              </strong> — there's no listing to pull photos from, so we need real pictures of it before
+              we can put together an offer.</div>
+              <label class="field-label" style="margin-top:12px;">Property Photos <span class="req">*</span>
+                <span class="small-muted">(or add a Pictures Link above instead)</span></label>
+              <input type="file" id="commercial-photos-input" accept="image/*" multiple>
+              <div id="commercial-photos-list" style="margin-top:8px;"></div>
+              <div class="error-text" id="commercial-photos-error">Upload at least one photo, or add a Pictures Link above, before continuing.</div>
+            `}
+          </div>
+        ` : ""}
+
         ${isResidential && isPreforeclosureAuction ? `
           <div style="margin-top:16px;">
             <label class="field-label">Year Built</label>
@@ -1420,12 +1440,19 @@ const steps = [
 
         const occStatusGroup = root.querySelector("#occupancy-status-group");
         const occDetailBlock = root.querySelector("#occupancy-detail-block");
+        const commercialVacantBlock = root.querySelector("#commercial-vacant-block");
         const occUnitsInput = root.querySelector("#occ-units-input");
         const occPctInput = root.querySelector("#occ-pct-input");
         if (occUnitsInput) occUnitsInput.value = answers.commercialUnitsOccupied || "";
         if (occPctInput) occPctInput.value = answers.commercialOccupancyPct || "";
         if (occUnitsInput) occUnitsInput.oninput = () => updateCompsPromptText();
         if (occPctInput) occPctInput.oninput = () => updateCompsPromptText();
+        if (!isOnMarket) {
+          wireScreenshotUpload(root, {
+            inputSelector: "#commercial-photos-input", listSelector: "#commercial-photos-list",
+            answersKey: "propertyPhotoUrls", address: addressLine
+          });
+        }
         occStatusGroup.querySelectorAll(".choice-btn").forEach(btn => {
           if (btn.dataset.value === answers.commercialOccupancyStatus) btn.classList.add("selected");
           btn.onclick = () => {
@@ -1434,6 +1461,7 @@ const steps = [
             answers.commercialOccupancyStatus = btn.dataset.value;
             toggleError(root, "#occupancy-status-error", false);
             occDetailBlock.hidden = answers.commercialOccupancyStatus !== "Partially Occupied";
+            if (commercialVacantBlock) commercialVacantBlock.hidden = answers.commercialOccupancyStatus !== "Vacant";
             updateCompsPromptText();
           };
         });
@@ -1798,6 +1826,16 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
         } else if (answers.commercialOccupancyStatus === "Vacant") {
           answers.commercialOccupancyPct = "0";
           answers.commercialUnitsOccupied = "0";
+        }
+        // A vacant, off-market commercial property has no income AND no listing to pull condition
+        // photos from -- without either one, there's nothing to base an offer on, so require real
+        // pictures (or a link to them) before letting this lead through. On-market covers this via
+        // the listing link instead (see the banner above), so it's exempt.
+        const isOnMarket = answers.marketStatus === "On-Market";
+        if (answers.commercialOccupancyStatus === "Vacant" && !isOnMarket) {
+          const hasPhotos = !!((answers.propertyPhotoUrls && answers.propertyPhotoUrls.length) || answers.picturesLink);
+          toggleError(root, "#commercial-photos-error", !hasPhotos);
+          if (!hasPhotos) ok = false;
         }
       }
       return ok;
@@ -3107,6 +3145,9 @@ function buildAnswerRows() {
         ["Occupancy %", answers.commercialOccupancyPct || "—"],
         ["NOI", answers.commercialNoiUnknown ? "Unknown" : (answers.commercialNOI || "—")]
       );
+      if (answers.commercialOccupancyStatus === "Vacant" && answers.marketStatus !== "On-Market") {
+        rows.push(["Property Photos", (answers.propertyPhotoUrls || []).join("\n") || "—"]);
+      }
     }
     if (answers.role !== "Seller") {
       if (answers.dealType === "Cash Deal") {
@@ -3878,6 +3919,9 @@ function buildLeadFields(lead) {
         ["Occupancy %", lead["Commercial Occupancy %"] || "—"],
         ["NOI", lead["NOI"] || "—"]
       );
+      if (lead["Commercial Occupancy Status"] === "Vacant" && lead["Market Status"] !== "On-Market") {
+        fields.push(["Property Photos", lead["Property Photo URLs"] || "—"]);
+      }
     }
     if (lead["Role"] !== "Seller") {
       if (lead["Deal Type"] === "Cash Deal") {
