@@ -1025,25 +1025,18 @@ const steps = [
         ` : ""}
 
         ${!isLand ? `
-          <div class="banner warn" style="margin:16px 0;">
-            ${isPreforeclosureAuction ? `
-              <strong>⭐ If the property needs no rehab, enter 0 here</strong> rather than leaving it
-              blank or guessing a small number — this feeds directly into the ARV/MAO calculation
-              below, and a wrong number here means a wrong cash offer. There's no rehab-based branching
-              for this category (no seller-financing split by rehab need, due to the timeline and
-              urgency of this seller category) — the only thing that decides cash vs subject-to is
-              comparing that MAO against the seller's existing debt, on the Existing Debt & Arrears
-              step next. A preforeclosure seller isn't running this as an income property, so use the
-              purchase-year/maintenance section above (and the AI prompt it builds) to estimate a real
-              rehab number if it does need work.
-            ` : `
+          ${isPreforeclosureAuction ? `
+            <p class="hint" style="margin:16px 0;">This rehab estimate feeds the MAO used to decide cash
+            vs subject-to on the Existing Debt &amp; Arrears step next.</p>
+          ` : `
+            <div class="banner warn" style="margin:16px 0;">
               <strong>⭐ If the property is currently generating income and/or needs no rehab to generate
               cash flow, enter 0 here</strong> rather than leaving it blank or guessing a small number —
               the site's logic for what text goes to the seller/realtor only works correctly when a true
               no-rehab deal reads as exactly 0. If it's below 50% occupancy and does need rehab, go ahead
               and enter a real rehab amount from the AI prompt results below.
-            `}
-          </div>
+            </div>
+          `}
           <label class="field-label">Rehab Estimate — Low <span class="small-muted">(optional, if known)</span></label>
           <input type="number" id="rehab-low-input" placeholder="$">
           <label class="field-label">Rehab Estimate — High</label>
