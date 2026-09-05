@@ -836,6 +836,8 @@ const steps = [
           + `If the numbers turn out inflated, we would have to come back and lower the offer later anyway, and time is not on your side right now.\n\n`
           + `Full honesty gives you the fairest offer we can make, and a real shot at walking away with something instead of nothing if this goes to auction.`;
       };
+      const monthsBehindScript = "How many months behind are you on your mortgage payments? Just need "
+        + "an honest number so I can figure out the best way to help.";
       const googleAiHow = `go to <strong>google.com</strong> and search anything (typing "ai" works fine, or just the
         address) — once results load, look at the row of tabs near the top of the page (next to "All", "Images",
         "News", "Shopping") and click <strong>"AI Mode"</strong>`;
@@ -991,6 +993,10 @@ const steps = [
 
             <label class="field-label" style="margin-top:16px;">Months Behind on Payments</label>
             <input type="number" id="months-behind-input" placeholder="e.g. 4">
+            <p class="hint">Ask the seller (text it or read it over the phone):
+            <br><span class="small-muted">"${monthsBehindScript}"</span>
+            <br><button type="button" class="btn secondary" id="months-behind-script-copy-btn" style="margin-top:8px;">Copy Text</button>
+            </p>
 
             <label class="field-label" style="margin-top:16px;">Annual Maintenance Spend
               <span class="small-muted">(what the seller says they've put in per year since buying)</span></label>
@@ -1099,6 +1105,7 @@ const steps = [
         root.querySelector("#months-behind-input").value = answers.monthsBehindOnPayments || "";
         root.querySelector("#annual-maintenance-input").value = answers.annualMaintenanceSpend || "";
         wireCopyPromptButton(root, "#preforeclosure-script-copy-btn", () => buildPreforeclosureSellerScript(root.querySelector("#purchase-year-input").value));
+        wireCopyPromptButton(root, "#months-behind-script-copy-btn", () => monthsBehindScript);
         wireCopyPromptButton(root, "#preforeclosure-repair-prompt-copy-btn", () => buildPreforeclosureRehabPrompt(
           root.querySelector("#arv-input").value,
           root.querySelector("#year-built-input").value,
