@@ -587,20 +587,36 @@ const steps = [
     // answers.dealType = "Cash Deal" when Land is selected, so this step has nothing to ask.
     skip() { return answers.assetType === "Land"; },
     render(root) {
+      // The preforeclosure/auction category is cash-only under the hood -- no seller carryback
+      // offers there (see preforeclosureDebtCheck's comment). Picking it sets dealCategory (for
+      // that dedicated step, the SOP, and admin visibility) while dealType itself gets forced to
+      // "Cash Deal" so every existing Cash Deal branch (ARV/MAO computation, Deal Status, the
+      // showsCashDealFields display gates) just works without needing its own parallel logic.
+      const DEAL_TYPE_OPTIONS = ["Cash Deal", "Seller Financing / Creative Finance", "Upcoming Auction/Preforeclosure Property"];
       root.innerHTML = `
         <h2 class="step-title">Deal Type</h2>
-        <p class="step-sub">Is this an all-cash deal, or does it need seller financing / a creative-finance structure?</p>
+        <p class="step-sub">Is this an all-cash deal, does it need seller financing / a creative-finance
+        structure, or is this a preforeclosure property with an upcoming auction date?</p>
         <div class="choice-group" id="deal-type-group">
-          ${["Cash Deal", "Seller Financing / Creative Finance"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
+          ${DEAL_TYPE_OPTIONS.map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
         </div>
         <div class="error-text" id="deal-type-error">Please choose one.</div>
       `;
+      const selectedValue = answers.dealCategory === "Upcoming Auction/Preforeclosure Property"
+        ? "Upcoming Auction/Preforeclosure Property"
+        : answers.dealType;
       root.querySelectorAll("#deal-type-group .choice-btn").forEach(btn => {
-        if (btn.dataset.value === answers.dealType) btn.classList.add("selected");
+        if (btn.dataset.value === selectedValue) btn.classList.add("selected");
         btn.onclick = () => {
           root.querySelectorAll("#deal-type-group .choice-btn").forEach(b => b.classList.remove("selected"));
           btn.classList.add("selected");
-          answers.dealType = btn.dataset.value;
+          if (btn.dataset.value === "Upcoming Auction/Preforeclosure Property") {
+            answers.dealCategory = "Upcoming Auction/Preforeclosure Property";
+            answers.dealType = "Cash Deal";
+          } else {
+            answers.dealCategory = "";
+            answers.dealType = btn.dataset.value;
+          }
           toggleError(root, "#deal-type-error", false);
         };
       });
@@ -2097,6 +2113,165 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
     }
   },
   {
+    key: "preforeclosureDebtCheck",
+    progress: true,
+    // Preforeclosure/auction deals are cash-only -- no seller-financing pitch at all (see dealType's
+    // comment). If the existing debt is at or above what we could pay in cash under any buyer
+    // profile, there's no equity to work with, so a cash purchase is off the table entirely: the
+    // associate stops short of naming a price and instead gathers what admin needs to structure a
+    // subject-to offer directly with the seller (payoff statement, loan terms, notes).
+    skip() { return answers.dealCategory !== "Upcoming Auction/Preforeclosure Property"; },
+    render(root) {
+      const refusalScript = "I want to ensure you get a fair offer and we don't waste time. If the "
+        + "offer is below existing debt, we wasted a day or longer and we don't have much time to "
+        + "prevent you from getting nothing if you do nothing.";
+      const sellerName = answers.sellerContactName || "[Name]";
+      const addressLine = `${answers.street || ""}, ${answers.city || ""}, ${answers.state || ""} ${answers.zip || ""}`.trim();
+      const maoCandidates = [answers.maoCash, answers.maoHardMoney10, answers.maoHardMoney20]
+        .map(Number).filter(n => n > 0);
+      const cashOfferAmt = maoCandidates.length ? Math.round(Math.min(...maoCandidates)) : 0;
+      const highestMao = maoCandidates.length ? Math.round(Math.max(...maoCandidates)) : 0;
+      const fmt = n => "$" + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
+
+      root.innerHTML = `
+        <h2 class="step-title">Existing Debt &amp; Arrears</h2>
+        <p class="step-sub">Look up the existing loan payoff for this property on PropWire.</p>
+        <label class="field-label">Existing Debt / Payoff Amount <span class="req">*</span></label>
+        <input type="number" id="preforeclosure-debt-input" placeholder="$">
+        <div class="error-text" id="preforeclosure-debt-error">Required.</div>
+        <p class="hint">If PropWire doesn't show this, ask the seller directly. If they're hesitant to
+        share it, use this:
+        <br><span class="small-muted">"${refusalScript}"</span>
+        <br><button type="button" class="btn secondary" id="refusal-script-copy-btn" style="margin-top:8px;">Copy Text</button>
+        </p>
+
+        <label class="field-label" style="margin-top:16px;">How far behind on payments (arrears) are they? <span class="req">*</span></label>
+        <input type="number" id="arrears-input" placeholder="$">
+        <p class="hint">Needed to know whether a subject-to structure is even workable here.</p>
+        <div class="error-text" id="arrears-error">Required.</div>
+
+        <div class="banner warn" id="equity-banner" style="margin-top:16px; display:none;"></div>
+        <div id="equity-branch-content"></div>
+      `;
+      root.querySelector("#preforeclosure-debt-input").value = answers.preforeclosureDebt || "";
+      root.querySelector("#arrears-input").value = answers.arrearsAmount || "";
+      wireCopyPromptButton(root, "#refusal-script-copy-btn", () => refusalScript);
+
+      const equityBanner = root.querySelector("#equity-banner");
+      const branchContent = root.querySelector("#equity-branch-content");
+
+      const renderBranch = () => {
+        const debt = Number(root.querySelector("#preforeclosure-debt-input").value) || 0;
+        if (!debt || !highestMao) {
+          equityBanner.style.display = "none";
+          branchContent.innerHTML = "";
+          return;
+        }
+        equityBanner.style.display = "";
+        const hasEquity = debt < highestMao;
+        if (hasEquity) {
+          equityBanner.className = "banner info";
+          equityBanner.innerHTML = `<strong>This one has room to work as a cash deal.</strong> The
+            existing debt is below what we could pay under any buyer profile.`;
+          const offerScript = cashOfferAmt
+            ? `Hi ${sellerName}, saw ${addressLine} is coming up for auction soon. Would you be open `
+              + `to $${cashOfferAmt.toLocaleString()} cash to purchase outright, with a 30 day close `
+              + `(our requirement for deals like this, though we have closed in under 2 weeks before)?`
+            : "";
+          branchContent.innerHTML = offerScript ? `
+            <div class="banner info" style="margin-top:12px;">
+              <strong>Text this:</strong>
+              <br><span class="small-muted">${offerScript}</span>
+              <br><button type="button" class="btn secondary" id="offer-script-copy-btn" style="margin-top:8px;">Copy Text</button>
+            </div>
+          ` : "";
+          wireCopyPromptButton(branchContent, "#offer-script-copy-btn", () => offerScript);
+        } else {
+          equityBanner.className = "banner danger";
+          equityBanner.innerHTML = `<strong>No equity here</strong> — the existing debt is at or above
+            the most we could pay in cash. This can't move forward as a cash purchase. Don't quote the
+            seller a price — instead, gather what's below and submit it to admin as a
+            <strong>Subject To - Only Possible</strong> lead so admin can structure that offer directly
+            with the seller.`;
+          branchContent.innerHTML = `
+            <div style="margin-top:16px;">
+              <label class="field-label">Payoff Statement Screenshot <span class="small-muted">(optional, but strongly encouraged)</span></label>
+              <p class="hint">Have the seller call their lender, request a payoff statement, and
+              screenshot it for you to upload here.</p>
+              <input type="file" id="payoff-screenshots-input" accept="image/*" multiple>
+              <div id="payoff-screenshots-list" style="margin-top:8px;"></div>
+
+              <label class="field-label" style="margin-top:16px;">Notes <span class="small-muted">(optional)</span></label>
+              <textarea id="payoff-notes-input" placeholder="Anything relevant from the payoff statement or the call with the lender..."></textarea>
+
+              <label class="field-label" style="margin-top:16px;">Loan details <span class="small-muted">(ask the seller as much of this as they know)</span></label>
+              <div class="row2">
+                <div>
+                  <label class="field-label" style="font-weight:normal;">Monthly Payment (Total)</label>
+                  <input type="number" id="loan-monthly-payment-input" placeholder="$">
+                </div>
+                <div>
+                  <label class="field-label" style="font-weight:normal;">Monthly Principal</label>
+                  <input type="number" id="loan-monthly-principal-input" placeholder="$">
+                </div>
+              </div>
+              <div class="row2">
+                <div>
+                  <label class="field-label" style="font-weight:normal;">Monthly Interest</label>
+                  <input type="number" id="loan-monthly-interest-input" placeholder="$">
+                </div>
+                <div>
+                  <label class="field-label" style="font-weight:normal;">Monthly Taxes (escrow)</label>
+                  <input type="number" id="loan-monthly-taxes-input" placeholder="$">
+                </div>
+              </div>
+              <label class="field-label" style="font-weight:normal;">Monthly Insurance (escrow)</label>
+              <input type="number" id="loan-monthly-insurance-input" placeholder="$">
+            </div>
+          `;
+          branchContent.querySelector("#payoff-notes-input").value = answers.payoffStatementNotes || "";
+          branchContent.querySelector("#payoff-notes-input").oninput = (e) => { answers.payoffStatementNotes = e.target.value; };
+          branchContent.querySelector("#loan-monthly-payment-input").value = answers.loanMonthlyPayment || "";
+          branchContent.querySelector("#loan-monthly-principal-input").value = answers.loanMonthlyPrincipal || "";
+          branchContent.querySelector("#loan-monthly-interest-input").value = answers.loanMonthlyInterest || "";
+          branchContent.querySelector("#loan-monthly-taxes-input").value = answers.loanMonthlyTaxes || "";
+          branchContent.querySelector("#loan-monthly-insurance-input").value = answers.loanMonthlyInsurance || "";
+          wireScreenshotUpload(branchContent, {
+            inputSelector: "#payoff-screenshots-input", listSelector: "#payoff-screenshots-list",
+            answersKey: "payoffStatementUrls", address: addressLine
+          });
+          wireMoneyEchoesIn(branchContent);
+        }
+      };
+      root.querySelector("#preforeclosure-debt-input").addEventListener("input", renderBranch);
+      renderBranch();
+    },
+    validate(root) {
+      answers.preforeclosureDebt = root.querySelector("#preforeclosure-debt-input").value;
+      answers.arrearsAmount = root.querySelector("#arrears-input").value;
+      let ok = true;
+      toggleError(root, "#preforeclosure-debt-error", !answers.preforeclosureDebt); if (!answers.preforeclosureDebt) ok = false;
+      toggleError(root, "#arrears-error", !answers.arrearsAmount); if (!answers.arrearsAmount) ok = false;
+
+      const maoCandidates = [answers.maoCash, answers.maoHardMoney10, answers.maoHardMoney20]
+        .map(Number).filter(n => n > 0);
+      const highestMao = maoCandidates.length ? Math.round(Math.max(...maoCandidates)) : 0;
+      const debt = Number(answers.preforeclosureDebt) || 0;
+      answers.subjectToOnlyPossible = (debt > 0 && highestMao > 0 && debt >= highestMao) ? "Yes" : "No";
+
+      if (answers.subjectToOnlyPossible === "Yes") {
+        const branchContent = root.querySelector("#equity-branch-content");
+        answers.loanMonthlyPayment = branchContent.querySelector("#loan-monthly-payment-input").value;
+        answers.loanMonthlyPrincipal = branchContent.querySelector("#loan-monthly-principal-input").value;
+        answers.loanMonthlyInterest = branchContent.querySelector("#loan-monthly-interest-input").value;
+        answers.loanMonthlyTaxes = branchContent.querySelector("#loan-monthly-taxes-input").value;
+        answers.loanMonthlyInsurance = branchContent.querySelector("#loan-monthly-insurance-input").value;
+        answers.payoffStatementNotes = branchContent.querySelector("#payoff-notes-input").value;
+      }
+      return ok;
+    }
+  },
+  {
     key: "dualOfferTemplates",
     progress: true,
     // Runs for Cash Deal and Seller Financing alike -- cashDealDetails now computes the MAO/As-Is
@@ -2104,12 +2279,16 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
     // regardless of which dealType this lead is. Land/Business don't fit the "cash vs.
     // seller-financed" framing, and a Seller filling this out about their own property has no one to
     // text these scripts to. Runs BEFORE cashDealOutcome (Deal Status) -- the associate needs the
-    // actual offer text to send before they can have anything to report an outcome on.
+    // actual offer text to send before they can have anything to report an outcome on. Skipped for
+    // the preforeclosure/auction category even though dealType reads "Cash Deal" for it under the
+    // hood -- that category is cash-only with no seller-financing pitch at all, and gets its own
+    // dedicated cash-offer text in preforeclosureDebtCheck instead.
     skip() {
       return (answers.dealType !== "Cash Deal" && answers.dealType !== "Seller Financing / Creative Finance")
         || answers.assetType === "Land"
         || answers.assetType === "Business"
-        || answers.role === "Seller";
+        || answers.role === "Seller"
+        || answers.dealCategory === "Upcoming Auction/Preforeclosure Property";
     },
     render(root) {
       const addressLine = `${answers.street || ""}, ${answers.city || ""}, ${answers.state || ""} ${answers.zip || ""}`.trim();
@@ -2464,6 +2643,9 @@ function buildAnswerRows() {
     ["Subtype / Details", answers.assetSubtype || [answers.beds && `${answers.beds} bd`, answers.baths && `${answers.baths} ba`, answers.acreage && `${answers.acreage} acres`, answers.sqft && `${answers.sqft} sqft`].filter(Boolean).join(", ")],
     ["Deal Type", answers.dealType || "—"]
   );
+  if (answers.dealCategory) {
+    rows.push(["Deal Category", answers.dealCategory]);
+  }
   if (answers.assetType === "Land") {
     rows.push(["Zoning", answers.landZoning || "—"]);
   }
@@ -2510,6 +2692,24 @@ function buildAnswerRows() {
           ["Seller Financing Negotiation Notes", answers.sellerFinancingNegotiationNotes || "—"]
         );
       }
+    }
+  }
+  if (answers.dealCategory === "Upcoming Auction/Preforeclosure Property") {
+    rows.push(
+      ["Existing Debt / Payoff Amount", answers.preforeclosureDebt || "—"],
+      ["Arrears Amount", answers.arrearsAmount || "—"],
+      ["Subject To Only Possible", answers.subjectToOnlyPossible || "—"]
+    );
+    if (answers.subjectToOnlyPossible === "Yes") {
+      rows.push(
+        ["Payoff Statement Screenshots", (answers.payoffStatementUrls || []).join("\n") || "—"],
+        ["Payoff Statement Notes", answers.payoffStatementNotes || "—"],
+        ["Loan Monthly Payment", answers.loanMonthlyPayment || "—"],
+        ["Loan Monthly Principal", answers.loanMonthlyPrincipal || "—"],
+        ["Loan Monthly Interest", answers.loanMonthlyInterest || "—"],
+        ["Loan Monthly Taxes", answers.loanMonthlyTaxes || "—"],
+        ["Loan Monthly Insurance", answers.loanMonthlyInsurance || "—"]
+      );
     }
   }
   if (answers.dealType !== "Cash Deal" || answers.role === "Seller") {
@@ -2596,6 +2796,68 @@ function wireCopyPromptButton(root, buttonSelector, getText) {
     } else {
       prompt("Copy this prompt:", text);
     }
+  };
+}
+
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+// Generic screenshot/image upload widget -- picks a file, uploads it via uploadCmaScreenshot (a
+// generic Drive upload despite the CMA-specific name), and stores only the resulting URL in
+// answers[answersKey] -- never the raw image data, so Save My Progress links and the submission
+// payload both stay small. cashDealDetails has its own inline copy of this same pattern for CMA
+// screenshots (left as-is to avoid touching already-verified code); this shared version is for
+// new upload spots like the preforeclosure payoff statement.
+function wireScreenshotUpload(root, { inputSelector, listSelector, answersKey, address }) {
+  const input = root.querySelector(inputSelector);
+  const list = root.querySelector(listSelector);
+  if (!input || !list) return;
+  const renderList = () => {
+    const urls = answers[answersKey] || [];
+    list.innerHTML = urls.map((url, i) => `
+      <div class="small-muted" style="margin-top:4px;">
+        <a href="${url}" target="_blank" rel="noopener">Screenshot ${i + 1}</a>
+        <button type="button" class="link-btn" data-remove-idx="${i}" style="margin-left:8px;">Remove</button>
+      </div>
+    `).join("");
+    list.querySelectorAll("[data-remove-idx]").forEach(btn => {
+      btn.onclick = () => {
+        answers[answersKey].splice(Number(btn.dataset.removeIdx), 1);
+        renderList();
+      };
+    });
+  };
+  renderList();
+  input.onchange = async (e) => {
+    const files = Array.from(e.target.files);
+    for (const file of files) {
+      const statusEl = document.createElement("div");
+      statusEl.className = "small-muted";
+      statusEl.textContent = `Uploading ${file.name}...`;
+      list.appendChild(statusEl);
+      try {
+        const fileData = await readFileAsBase64(file);
+        const res = await api("uploadCmaScreenshot", {
+          fileName: file.name, fileData, contentType: file.type || "image/png", address
+        });
+        if (res.ok) {
+          answers[answersKey] = answers[answersKey] || [];
+          answers[answersKey].push(res.url);
+          renderList();
+        } else {
+          statusEl.textContent = `Failed to upload ${file.name}: ${res.error || "unknown error"}`;
+        }
+      } catch (err) {
+        statusEl.textContent = `Failed to upload ${file.name}: ${err.message}`;
+      }
+    }
+    e.target.value = "";
   };
 }
 
@@ -2883,8 +3145,8 @@ async function submitLead(container) {
         street: answers.street, parcelIds: answers.parcelIds, city: answers.city, state: answers.state, zip: answers.zip, units: answers.units,
         assetType: answers.assetType, assetSubtype: answers.assetSubtype,
         beds: answers.beds, baths: answers.baths, sqft: answers.sqft, acreage: answers.acreage, landZoning: answers.landZoning,
-        dealType: answers.dealType,
-        arv: answers.arv, chaseEstimate: answers.chaseEstimate, asIsValue: answers.asIsValue, picturesLink: answers.picturesLink, rehabEstimate: answers.rehabEstimate,
+        dealType: answers.dealType, dealCategory: answers.dealCategory,
+        arv: answers.arv, askingPrice: answers.askingPrice, chaseEstimate: answers.chaseEstimate, asIsValue: answers.asIsValue, picturesLink: answers.picturesLink, rehabEstimate: answers.rehabEstimate,
         rehabEstimateLow: answers.rehabEstimateLow, rehabEstimateHigh: answers.rehabEstimateHigh,
         countyAssessedValue: answers.countyAssessedValue,
         cmaScreenshotUrls: (answers.cmaScreenshotUrls || []).join("\n"),
@@ -2915,7 +3177,14 @@ async function submitLead(container) {
         downPaymentIntent: answers.dpSkipped ? "" : answers.downPaymentIntent,
         downPaymentNeeded: answers.dpSkipped ? "" : answers.downPaymentNeeded,
         downPaymentNonNegotiable: answers.downPaymentNonNegotiable,
-        marketStatus: answers.marketStatus, sourceLink: answers.sourceLink
+        marketStatus: answers.marketStatus, sourceLink: answers.sourceLink,
+        preforeclosureDebt: answers.preforeclosureDebt, arrearsAmount: answers.arrearsAmount,
+        subjectToOnlyPossible: answers.subjectToOnlyPossible,
+        payoffStatementUrls: (answers.payoffStatementUrls || []).join("\n"),
+        payoffStatementNotes: answers.payoffStatementNotes,
+        loanMonthlyPayment: answers.loanMonthlyPayment, loanMonthlyPrincipal: answers.loanMonthlyPrincipal,
+        loanMonthlyInterest: answers.loanMonthlyInterest, loanMonthlyTaxes: answers.loanMonthlyTaxes,
+        loanMonthlyInsurance: answers.loanMonthlyInsurance
       }
     });
     if (!res.ok) throw new Error(res.error || "Something went wrong.");
@@ -3130,6 +3399,9 @@ function buildLeadFields(lead) {
     ["Beds", lead["Beds"] || "—"], ["Baths", lead["Baths"] || "—"], ["Acreage", lead["Acreage"] || "—"], ["Sq Ft", lead["Sq Ft"] || "—"],
     ["Deal Type", lead["Deal Type"] || "—"]
   );
+  if (lead["Deal Category"]) {
+    fields.push(["Deal Category", lead["Deal Category"]]);
+  }
   if (lead["Asset Type"] === "Land") {
     fields.push(["Zoning", lead["Land Zoning"] || "—"]);
   }
@@ -3175,6 +3447,24 @@ function buildLeadFields(lead) {
           ["Seller Financing Negotiation Notes", lead["Seller Financing Negotiation Notes"] || "—"]
         );
       }
+    }
+  }
+  if (lead["Deal Category"] === "Upcoming Auction/Preforeclosure Property") {
+    fields.push(
+      ["Existing Debt / Payoff Amount", lead["Preforeclosure Debt"] || "—"],
+      ["Arrears Amount", lead["Arrears Amount"] || "—"],
+      ["Subject To Only Possible", lead["Subject To Only Possible"] || "—"]
+    );
+    if (lead["Subject To Only Possible"] === "Yes") {
+      fields.push(
+        ["Payoff Statement Screenshots", lead["Payoff Statement URLs"] || "—"],
+        ["Payoff Statement Notes", lead["Payoff Statement Notes"] || "—"],
+        ["Loan Monthly Payment", lead["Loan Monthly Payment"] || "—"],
+        ["Loan Monthly Principal", lead["Loan Monthly Principal"] || "—"],
+        ["Loan Monthly Interest", lead["Loan Monthly Interest"] || "—"],
+        ["Loan Monthly Taxes", lead["Loan Monthly Taxes"] || "—"],
+        ["Loan Monthly Insurance", lead["Loan Monthly Insurance"] || "—"]
+      );
     }
   }
   if (lead["Deal Type"] !== "Cash Deal" || lead["Role"] === "Seller") {
@@ -3762,7 +4052,60 @@ function openOutreachSop() {
   overlay.hidden = false;
   panel.innerHTML = `
     <button class="link-btn" id="close-outreach-sop-btn" style="float:right;">Close ✕</button>
-    <h2>FSBO + On Market + Preforeclosure Auction SOP</h2>
+    <h2>Acquisition SOP</h2>
+    <p class="small-muted">Two outreach tracks, run alongside each other. Option 1 (preforeclosure
+    auction) has the higher probability of getting accepted and closing fast — prioritize it first
+    each day, then fill remaining volume with Option 2.</p>
+
+    <h2 style="margin-top:28px;">Option 1: Preforeclosure Auction Soon — High Deal Probability Of Being
+    Accepted and Closing</h2>
+    <p class="small-muted">A cash-only play — <strong>no seller financing offers here.</strong>
+    <strong>Single-family properties only.</strong></p>
+
+    <h3 style="margin-top:22px;">1. Source</h3>
+    <p class="hint">auction.com. Filter for single-family preforeclosure properties with <strong>27 to
+    30 days left</strong> until the auction date, and pull about 50 of them into a spreadsheet/CSV per
+    day.</p>
+
+    <h3 style="margin-top:22px;">2. Skip trace</h3>
+    <p class="hint">auction.com doesn't give you a phone number. Look up each owner on
+    <strong>truepeoplesearch.com</strong> (free, one at a time) or pay for a bulk skip tracing service
+    if you want to move through 50 at once faster.</p>
+
+    <h3 style="margin-top:22px;">3. Text once, then call</h3>
+    <p class="hint">Send the text below <strong>one time only</strong> — do not send multiple texts to
+    the same owner. After that initial text, switch to <strong>calling the owner and leaving
+    voicemails</strong> if they don't respond.</p>
+    <div class="banner info">
+      "Hey [Name], this is [Your Name]. Would you consider an offer on [Address]? I couldn't help but
+      notice that its auction date is around the corner, next week or so. I was planning to go and bid on
+      it, but figured it wouldn't hurt to try and work something out with you before it's gone."
+    </div>
+    <p class="hint"><strong>Volume:</strong> 50 owners a day for 7 days (350 total) — at that volume
+    you're very likely to land a deal.</p>
+
+    <h3 style="margin-top:22px;">4. Existing debt &amp; equity check</h3>
+    <p class="hint">Once they respond, run the address through the SendMySeller wizard for the MAO
+    numbers, then check <strong>PropWire</strong> for their approximate existing debt (the wizard has a
+    dedicated step for this once you pick "Upcoming Auction/Preforeclosure Property" as the deal
+    type).</p>
+    <p class="hint">If PropWire doesn't have it, ask the seller directly. If they're hesitant to share
+    it:</p>
+    <div class="banner info">"I want to ensure you get a fair offer and we don't waste time. If the
+    offer is below existing debt, we wasted a day or longer and we don't have much time to prevent you
+    from getting nothing if you do nothing."</div>
+    <p class="hint">Also ask how far behind on payments (arrears) they are — needed to know if a
+    subject-to structure is even workable.</p>
+    <p class="hint"><strong>Debt below our highest MAO (has equity):</strong> proceed as a normal cash
+    offer, texted with a real dollar number, same as Option 2's cash offers below.
+    <br><strong>Debt at or above our highest MAO (no equity):</strong> don't quote a price at all.
+    Instead, have the seller call their lender for a payoff statement, screenshot it, and upload it in
+    the wizard, along with whatever loan details they know (monthly payment, principal, interest,
+    taxes, insurance). Submit the lead to admin as a <strong>Subject To - Only Possible</strong> lead —
+    admin structures that offer directly, taking over the existing payments to protect the seller's
+    credit and still getting them a few thousand dollars at closing.</p>
+
+    <h2 style="margin-top:32px;">Option 2: FSBO + On Market Acquisition</h2>
     <p class="small-muted">This SOP is for deals that need rehab/renovation (fix and flip). Cold-text every
     lead with two soft offers, cash and seller financing, unless the seller's already ruled one out.
     <strong>Daily target: 50 new properties texted per day.</strong></p>
@@ -3859,30 +4202,6 @@ function openOutreachSop() {
     — only stretch to day 7 if the conversation itself makes that the smarter call (e.g. the seller said
     they need more time, or you're waiting on something specific from them). Log every counter or objection
     in the lead's notes — admin uses it to decide how to adjust either offer.</p>
-
-    <h3 style="margin-top:22px;">8. Preforeclosure Auction Outreach (auction.com)</h3>
-    <p class="hint">A separate volume play run alongside the FSBO/on-market outreach above — different
-    lead source, different offer logic. <strong>Single-family properties only.</strong></p>
-    <p class="hint"><strong>Source:</strong> auction.com. Filter for single-family preforeclosure
-    properties with <strong>27 to 30 days left</strong> until the auction date, and pull about 50 of them
-    into a spreadsheet/CSV per day.</p>
-    <p class="hint"><strong>Skip trace before texting</strong> — auction.com doesn't give you a phone
-    number. Look up each owner on <strong>truepeoplesearch.com</strong> (free, one at a time) or pay for a
-    bulk skip tracing service if you want to move through 50 at once faster.</p>
-    <p class="hint"><strong>Text this:</strong></p>
-    <div class="banner info">
-      "Hey [Name], this is [Your Name]. Would you consider an offer on [Address]? I couldn't help but
-      notice that its auction date is around the corner, next week or so. I was planning to go and bid on
-      it, but figured it wouldn't hurt to try and work something out with you before it's gone."
-    </div>
-    <p class="hint"><strong>Volume:</strong> 50 texts a day for 7 days (350 total) — at that volume you're
-    very likely to land a deal.</p>
-    <p class="hint"><strong>If they ask what you'd offer:</strong> run the address through the
-    SendMySeller wizard for the MAO numbers, and check <strong>PropWire</strong> for their approximate
-    existing debt. Offer the <strong>lowest MAO that still covers their existing debt and nets them at
-    least $10,000</strong>, more if the numbers allow it.</p>
-    <p class="hint">Once the seller agrees to a dollar amount, submit the lead through the wizard and
-    contact admin.</p>
   `;
   panel.querySelector("#close-outreach-sop-btn").onclick = () => overlay.hidden = true;
 }
