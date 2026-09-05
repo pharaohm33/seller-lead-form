@@ -4234,6 +4234,16 @@ function openOutreachSop() {
     auction) has the higher probability of getting accepted and closing fast — prioritize it first
     each day, then fill remaining volume with Option 2.</p>
 
+    <div class="banner info"><strong>Batch workflow, both tracks:</strong> send your day's outreach
+    texts to your <em>entire</em> list first, before opening the wizard for any single property —
+    don't fill in property details until one actually responds. Fill in your own info at the very
+    start of the wizard (Contact step), then hit <strong>"Save My Progress"</strong> at the top of the
+    page <em>before</em> entering any property specifics — that gives you one reusable link with your
+    own info already saved. When a property responds, open that link, fill in that property's
+    address/seller info fresh, and continue through to submission. When the next property responds
+    later in the day, reopen that <em>same</em> saved link again and repeat — no need to retype your
+    own info each time.</div>
+
     <h2 style="margin-top:28px;">Option 1: Preforeclosure Auction Soon — High Deal Probability Of Being
     Accepted and Closing</h2>
     <p class="small-muted">Cash offer if there's equity to work with; a subject-to pitch (never a
