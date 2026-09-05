@@ -979,6 +979,8 @@ const steps = [
           <div style="margin-top:16px;">
             <label class="field-label">Year Built</label>
             <input type="number" id="year-built-input" placeholder="e.g. 1998">
+            <p class="hint">Look this up on <a href="https://www.zillow.com/" target="_blank" rel="noopener">Zillow</a>:
+            search the address and check the property details for "Year Built."</p>
 
             <label class="field-label" style="margin-top:16px;">Purchase Year
               <span class="small-muted">(the year the seller bought the property)</span></label>
