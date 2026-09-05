@@ -1087,6 +1087,12 @@ const steps = [
             ` : ""}
           </div>
 
+          ${isCommercial ? `
+            <label class="field-label" style="margin-top:16px;">NOI Research Notes for Admin
+              <span class="small-muted">(optional — if Google AI estimated a NOI or flagged a red flag on the number above, jot down its most likely NOI figure and reasoning here, e.g. "AI estimates NOI ~$29,700/yr from $550/unit market rent; flagged elevated insurance costs pushing expenses to ~50%")</span></label>
+            <textarea id="noi-research-notes-input" placeholder="What did Google AI conclude about NOI/expenses for this property?"></textarea>
+          ` : ""}
+
           <label class="field-label" style="margin-top:16px;">CMA Screenshots
             <span class="small-muted">(optional, but strongly encouraged — upload one or more)</span></label>
           <input type="file" id="cma-screenshots-input" accept="image/*" multiple>
@@ -1114,6 +1120,11 @@ const steps = [
           <span class="small-muted">${isLand ? "(current market value — land offers are based on this directly, not a post-repair value)" : "(After Repair Value)"}</span>${isResidential ? "" : ` <span class="req">*</span>`}</label>
         <input type="number" id="arv-input" placeholder="$">
         <div class="error-text" id="arv-error">Required.</div>
+        ${hasCompsWorkflow ? `
+          <p class="hint">Google AI will usually give you a range here rather than one number -- enter its
+          <strong>single most likely estimate</strong> based on the data it found, not the high or low end,
+          unless you have a specific reason to lean toward one side.</p>
+        ` : ""}
         ${!hasCompsWorkflow ? `
           <p class="hint">${googleAiHow}, copy a listing link if you have one (or just use the address), then ask:
           <br><span class="small-muted">"${arvPrompt}"</span></p>
@@ -1514,6 +1525,7 @@ const steps = [
       wireCopyPromptButton(root, "#assessed-value-prompt-copy-btn", () => assessedValuePrompt);
 
       if (isCommercial) {
+        root.querySelector("#noi-research-notes-input").value = answers.noiResearchNotes || "";
         const noiInput = root.querySelector("#noi-input");
         noiInput.value = answers.commercialNOI || "";
         noiInput.oninput = () => updateCompsPromptText();
@@ -1641,7 +1653,7 @@ For each comp, list:
 
 After listing the comps, calculate and show your work:
 1. Acreage Difference %: (Average Comp Acreage - Subject Acreage) / Subject Acreage x 100
-2. Estimated As-Is Value: Average (time-adjusted) Price per Acre of the comps x Subject Acreage — give a final range, not just one number.
+2. Estimated As-Is Value: Average (time-adjusted) Price per Acre of the comps x Subject Acreage — give a final range, plus your single most likely estimate within that range based on the data you found, not just the range itself.
 
 If the value comes out lower than what you might initially expect, say so plainly — that's an important finding, not something to smooth over.`
 : isCommercial
@@ -1675,13 +1687,13 @@ For each comp, list:
 After listing the comps, calculate BOTH approaches below and reconcile them if they meaningfully disagree:
 
 1. Sales Comparison Approach: ${matchByUnitsOnly
-  ? `Average Sale Price Per Unit of the comps x Subject Unit Count (${answers.units || "[UNIT COUNT]"}) = Estimated Value Range (give a range, not one number).`
-  : `Average Price per Square Foot (or Acre) of the comps x Subject Size = Estimated Value Range (give a range, not one number).`}
+  ? `Average Sale Price Per Unit of the comps x Subject Unit Count (${answers.units || "[UNIT COUNT]"}) = Estimated Value Range, plus your single most likely estimate within that range based on the data you found, not just the range itself.`
+  : `Average Price per Square Foot (or Acre) of the comps x Subject Size = Estimated Value Range, plus your single most likely estimate within that range based on the data you found, not just the range itself.`}
 2. Income Approach: ${liveNOI
-  ? `Using the subject's current NOI of $${Number(liveNOI).toLocaleString()}${occupancyPart && answers.commercialOccupancyStatus !== "Fully Occupied" ? ` (in-place NOI — the property is only ${occupancyPart.toLowerCase()}, not fully occupied)` : ""} and the average cap rate from the sold comps above, calculate Estimated Value = NOI ÷ Average Comp Cap Rate.${occupancyPart && answers.commercialOccupancyStatus !== "Fully Occupied" ? ` Since it isn't fully occupied, also estimate a stabilized NOI at full occupancy using typical market rents for this asset type and size, and show that as a second Income Approach value alongside the in-place one.` : ""}`
-  : `We don't have a confirmed current NOI for this property${occupancyPart ? ` (currently ${occupancyPart.toLowerCase()})` : ""}. If you can reasonably estimate one from market rents typical for this asset type and size${occupancyPart && answers.commercialOccupancyStatus !== "Fully Occupied" ? `, accounting for that occupancy level` : ""}, calculate an Income Approach value using that estimate and the average cap rate from the sold comps, but flag it clearly as an estimate rather than confirmed income. Otherwise, lean primarily on the Sales Comparison Approach above since there's no reliable income data to anchor an Income Approach.`}
+  ? `Using the subject's current NOI of $${Number(liveNOI).toLocaleString()}${occupancyPart && answers.commercialOccupancyStatus !== "Fully Occupied" ? ` (in-place NOI — the property is only ${occupancyPart.toLowerCase()}, not fully occupied)` : ""} and the average cap rate from the sold comps above, calculate Estimated Value = NOI ÷ Average Comp Cap Rate.${occupancyPart && answers.commercialOccupancyStatus !== "Fully Occupied" ? ` Since it isn't fully occupied, also estimate a stabilized NOI at full occupancy using typical market rents for this asset type and size, and show that as a second Income Approach value alongside the in-place one.` : ""} If this NOI implies unusually low operating expenses for a property like this in this market (a suspiciously high margin), flag that clearly as a possible red flag -- seller-reported NOI is often optimistic and may be missing real costs like insurance, maintenance, or property management -- and state what a more realistic NOI would likely be instead.`
+  : `We don't have a confirmed current NOI for this property${occupancyPart ? ` (currently ${occupancyPart.toLowerCase()})` : ""}. If you can reasonably estimate one from market rents typical for this asset type and size${occupancyPart && answers.commercialOccupancyStatus !== "Fully Occupied" ? `, accounting for that occupancy level` : ""}, calculate an Income Approach value using that estimate and the average cap rate from the sold comps, but flag it clearly as an estimate rather than confirmed income. When estimating expenses to derive that NOI, flag plainly if operating costs (taxes and insurance especially) in this specific market tend to run meaningfully higher or lower than a typical 35 to 45% expense ratio, and state your single most likely NOI estimate, not just a range. Otherwise, lean primarily on the Sales Comparison Approach above since there's no reliable income data to anchor an Income Approach.`}
 
-If the two approaches disagree by more than roughly 15%, say so plainly and explain the likely reason (below-market in-place rents, deferred capital expenditures, a below-market lease in place, etc.) — that's an important finding, not something to smooth over.`
+If the two approaches disagree by more than roughly 15%, say so plainly and explain the likely reason (below-market in-place rents, deferred capital expenditures, a below-market lease in place, etc.) — that's an important finding, not something to smooth over. Then give one final reconciled ARV: your single most likely estimate, not just a range, weighing both approaches.`
 : `Act as a professional real estate data analyst. Explain your math simply and avoid real estate jargon — I have no real estate experience.
 
 Find recent comparable sales (comps) and an estimated After Repair Value (ARV) for this property:
@@ -1705,7 +1717,7 @@ For each comp, list:
 
 After listing the comps, calculate and show your work:
 1. Square Footage Difference %: (Average Comp SqFt - Subject SqFt) / Subject SqFt x 100
-2. Estimated ARV: Average Price per Square Foot of the comps x Subject SqFt — give a final range, not just one number.
+2. Estimated ARV: Average Price per Square Foot of the comps x Subject SqFt — give a final range, plus your single most likely estimate within that range based on the data you found, not just the range itself.
 
 If the ARV comes out lower than what a bank's automated home value estimate would show, say so plainly — that's an important finding, not something to smooth over.`;
 
@@ -1722,9 +1734,11 @@ What is the average sold cap rate for multifamily properties in ${cityState} (or
 
 Give me:
 1. The market cap rate range you're using and where it comes from.
-2. The implied property value at both ends of that range (NOI divided by cap rate), as a range, not one number.
+2. The implied property value at both ends of that range (NOI divided by cap rate), as a range, not one number -- plus your single most likely estimate within that range based on the data you found.
 3. If you're aware of any specific recent multifamily sales nearby, mention them for context, but don't force a comp if you can't find a genuinely comparable one — a bad comp is worse than no comp.
-4. A flag if operating expenses (taxes and insurance especially) in this specific market tend to run higher or lower than a typical 35 to 45% expense ratio.
+4. ${liveNOI
+  ? `If this NOI implies unusually low operating expenses for a property like this in this market (a suspiciously high margin), flag that clearly as a possible red flag -- seller-reported NOI is often optimistic and may be missing real costs like insurance, maintenance, or property management -- and state what a more realistic NOI would likely be instead.`
+  : `A flag if operating expenses (taxes and insurance especially) in this specific market tend to run higher or lower than a typical 35 to 45% expense ratio, and your single most likely NOI estimate, not just a range.`}
 
 If this suggests the property is worth meaningfully less than expected, say so plainly — that's an important finding, not something to smooth over.`;
         }
@@ -1919,6 +1933,7 @@ If this suggests the property is worth meaningfully less than expected, say so p
         // is the one hard requirement, since even a rough vacant/partial/full read is needed to make
         // any sense of whatever NOI number (confirmed or estimated) ends up in the comps prompt.
         if (!answers.commercialNoiUnknown) answers.commercialNOI = root.querySelector("#noi-input").value;
+        answers.noiResearchNotes = root.querySelector("#noi-research-notes-input").value.trim();
         const isMultifamilySubtype = answers.assetSubtype === "Multifamily";
         answers.commercialOccupancyStatus = answers.commercialOccupancyStatus || "";
         toggleError(root, "#occupancy-status-error", !answers.commercialOccupancyStatus);
@@ -3262,7 +3277,8 @@ function buildAnswerRows() {
       rows.push(
         ["Occupancy Status", answers.commercialOccupancyStatus || "—"],
         ["Occupancy %", answers.commercialOccupancyPct || "—"],
-        ["NOI", answers.commercialNoiUnknown ? "Unknown" : (answers.commercialNOI || "—")]
+        ["NOI", answers.commercialNoiUnknown ? "Unknown" : (answers.commercialNOI || "—")],
+        ["NOI Research Notes", answers.noiResearchNotes || "—"]
       );
       if (answers.commercialOccupancyStatus === "Vacant" && answers.marketStatus !== "On-Market") {
         rows.push(["Property Photos", (answers.propertyPhotoUrls || []).join("\n") || "—"]);
@@ -3774,6 +3790,7 @@ async function submitLead(container) {
         strNoiPerUnit: answers.strNoiPerUnit,
         noi: answers.residentialNOI || answers.commercialNOI,
         commercialOccupancyStatus: answers.commercialOccupancyStatus, commercialOccupancyPct: answers.commercialOccupancyPct,
+        noiResearchNotes: answers.noiResearchNotes,
         businessRevenue: answers.businessRevenue, businessEarningsType: answers.businessEarningsType,
         businessEarnings: answers.businessEarnings,
         totalDebt: answers.debtUnknown ? "" : answers.totalDebt,
@@ -4039,7 +4056,8 @@ function buildLeadFields(lead) {
       fields.push(
         ["Occupancy Status", lead["Commercial Occupancy Status"] || "—"],
         ["Occupancy %", lead["Commercial Occupancy %"] || "—"],
-        ["NOI", lead["NOI"] || "—"]
+        ["NOI", lead["NOI"] || "—"],
+        ["NOI Research Notes", lead["NOI Research Notes"] || "—"]
       );
       if (lead["Commercial Occupancy Status"] === "Vacant" && lead["Market Status"] !== "On-Market") {
         fields.push(["Property Photos", lead["Property Photo URLs"] || "—"]);
