@@ -17,7 +17,7 @@ const STR_EXPENSE_RATIO = 25;
 // for the no-rehab seller-financing-only pivot in cashDealDetails -- a judgment call, tune here.
 const ARV_VS_ASKING_CLOSE_PCT = 0.05;
 
-const LEAD_STATUSES = ["New", "Contacted", "Under Review", "Offer Sent", "Negotiation", "Verbally Accepted But Not Signed", "Offer Signed By Seller", "In Escrow To Close", "Closed", "Dead"];
+const LEAD_STATUSES = ["New", "Contacted", "Under Review", "Offer Sent", "Negotiation", "Verbally Accepted But Not Signed", "Offer Signed By Seller", "In Escrow To Close", "Hold Off", "Closed", "Dead"];
 
 const STATUS_COLORS = {
   "New": { bg: "#e5e7eb", fg: "#374151" },
@@ -28,6 +28,7 @@ const STATUS_COLORS = {
   "Verbally Accepted But Not Signed": { bg: "#d1fae5", fg: "#065f46" },
   "Offer Signed By Seller": { bg: "#e1efe7", fg: "#1f6f4a" },
   "In Escrow To Close": { bg: "#14532d", fg: "#ffffff" },
+  "Hold Off": { bg: "#fef3c7", fg: "#92400e" },
   "Closed": { bg: "#e5e7eb", fg: "#374151" },
   "Dead": { bg: "#fbeceb", fg: "#b3372c" }
 };
@@ -51,6 +52,7 @@ const STATUS_SORT_ORDER = [
   "Under Review",
   "Contacted",
   "New",
+  "Hold Off",
   "Closed",
   "Dead"
 ];
@@ -73,6 +75,7 @@ const ADMIN_STATUS_SORT_ORDER = [
   "Offer Sent",
   "Under Review",
   "Contacted",
+  "Hold Off",
   "Closed",
   "Dead"
 ];

@@ -64,6 +64,7 @@ const STATUS_SORT_ORDER = [
   'Offer Sent',
   'Under Review',
   'Contacted',
+  'Hold Off',
   'Closed',
   'Dead'
 ];
