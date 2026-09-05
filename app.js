@@ -2327,11 +2327,19 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
         } else {
           equityBanner.className = "banner danger";
           equityBanner.innerHTML = `<strong>No equity here</strong> — the existing debt is at or above
-            the most we could pay in cash. This can't move forward as a cash purchase. Don't quote the
-            seller a price — instead, gather what's below and submit it to admin as a
-            <strong>Subject To - Only Possible</strong> lead so admin can structure that offer directly
-            with the seller.`;
+            the most we could pay in cash. This can't move forward as a cash purchase, and there's no
+            specific dollar offer to give yet — text the script below instead, then gather what's below
+            it and submit the lead to admin as a <strong>Subject To - Only Possible</strong> lead so
+            admin can structure the actual offer directly with the seller.`;
+          const subjectToScript = `We can put together an offer that saves your credit from being `
+            + `damaged any further, and gets you as much money as possible at closing, by taking over `
+            + `your existing mortgage payments.`;
           branchContent.innerHTML = `
+            <div class="banner info" style="margin-top:12px;">
+              <strong>Text this:</strong>
+              <br><span class="small-muted">${subjectToScript}</span>
+              <br><button type="button" class="btn secondary" id="subject-to-script-copy-btn" style="margin-top:8px;">Copy Text</button>
+            </div>
             <div style="margin-top:16px;">
               <label class="field-label">Payoff Statement Screenshot <span class="small-muted">(optional, but strongly encouraged)</span></label>
               <p class="hint">Have the seller call their lender, request a payoff statement, and
@@ -2379,6 +2387,7 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
             answersKey: "payoffStatementUrls", address: addressLine
           });
           wireMoneyEchoesIn(branchContent);
+          wireCopyPromptButton(branchContent, "#subject-to-script-copy-btn", () => subjectToScript);
         }
       };
       root.querySelector("#preforeclosure-debt-input").addEventListener("input", renderBranch);
@@ -4210,8 +4219,9 @@ function openOutreachSop() {
 
     <h2 style="margin-top:28px;">Option 1: Preforeclosure Auction Soon — High Deal Probability Of Being
     Accepted and Closing</h2>
-    <p class="small-muted">A cash-only play — <strong>no seller financing offers here.</strong>
-    <strong>Single-family properties only.</strong></p>
+    <p class="small-muted">Cash offer if there's equity to work with; a subject-to pitch (never a
+    dollar figure) if there isn't. <strong>No standard seller-financing/carryback offers here.
+    Single-family properties only.</strong></p>
 
     <h3 style="margin-top:22px;">1. Source</h3>
     <p class="hint">auction.com. Filter for single-family preforeclosure properties with <strong>27 to
@@ -4255,12 +4265,14 @@ function openOutreachSop() {
     subject-to structure is even workable.</p>
     <p class="hint"><strong>Debt below our highest MAO (has equity):</strong> proceed as a normal cash
     offer, texted with a real dollar number, same as Option 2's cash offers below.
-    <br><strong>Debt at or above our highest MAO (no equity):</strong> don't quote a price at all.
-    Instead, have the seller call their lender for a payoff statement, screenshot it, and upload it in
-    the wizard, along with whatever loan details they know (monthly payment, principal, interest,
-    taxes, insurance). Submit the lead to admin as a <strong>Subject To - Only Possible</strong> lead —
-    admin structures that offer directly, taking over the existing payments to protect the seller's
-    credit and still getting them a few thousand dollars at closing.</p>
+    <br><strong>Debt at or above our highest MAO (no equity):</strong> don't quote a dollar figure —
+    the wizard gives you a subject-to script instead, along the lines of "we can put together an offer
+    that saves your credit from being damaged any further, and gets you as much money as possible at
+    closing, by taking over your existing mortgage payments." Text that, then have the seller call
+    their lender for a payoff statement, screenshot it, and upload it in the wizard, along with
+    whatever loan details they know (monthly payment, principal, interest, taxes, insurance). Submit
+    the lead to admin as a <strong>Subject To - Only Possible</strong> lead — admin structures the
+    actual offer directly with the seller from there.</p>
 
     <h2 style="margin-top:32px;">Option 2: FSBO + On Market Acquisition</h2>
     <p class="small-muted">This SOP is for deals that need rehab/renovation (fix and flip). Cold-text every
