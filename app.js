@@ -655,6 +655,9 @@ const steps = [
   {
     key: "price",
     progress: true,
+    // Auction/preforeclosure sellers have no asking price at all (see cashDealDetails) -- the offer
+    // is built purely off As-Is Value/ARV/repair, so there's no "what price are they seeking" to ask.
+    skip() { return answers.dealCategory === "Upcoming Auction/Preforeclosure Property"; },
     render(root) {
       root.innerHTML = `
         <h2 class="step-title">Price</h2>
