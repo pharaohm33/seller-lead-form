@@ -498,7 +498,7 @@ const steps = [
               // back until validate() runs on Next -- otherwise this would always show stale/blank.
               const subtype = subFields.querySelector("#subtype-input").value || "commercial";
               const unitsPart = unitsNum > 1 ? `a ${unitsNum} unit ${subtype} property` : `a ${subtype} property`;
-              return `what is the total building square footage for ${addr || "[SUBJECT ADDRESS]"}, ${unitsPart}? Check public property/tax records if you can find them.`;
+              return `what is the county assessed building square footage for ${addr || "[SUBJECT ADDRESS]"}, ${unitsPart}? Check the county assessor/property tax records specifically -- that's the most reliable source for this, not a listing site's estimate.`;
             };
             const updateSqftPromptHint = () => {
               subFields.querySelector("#sqft-research-prompt-hint").textContent = `"${buildSqftResearchPrompt()}"`;
@@ -1076,6 +1076,15 @@ const steps = [
             already on file. Copy it, ${googleAiHow}, and paste it in.</p>
             <textarea id="comps-prompt-text" readonly rows="16" style="width:100%; font-size:12px; font-family:'IBM Plex Mono', ui-monospace, monospace;"></textarea>
             <button type="button" class="btn secondary" id="comps-prompt-copy-btn" style="margin-top:8px;">Copy Prompt</button>
+
+            ${answers.matchByUnitsOnly ? `
+              <p class="hint" style="margin-top:16px;"><strong>If the prompt above doesn't find genuinely
+              comparable sales</strong> (common in small or rural markets like this one), try this simpler
+              fallback instead — it uses the area's average multifamily cap rate instead of hunting for
+              exact comps, so it holds up better where sold data is thin:</p>
+              <textarea id="unit-count-fallback-prompt-text" readonly rows="10" style="width:100%; font-size:12px; font-family:'IBM Plex Mono', ui-monospace, monospace;"></textarea>
+              <button type="button" class="btn secondary" id="unit-count-fallback-prompt-copy-btn" style="margin-top:8px;">Copy Fallback Prompt</button>
+            ` : ""}
           </div>
 
           <label class="field-label" style="margin-top:16px;">CMA Screenshots
@@ -1699,6 +1708,26 @@ After listing the comps, calculate and show your work:
 2. Estimated ARV: Average Price per Square Foot of the comps x Subject SqFt — give a final range, not just one number.
 
 If the ARV comes out lower than what a bank's automated home value estimate would show, say so plainly — that's an important finding, not something to smooth over.`;
+
+        if (matchByUnitsOnly) {
+          const cityState = `${answers.city || "[CITY]"}, ${answers.state || "[STATE]"}`;
+          const isFullyOccupied = answers.commercialOccupancyStatus === "Fully Occupied";
+          const noiClause = liveNOI
+            ? `with a confirmed annual NOI of $${Number(liveNOI).toLocaleString()}${!isFullyOccupied && occupancyPart ? ` (in place -- reflecting ${occupancyPart.toLowerCase()}, not full occupancy -- also estimate NOI and value at full/stabilized occupancy and show both)` : ""}`
+            : `. I don't have a confirmed NOI yet -- estimate typical market rent per unit for a property this size and area, and use that to build a reasonable NOI`;
+          root.querySelector("#unit-count-fallback-prompt-text").value =
+`Act as a professional commercial real estate underwriter. Explain your math simply and avoid real estate jargon — I have no real estate experience.
+
+What is the average sold cap rate for multifamily properties in ${cityState} (or the surrounding region if there isn't enough local data), and use it to evaluate this ${answers.units || "[UNIT COUNT]"} unit property${noiClause}.
+
+Give me:
+1. The market cap rate range you're using and where it comes from.
+2. The implied property value at both ends of that range (NOI divided by cap rate), as a range, not one number.
+3. If you're aware of any specific recent multifamily sales nearby, mention them for context, but don't force a comp if you can't find a genuinely comparable one — a bad comp is worse than no comp.
+4. A flag if operating expenses (taxes and insurance especially) in this specific market tend to run higher or lower than a typical 35 to 45% expense ratio.
+
+If this suggests the property is worth meaningfully less than expected, say so plainly — that's an important finding, not something to smooth over.`;
+        }
         };
         updateCompsPromptText();
         root.querySelector("#comps-prompt-copy-btn").onclick = () => {
@@ -1713,6 +1742,7 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
             prompt("Copy this prompt:", text);
           }
         };
+        wireCopyPromptButton(root, "#unit-count-fallback-prompt-copy-btn", () => root.querySelector("#unit-count-fallback-prompt-text").value);
 
         // Screenshots upload straight to Drive as soon as they're picked (see uploadCmaScreenshot
         // in the backend) -- only the resulting links get stored in `answers`, never the raw image
