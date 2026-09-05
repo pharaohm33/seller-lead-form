@@ -4271,12 +4271,13 @@ function openOutreachSop() {
     if you want to move through 50 at once faster.</p>
 
     <h3 style="margin-top:22px;">3. Text once, then call</h3>
-    <p class="hint">Send the text below <strong>one time only</strong> — do not send multiple texts to
-    the same owner. After that single opening text, switch to <strong>calling the owner and leaving
-    voicemails</strong>, and keep calling/leaving voicemails from there (no more texts) until they
-    respond. If there's still no response after <strong>3 to 7 total touch points</strong> (the text
-    plus calls/voicemails combined), stop and move on to different auction properties elsewhere in
-    the US.</p>
+    <p class="hint"><strong>Single-family only</strong> — unlike Option 2 below, this track doesn't
+    have a 5+ unit variant. Send the text below <strong>one time only</strong> — do not send multiple
+    texts to the same owner. After that single opening text, switch to <strong>calling the owner and
+    leaving voicemails</strong>, and keep calling/leaving voicemails from there (no more texts) until
+    they respond. If there's still no response after <strong>3 to 7 total touch points</strong> (the
+    text plus calls/voicemails combined), stop and move on to different auction properties elsewhere
+    in the US.</p>
     <div class="banner info">
       "Hey [Name], this is [Your Name]. Would you consider an offer on [Address]? I couldn't help but
       notice that its auction date is around the corner, next week or so. I was planning to go and bid on
@@ -4289,10 +4290,11 @@ function openOutreachSop() {
     — new leads and follow ups combined — rather than dropping follow ups.</p>
 
     <h3 style="margin-top:22px;">4. Existing debt &amp; equity check</h3>
-    <p class="hint">Once they respond, run the address through the SendMySeller wizard for the MAO
-    numbers, then check <strong>PropWire</strong> for their approximate existing debt (the wizard has a
-    dedicated step for this once you pick "Upcoming Auction/Preforeclosure Property" as the deal
-    type).</p>
+    <p class="hint"><strong>Single-family only</strong> — same as the rest of Option 1. Once they
+    respond, run the address through the SendMySeller wizard for the MAO numbers (Asset Type:
+    Residential Property, 1-4 units), then check <strong>PropWire</strong> for their approximate
+    existing debt (the wizard has a dedicated step for this once you pick "Upcoming
+    Auction/Preforeclosure Property" as the deal type).</p>
     <p class="hint">If PropWire doesn't have it, ask the seller directly. If they're hesitant to share
     it:</p>
     <div class="banner info">"I want to ensure you get a fair offer and we don't waste time. If the
