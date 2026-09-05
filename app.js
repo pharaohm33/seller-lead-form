@@ -2381,14 +2381,25 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
               + `to $${cashOfferAmt.toLocaleString()} cash to purchase outright? We can close before `
               + `the property goes to auction.`
             : "";
+          const rentCheckScript = "Will you be able to rent somewhere else with this money and be "
+            + "okay? I just want to make sure this actually helps you.";
           branchContent.innerHTML = offerScript ? `
             <div class="banner info" style="margin-top:12px;">
               <strong>Text this:</strong>
               <br><span class="small-muted">${offerScript}</span>
               <br><button type="button" class="btn secondary" id="offer-script-copy-btn" style="margin-top:8px;">Copy Text</button>
             </div>
+            <p class="hint" style="margin-top:12px;">Start here and talk it through with them -- ask if
+            they'll be able to rent somewhere else with this money and be okay:
+            <br><span class="small-muted">"${rentCheckScript}"</span>
+            <br><button type="button" class="btn secondary" id="rent-check-script-copy-btn" style="margin-top:8px;">Copy Text</button>
+            </p>
+            <p class="hint">If they say they won't be okay, or their need is greater (a family
+            emergency, medical bills, etc.), go up to the highest MAO instead:
+            <strong>${fmt(highestMao)}</strong>.</p>
           ` : "";
           wireCopyPromptButton(branchContent, "#offer-script-copy-btn", () => offerScript);
+          if (offerScript) wireCopyPromptButton(branchContent, "#rent-check-script-copy-btn", () => rentCheckScript);
         } else {
           equityBanner.className = "banner danger";
           equityBanner.innerHTML = `<strong>No equity here</strong> — the existing debt is at or above
