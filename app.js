@@ -395,8 +395,18 @@ const steps = [
               ${COMMERCIAL_SUBTYPES.map(s => `<option value="${s}">${s}</option>`).join("")}
             </select>
             <div class="error-text" id="subtype-error">Please select a subtype.</div>
+
+            <label class="field-label" style="margin-top:16px;">Building Square Footage
+              <span class="small-muted">(required unless acreage is filled in below — whichever is the standard valuation metric for this asset type)</span></label>
+            <input type="number" id="sqft-input" min="0" step="1">
+            <label class="field-label">Acreage
+              <span class="small-muted">(required unless square footage is filled in above)</span></label>
+            <input type="number" id="acreage-input" min="0" step="0.01" placeholder="e.g. 5.25">
+            <div class="error-text" id="acreage-error">Enter either square footage or acreage.</div>
           `;
           subFields.querySelector("#subtype-input").value = answers.assetSubtype || "";
+          subFields.querySelector("#sqft-input").value = answers.sqft || "";
+          subFields.querySelector("#acreage-input").value = answers.acreage || "";
         } else if (answers.assetType === "Business") {
           subFields.innerHTML = `
             <label class="field-label">Business type <span class="req">*</span></label>
@@ -555,6 +565,10 @@ const steps = [
       } else if (answers.assetType === "Commercial Property") {
         answers.assetSubtype = root.querySelector("#subtype-input").value;
         toggleError(root, "#subtype-error", !answers.assetSubtype); if (!answers.assetSubtype) ok = false;
+        answers.sqft = root.querySelector("#sqft-input").value;
+        answers.acreage = root.querySelector("#acreage-input").value;
+        const hasCommercialSize = !!(answers.sqft || answers.acreage);
+        toggleError(root, "#acreage-error", !hasCommercialSize); if (!hasCommercialSize) ok = false;
       } else if (answers.assetType === "Business") {
         answers.assetSubtype = root.querySelector("#subtype-input").value.trim();
         toggleError(root, "#subtype-error", !answers.assetSubtype); if (!answers.assetSubtype) ok = false;
@@ -760,7 +774,9 @@ const steps = [
 
       const isResidential = answers.assetType === "Residential Property (1-4 units)";
       const isLand = answers.assetType === "Land";
-      const hasCompsWorkflow = isResidential || isLand;
+      const isCommercial = answers.assetType === "Commercial Property";
+      const isMultifamilySubtype = answers.assetSubtype === "Multifamily";
+      const hasCompsWorkflow = isResidential || isLand || isCommercial;
       const isOnMarket = answers.marketStatus === "On-Market";
       // Auction/preforeclosure sellers have no asking price at all -- the offer is built purely off
       // As-Is Value/ARV/repair, and since there's usually no listing or photos to research the
@@ -888,7 +904,7 @@ const steps = [
             <strong>"AI Mode"</strong> tab near the top of the results.</li>
             <li>Tap <strong>"Get Comps Research Prompt for Google AI"</strong> below, hit <strong>Copy</strong>,
             and paste it into AI Mode.</li>
-            <li>Google AI will pull real recent comps and calculate ${isLand ? "a value range" : "an ARV range"}
+            <li>Google AI will pull real recent comps and calculate ${isLand ? "a value range" : isCommercial ? "an ARV range from both a sales-comps and an income approach" : "an ARV range"}
             for you — this is your CMA (Comparative Market Analysis).</li>
             <li>Screenshot the <strong>full</strong> response (the comps list AND the calculations at the
             bottom) and upload it below. If it doesn't fit in one screenshot, upload as many as you need —
@@ -903,6 +919,20 @@ const steps = [
             the subject's current bed/bath count — if the CMA leans on comps with more beds or baths than
             this property has, that overstates the ARV for a change this deal won't actually make. The
             comps prompt below already tells Google AI to match bed/bath count for this reason.</p>
+          ` : ""}
+          ${isCommercial ? `
+            <p class="hint"><strong>Comps must match the subject's asset type first.</strong> Never
+            compare a retail building to a multifamily building, or a small multifamily building to a
+            large one — match on asset type${isMultifamilySubtype ? " and unit count bracket" : ""}
+            before weighing distance or condition. Expect roughly <strong>0.5 to 1 mile</strong> in
+            urban/suburban areas, expanding to <strong>3 to 5 miles</strong> only in rural markets with
+            limited inventory — don't cross a major highway, river, or railroad line to find a comp if
+            one exists closer.</p>
+            <p class="hint">Comps sold within the last <strong>6 months</strong> are ideal, up to
+            <strong>12 months</strong> if this market or asset type doesn't have enough recent sales.
+            The prompt below asks Google AI for both a sales-comparison value (price per square foot or
+            acre) and an income-based value (using the comps' cap rates), and to reconcile the two if
+            they disagree.</p>
           ` : ""}
           ${isLand ? `
             <p class="hint"><strong>For land, what a comp has in common matters more than how close it is.</strong>
@@ -922,7 +952,7 @@ const steps = [
             same zoning/topography/access rules apply, and try to match similar acreage and land type. Note what
             you found in Notes below. Lean toward the lowest comps or an average — never cherry-pick the highest
             value in the area, since that usually doesn't sell.</p>
-          ` : `
+          ` : isCommercial ? "" : `
             <p class="hint"><strong>Comps must be within a 1-mile radius of the property — no exceptions.</strong>
             Comps farther out drastically reduce the chance this deal actually closes, so be very cautious about
             using anything beyond 1 mile. Comps should also be no more than <strong>1 year old</strong>, and
@@ -935,7 +965,7 @@ const steps = [
 
           <button type="button" class="link-btn" id="comps-prompt-toggle-btn">Get Comps Research Prompt for Google AI &#9662;</button>
           <div id="comps-prompt-panel" hidden style="margin-top:10px;">
-            <p class="hint">This is pre-filled with the address/${isLand ? "acreage or square footage" : "beds/baths/sqft"}
+            <p class="hint">This is pre-filled with the address/${isLand ? "acreage or square footage" : isCommercial ? "asset type/size" : "beds/baths/sqft"}
             already on file. Copy it, ${googleAiHow}, and paste it in.</p>
             <textarea id="comps-prompt-text" readonly rows="16" style="width:100%; font-size:12px; font-family:'IBM Plex Mono', ui-monospace, monospace;"></textarea>
             <button type="button" class="btn secondary" id="comps-prompt-copy-btn" style="margin-top:8px;">Copy Prompt</button>
@@ -1359,6 +1389,12 @@ const steps = [
           ? (answers.acreage
               ? `${answers.acreage} acre(s)${answers.sqft ? ` (${answers.sqft} square feet)` : ""}${answers.landZoning ? `, zoned ${answers.landZoning}` : ""}`
               : (answers.sqft ? `${answers.sqft} square feet${answers.landZoning ? `, zoned ${answers.landZoning}` : ""}` : "[ACREAGE/SQUARE FEET]"))
+          : isCommercial
+          ? `${isMultifamilySubtype && answers.units ? `${answers.units} units, ` : ""}${
+              answers.acreage
+                ? `${answers.acreage} acre(s)${answers.sqft ? ` (${answers.sqft} square feet)` : ""}`
+                : (answers.sqft ? `${answers.sqft} square feet` : "[SQUARE FEET/ACREAGE]")
+            }`
           : (answers.beds && answers.baths
               ? `${answers.beds} bedroom(s), ${answers.baths} bathroom(s), ${answers.sqft ? answers.sqft + " square feet" : "[SQUARE FEET]"}`
               : (answers.sqft ? `${answers.sqft} square feet` : "[BEDROOMS/BATHROOMS/SQUARE FEET]"));
@@ -1398,6 +1434,37 @@ After listing the comps, calculate and show your work:
 2. Estimated As-Is Value: Average (time-adjusted) Price per Acre of the comps x Subject Acreage — give a final range, not just one number.
 
 If the value comes out lower than what you might initially expect, say so plainly — that's an important finding, not something to smooth over.`
+: isCommercial
+? `Act as a professional commercial real estate underwriter. Explain your math simply and avoid real estate jargon — I have no real estate experience.
+
+Find recent comparable SOLD properties and an estimated market value (ARV) for this property:
+- Address: ${addressLine || "[SUBJECT ADDRESS]"}
+- Asset Type: ${answers.assetSubtype || "[ASSET TYPE]"}
+- Size: ${detailsPart}${answers.commercialNOI ? `
+- Current reported annual NOI: $${Number(answers.commercialNOI).toLocaleString()}` : ""}
+
+Search live for 3 to 5 comparable SOLD properties that meet ALL of these rules:
+1. Same asset type as the subject (${answers.assetSubtype || "[ASSET TYPE]"}) — never comp a different commercial property type against this one (e.g. never comp retail against multifamily, or a small multifamily building against a large one)${isMultifamilySubtype ? `. For multifamily specifically, also match unit count within the same bracket (2 to 4, 5 to 9, 10 to 19, or 20+ units) and similar unit mix (studios, 1BR, 2BR, etc.) where you can find that detail` : ""}.
+2. Sold within the last 6 months — expand to 12 months only if this market or asset type doesn't have enough recent sales to work with.
+3. Within roughly 0.5 to 1 mile in urban or suburban areas, expanding up to 3 to 5 miles only in rural markets with limited inventory. Do not cross a major highway, river, or railroad line to find a comp if a comparable one exists closer, since that can put it in a functionally different submarket.
+4. Similar construction era/vintage and condition tier (turnkey/fully renovated, moderate deferred maintenance, or heavy deferred maintenance/needs a full renovation) — note each comp's tier explicitly, and flag any comp that recently had a new roof, updated plumbing, or modernized HVAC, since that inflates its price relative to what this property will still need.
+
+If this is a non-disclosure state and you can't find actual sold prices, use active for-sale listings instead that meet the other rules, and clearly label them as asking prices, not confirmed sale prices.
+
+For each comp, list:
+- Full address
+- Sale price (or asking price, if using the non-disclosure fallback) and the date
+- Square footage (or acreage, whichever is the standard valuation metric for this asset type) and Price per Square Foot (or Price per Acre)
+- Cap rate at time of sale, if publicly available or reasonably estimable (NOI ÷ sale price) — flag clearly if you had to estimate rather than find a reported number
+- Whether it sold vacant or with existing tenants/leases in place, and whether those leases were at or below current market rent
+- Estimated straight-line distance from the subject address, in miles
+
+After listing the comps, calculate BOTH approaches below and reconcile them if they meaningfully disagree:
+
+1. Sales Comparison Approach: Average Price per Square Foot (or Acre) of the comps x Subject Size = Estimated Value Range (give a range, not one number).
+2. Income Approach: ${answers.commercialNOI ? `Using the subject's current NOI of $${Number(answers.commercialNOI).toLocaleString()} and the average cap rate from the sold comps above, calculate Estimated Value = NOI ÷ Average Comp Cap Rate.` : `We don't have a confirmed current NOI for this property. If you can reasonably estimate one from market rents typical for this asset type and size, calculate an Income Approach value using that estimate and the average cap rate from the sold comps, but flag it clearly as an estimate rather than confirmed income. Otherwise, lean primarily on the Sales Comparison Approach above since there's no reliable income data to anchor an Income Approach.`}
+
+If the two approaches disagree by more than roughly 15%, say so plainly and explain the likely reason (below-market in-place rents, deferred capital expenditures, a below-market lease in place, etc.) — that's an important finding, not something to smooth over.`
 : `Act as a professional real estate data analyst. Explain your math simply and avoid real estate jargon — I have no real estate experience.
 
 Find recent comparable sales (comps) and an estimated After Repair Value (ARV) for this property:
@@ -2888,7 +2955,9 @@ function buildAnswerRows() {
     ["Parcel ID(s)", answers.parcelIds || "—"],
     ["Units", answers.units],
     ["Asset Type", answers.assetType],
-    ["Subtype / Details", answers.assetSubtype || [answers.beds && `${answers.beds} bd`, answers.baths && `${answers.baths} ba`, answers.acreage && `${answers.acreage} acres`, answers.sqft && `${answers.sqft} sqft`].filter(Boolean).join(", ")],
+    ["Subtype / Details", answers.assetType === "Commercial Property"
+      ? [answers.assetSubtype, answers.sqft && `${answers.sqft} sqft`, answers.acreage && `${answers.acreage} acres`].filter(Boolean).join(", ")
+      : (answers.assetSubtype || [answers.beds && `${answers.beds} bd`, answers.baths && `${answers.baths} ba`, answers.acreage && `${answers.acreage} acres`, answers.sqft && `${answers.sqft} sqft`].filter(Boolean).join(", "))],
     ["Deal Type", answers.dealType || "—"]
   );
   if (answers.dealCategory) {
