@@ -4235,8 +4235,11 @@ function openOutreachSop() {
       notice that its auction date is around the corner, next week or so. I was planning to go and bid on
       it, but figured it wouldn't hurt to try and work something out with you before it's gone."
     </div>
-    <p class="hint"><strong>Volume:</strong> 50 owners a day for 7 days (350 total) — at that volume
-    you're very likely to land a deal.</p>
+    <p class="hint"><strong>Volume:</strong> 50 new owners contacted a day for 7 days (350 total) — at
+    that volume you're very likely to land a deal. Follow ups (the 3 to 7 touch points above) matter
+    just as much as new outreach — don't skip them to chase new volume. If you can't handle both
+    50 new contacts a day and every follow up that's due, cap your day at <strong>50 total contacts</strong>
+    — new leads and follow ups combined — rather than dropping follow ups.</p>
 
     <h3 style="margin-top:22px;">4. Existing debt &amp; equity check</h3>
     <p class="hint">Once they respond, run the address through the SendMySeller wizard for the MAO
