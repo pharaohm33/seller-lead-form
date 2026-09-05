@@ -371,6 +371,34 @@ const steps = [
     }
   },
   {
+    // Moved ahead of assetType/dealType (used to sit right before "price") so Commercial's square
+    // footage step below can tell on-market from off-market -- an off-market property has no listing
+    // to read square footage off, so it needs the ask-seller/find-it-yourself treatment there.
+    key: "sourcing",
+    progress: true,
+    render(root) {
+      root.innerHTML = `
+        <h2 class="step-title">Deal Sourcing</h2>
+        <label class="field-label">Is this on-market or off-market? <span class="req">*</span></label>
+        <div class="choice-group" id="market-group">
+          ${["On-Market", "Off-Market"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
+        </div>
+        <div class="error-text" id="market-error">Please choose one.</div>
+
+        <label class="field-label">Link to where you found this listing <span class="small-muted">(optional)</span></label>
+        <input type="text" id="source-link-input" placeholder="https://...">
+      `;
+      root.querySelector("#source-link-input").value = answers.sourceLink || "";
+      bindChoiceGroup(root, "#market-group", "marketStatus");
+    },
+    validate(root) {
+      answers.sourceLink = root.querySelector("#source-link-input").value.trim();
+      const ok = !!answers.marketStatus;
+      toggleError(root, "#market-error", !ok);
+      return ok;
+    }
+  },
+  {
     key: "assetType",
     progress: true,
     render(root) {
@@ -385,6 +413,9 @@ const steps = [
         <div id="sub-fields"></div>
       `;
       const subFields = root.querySelector("#sub-fields");
+      // Dash-free like every other seller-facing script in this app.
+      const SELLER_SQFT_SCRIPT = "Do you happen to know the approximate square footage of the building? "
+        + "It's okay if you're not sure, just give me your best guess, I'll verify the exact number myself either way.";
 
       function renderSub() {
         if (answers.assetType === "Commercial Property") {
@@ -396,17 +427,83 @@ const steps = [
             </select>
             <div class="error-text" id="subtype-error">Please select a subtype.</div>
 
+            ${answers.marketStatus === "Off-Market" ? `
+              <label class="field-label" style="margin-top:16px;">Seller Reported Square Footage
+                <span class="small-muted">(optional — their best guess, for reference only. Verify the real number below either way.)</span></label>
+              <input type="number" id="seller-sqft-input" min="0" step="1">
+              <p class="hint">Ask the seller (text it or read it over the phone):
+              <br><span class="small-muted">"${SELLER_SQFT_SCRIPT}"</span>
+              <br><button type="button" class="btn secondary" id="seller-sqft-script-copy-btn" style="margin-top:8px;">Copy Text</button>
+              </p>
+            ` : ""}
+
             <label class="field-label" style="margin-top:16px;">Building Square Footage
-              <span class="small-muted">(required unless acreage is filled in below — whichever is the standard valuation metric for this asset type)</span></label>
-            <input type="number" id="sqft-input" min="0" step="1">
+              <span class="small-muted">(required unless acreage is filled in below, or skipped below for multifamily — whichever is the standard valuation metric for this asset type)</span></label>
+            <input type="number" id="sqft-input" min="0" step="1" ${answers.matchByUnitsOnly ? "disabled" : ""}>
+            ${answers.marketStatus === "Off-Market" ? `
+              <p class="hint">Off-market properties have no listing to read this off of, so always verify
+              it yourself even if the seller gave you a number. Go to <strong>google.com</strong>, search
+              anything (typing "ai" works fine), click <strong>"AI Mode"</strong> near the top of the
+              results, then ask:
+              <br><span class="small-muted" id="sqft-research-prompt-hint"></span>
+              <br><button type="button" class="btn secondary" id="sqft-research-prompt-copy-btn" style="margin-top:8px;">Copy Prompt</button>
+              </p>
+            ` : ""}
+            <div id="units-only-match-block" style="margin-top:8px;" ${answers.assetSubtype === "Multifamily" ? "" : "hidden"}>
+              <button type="button" class="btn ghost-small ${answers.matchByUnitsOnly ? "active" : ""}" id="units-only-match-btn">
+                Skip square footage — match comps by unit count instead
+              </button>
+              <p class="hint" style="margin-top:6px;">Use this when square footage can't be reliably found or
+              verified (common in small or rural non disclosure markets, and a wrong number here badly skews
+              comps) — comps get matched by closest unit count instead of a bad or guessed square footage.</p>
+            </div>
             <label class="field-label">Acreage
-              <span class="small-muted">(required unless square footage is filled in above)</span></label>
-            <input type="number" id="acreage-input" min="0" step="0.01" placeholder="e.g. 5.25">
+              <span class="small-muted">(required unless square footage is filled in above, or skipped above for multifamily)</span></label>
+            <input type="number" id="acreage-input" min="0" step="0.01" placeholder="e.g. 5.25" ${answers.matchByUnitsOnly ? "disabled" : ""}>
             <div class="error-text" id="acreage-error">Enter either square footage or acreage.</div>
           `;
           subFields.querySelector("#subtype-input").value = answers.assetSubtype || "";
           subFields.querySelector("#sqft-input").value = answers.sqft || "";
           subFields.querySelector("#acreage-input").value = answers.acreage || "";
+          {
+            const unitsOnlyBlock = subFields.querySelector("#units-only-match-block");
+            const unitsOnlyBtn = subFields.querySelector("#units-only-match-btn");
+            const sqftInputEl = subFields.querySelector("#sqft-input");
+            const acreageInputEl = subFields.querySelector("#acreage-input");
+            unitsOnlyBtn.onclick = () => {
+              answers.matchByUnitsOnly = !answers.matchByUnitsOnly;
+              if (answers.matchByUnitsOnly) {
+                answers.sqft = ""; sqftInputEl.value = "";
+                answers.acreage = ""; acreageInputEl.value = "";
+              }
+              sqftInputEl.disabled = answers.matchByUnitsOnly;
+              acreageInputEl.disabled = answers.matchByUnitsOnly;
+              unitsOnlyBtn.classList.toggle("active", answers.matchByUnitsOnly);
+              toggleError(subFields, "#acreage-error", false);
+            };
+            subFields.querySelector("#subtype-input").addEventListener("change", (e) => {
+              unitsOnlyBlock.hidden = e.target.value !== "Multifamily";
+            });
+          }
+          if (answers.marketStatus === "Off-Market") {
+            subFields.querySelector("#seller-sqft-input").value = answers.sellerReportedSqft || "";
+            wireCopyPromptButton(subFields, "#seller-sqft-script-copy-btn", () => SELLER_SQFT_SCRIPT);
+            const buildSqftResearchPrompt = () => {
+              const addr = `${answers.street || ""}, ${answers.city || ""}, ${answers.state || ""} ${answers.zip || ""}`.trim();
+              const unitsNum = Number(answers.units) || 1;
+              // Reads the subtype select live rather than answers.assetSubtype, which isn't written
+              // back until validate() runs on Next -- otherwise this would always show stale/blank.
+              const subtype = subFields.querySelector("#subtype-input").value || "commercial";
+              const unitsPart = unitsNum > 1 ? `a ${unitsNum} unit ${subtype} property` : `a ${subtype} property`;
+              return `what is the total building square footage for ${addr || "[SUBJECT ADDRESS]"}, ${unitsPart}? Check public property/tax records if you can find them.`;
+            };
+            const updateSqftPromptHint = () => {
+              subFields.querySelector("#sqft-research-prompt-hint").textContent = `"${buildSqftResearchPrompt()}"`;
+            };
+            updateSqftPromptHint();
+            subFields.querySelector("#subtype-input").addEventListener("change", updateSqftPromptHint);
+            wireCopyPromptButton(subFields, "#sqft-research-prompt-copy-btn", buildSqftResearchPrompt);
+          }
         } else if (answers.assetType === "Business") {
           subFields.innerHTML = `
             <label class="field-label">Business type <span class="req">*</span></label>
@@ -565,9 +662,13 @@ const steps = [
       } else if (answers.assetType === "Commercial Property") {
         answers.assetSubtype = root.querySelector("#subtype-input").value;
         toggleError(root, "#subtype-error", !answers.assetSubtype); if (!answers.assetSubtype) ok = false;
+        if (answers.marketStatus === "Off-Market") {
+          answers.sellerReportedSqft = root.querySelector("#seller-sqft-input").value;
+        }
+        if (answers.assetSubtype !== "Multifamily") answers.matchByUnitsOnly = false;
         answers.sqft = root.querySelector("#sqft-input").value;
         answers.acreage = root.querySelector("#acreage-input").value;
-        const hasCommercialSize = !!(answers.sqft || answers.acreage);
+        const hasCommercialSize = answers.matchByUnitsOnly || !!(answers.sqft || answers.acreage);
         toggleError(root, "#acreage-error", !hasCommercialSize); if (!hasCommercialSize) ok = false;
       } else if (answers.assetType === "Business") {
         answers.assetSubtype = root.querySelector("#subtype-input").value.trim();
@@ -642,31 +743,6 @@ const steps = [
     validate(root) {
       const ok = !!answers.dealType;
       toggleError(root, "#deal-type-error", !ok);
-      return ok;
-    }
-  },
-  {
-    key: "sourcing",
-    progress: true,
-    render(root) {
-      root.innerHTML = `
-        <h2 class="step-title">Deal Sourcing</h2>
-        <label class="field-label">Is this on-market or off-market? <span class="req">*</span></label>
-        <div class="choice-group" id="market-group">
-          ${["On-Market", "Off-Market"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
-        </div>
-        <div class="error-text" id="market-error">Please choose one.</div>
-
-        <label class="field-label">Link to where you found this listing <span class="small-muted">(optional)</span></label>
-        <input type="text" id="source-link-input" placeholder="https://...">
-      `;
-      root.querySelector("#source-link-input").value = answers.sourceLink || "";
-      bindChoiceGroup(root, "#market-group", "marketStatus");
-    },
-    validate(root) {
-      answers.sourceLink = root.querySelector("#source-link-input").value.trim();
-      const ok = !!answers.marketStatus;
-      toggleError(root, "#market-error", !ok);
       return ok;
     }
   },
@@ -923,7 +999,7 @@ const steps = [
           ${isCommercial ? `
             <p class="hint"><strong>Comps must match the subject's asset type first.</strong> Never
             compare a retail building to a multifamily building, or a small multifamily building to a
-            large one — match on asset type${isMultifamilySubtype ? " and unit count bracket" : ""}
+            large one — match on asset type${isMultifamilySubtype ? (answers.matchByUnitsOnly ? ", matched by closest unit count since square footage was skipped" : " and unit count bracket") : ""}
             before weighing distance or condition. Expect roughly <strong>0.5 to 1 mile</strong> in
             urban/suburban areas, expanding to <strong>3 to 5 miles</strong> only in rural markets with
             limited inventory — don't cross a major highway, river, or railroad line to find a comp if
@@ -1489,11 +1565,13 @@ const steps = [
               ? `${answers.acreage} acre(s)${answers.sqft ? ` (${answers.sqft} square feet)` : ""}${answers.landZoning ? `, zoned ${answers.landZoning}` : ""}`
               : (answers.sqft ? `${answers.sqft} square feet${answers.landZoning ? `, zoned ${answers.landZoning}` : ""}` : "[ACREAGE/SQUARE FEET]"))
           : isCommercial
-          ? `${isMultifamilySubtype && answers.units ? `${answers.units} units, ` : ""}${
-              answers.acreage
-                ? `${answers.acreage} acre(s)${answers.sqft ? ` (${answers.sqft} square feet)` : ""}`
-                : (answers.sqft ? `${answers.sqft} square feet` : "[SQUARE FEET/ACREAGE]")
-            }`
+          ? (isMultifamilySubtype && answers.matchByUnitsOnly
+              ? `${answers.units || "[UNIT COUNT]"} units (square footage not reliably known -- match by unit count instead, not square footage)`
+              : `${isMultifamilySubtype && answers.units ? `${answers.units} units, ` : ""}${
+                  answers.acreage
+                    ? `${answers.acreage} acre(s)${answers.sqft ? ` (${answers.sqft} square feet)` : ""}`
+                    : (answers.sqft ? `${answers.sqft} square feet` : "[SQUARE FEET/ACREAGE]")
+                }`)
           : (answers.beds && answers.baths
               ? `${answers.beds} bedroom(s), ${answers.baths} bathroom(s), ${answers.sqft ? answers.sqft + " square feet" : "[SQUARE FEET]"}`
               : (answers.sqft ? `${answers.sqft} square feet` : "[BEDROOMS/BATHROOMS/SQUARE FEET]"));
@@ -1506,6 +1584,7 @@ const steps = [
         const liveUnitsOccupied = root.querySelector("#occ-units-input")?.value;
         const livePctOccupied = root.querySelector("#occ-pct-input")?.value;
         const liveNOI = isCommercial && !answers.commercialNoiUnknown ? root.querySelector("#noi-input")?.value : "";
+        const matchByUnitsOnly = isMultifamilySubtype && !!answers.matchByUnitsOnly;
         const occupancyPart = !isCommercial ? "" : answers.commercialOccupancyStatus === "Fully Occupied"
           ? "Fully occupied (100%)"
           : answers.commercialOccupancyStatus === "Vacant"
@@ -1564,7 +1643,9 @@ Find recent comparable SOLD properties and an estimated market value (ARV) for t
 - Current reported annual NOI: $${Number(liveNOI).toLocaleString()}` : ""}
 
 Search live for 3 to 5 comparable SOLD properties that meet ALL of these rules:
-1. Same asset type as the subject (${answers.assetSubtype || "[ASSET TYPE]"}) — never comp a different commercial property type against this one (e.g. never comp retail against multifamily, or a small multifamily building against a large one)${isMultifamilySubtype ? `. For multifamily specifically, also match unit count within the same bracket (2 to 4, 5 to 9, 10 to 19, or 20+ units) and similar unit mix (studios, 1BR, 2BR, etc.) where you can find that detail` : ""}.
+1. Same asset type as the subject (${answers.assetSubtype || "[ASSET TYPE]"}) — never comp a different commercial property type against this one, and never comp a single-family home, duplex, triplex, or fourplex against this multifamily property${isMultifamilySubtype ? (matchByUnitsOnly
+  ? `. This property's square footage isn't reliably known, so ignore square footage and unit-count brackets entirely -- instead, rank candidate comps by how close their unit count is to this property's ${answers.units || "[UNIT COUNT]"} units, and use the closest matches available even if none are an exact match. Also try to match similar unit mix (studios, 1BR, 2BR, etc.) where you can find that detail`
+  : `. For multifamily specifically, also match unit count within the same bracket (2 to 4, 5 to 9, 10 to 19, or 20+ units) and similar unit mix (studios, 1BR, 2BR, etc.) where you can find that detail`) : ""}.
 2. Sold within the last 6 months — expand to 12 months only if this market or asset type doesn't have enough recent sales to work with.
 3. Within roughly 0.5 to 1 mile in urban or suburban areas, expanding up to 3 to 5 miles only in rural markets with limited inventory. Do not cross a major highway, river, or railroad line to find a comp if a comparable one exists closer, since that can put it in a functionally different submarket.
 4. Similar construction era/vintage and condition tier (turnkey/fully renovated, moderate deferred maintenance, or heavy deferred maintenance/needs a full renovation) — note each comp's tier explicitly, and flag any comp that recently had a new roof, updated plumbing, or modernized HVAC, since that inflates its price relative to what this property will still need.
@@ -1574,14 +1655,16 @@ If this is a non-disclosure state and you can't find actual sold prices, use act
 For each comp, list:
 - Full address
 - Sale price (or asking price, if using the non-disclosure fallback) and the date
-- Square footage (or acreage, whichever is the standard valuation metric for this asset type) and Price per Square Foot (or Price per Acre)
+- ${matchByUnitsOnly ? "Unit count and Price per Unit" : "Square footage (or acreage, whichever is the standard valuation metric for this asset type) and Price per Square Foot (or Price per Acre)"}
 - Cap rate at time of sale, if publicly available or reasonably estimable (NOI ÷ sale price) — flag clearly if you had to estimate rather than find a reported number
 - Whether it sold vacant or with existing tenants/leases in place, and whether those leases were at or below current market rent
 - Estimated straight-line distance from the subject address, in miles
 
 After listing the comps, calculate BOTH approaches below and reconcile them if they meaningfully disagree:
 
-1. Sales Comparison Approach: Average Price per Square Foot (or Acre) of the comps x Subject Size = Estimated Value Range (give a range, not one number).
+1. Sales Comparison Approach: ${matchByUnitsOnly
+  ? `Average Sale Price Per Unit of the comps x Subject Unit Count (${answers.units || "[UNIT COUNT]"}) = Estimated Value Range (give a range, not one number).`
+  : `Average Price per Square Foot (or Acre) of the comps x Subject Size = Estimated Value Range (give a range, not one number).`}
 2. Income Approach: ${liveNOI
   ? `Using the subject's current NOI of $${Number(liveNOI).toLocaleString()}${occupancyPart && answers.commercialOccupancyStatus !== "Fully Occupied" ? ` (in-place NOI — the property is only ${occupancyPart.toLowerCase()}, not fully occupied)` : ""} and the average cap rate from the sold comps above, calculate Estimated Value = NOI ÷ Average Comp Cap Rate.${occupancyPart && answers.commercialOccupancyStatus !== "Fully Occupied" ? ` Since it isn't fully occupied, also estimate a stabilized NOI at full occupancy using typical market rents for this asset type and size, and show that as a second Income Approach value alongside the in-place one.` : ""}`
   : `We don't have a confirmed current NOI for this property${occupancyPart ? ` (currently ${occupancyPart.toLowerCase()})` : ""}. If you can reasonably estimate one from market rents typical for this asset type and size${occupancyPart && answers.commercialOccupancyStatus !== "Fully Occupied" ? `, accounting for that occupancy level` : ""}, calculate an Income Approach value using that estimate and the average cap rate from the sold comps, but flag it clearly as an estimate rather than confirmed income. Otherwise, lean primarily on the Sales Comparison Approach above since there's no reliable income data to anchor an Income Approach.`}
@@ -3110,10 +3193,13 @@ function buildAnswerRows() {
     ["Units", answers.units],
     ["Asset Type", answers.assetType],
     ["Subtype / Details", answers.assetType === "Commercial Property"
-      ? [answers.assetSubtype, answers.sqft && `${answers.sqft} sqft`, answers.acreage && `${answers.acreage} acres`].filter(Boolean).join(", ")
+      ? [answers.assetSubtype, answers.sqft && `${answers.sqft} sqft`, answers.acreage && `${answers.acreage} acres`, answers.matchByUnitsOnly && "sqft skipped, matched by units"].filter(Boolean).join(", ")
       : (answers.assetSubtype || [answers.beds && `${answers.beds} bd`, answers.baths && `${answers.baths} ba`, answers.acreage && `${answers.acreage} acres`, answers.sqft && `${answers.sqft} sqft`].filter(Boolean).join(", "))],
     ["Deal Type", answers.dealType || "—"]
   );
+  if (answers.assetType === "Commercial Property" && answers.marketStatus === "Off-Market") {
+    rows.push(["Seller Reported Sq Ft", answers.sellerReportedSqft || "—"]);
+  }
   if (answers.dealCategory) {
     rows.push(["Deal Category", answers.dealCategory]);
   }
@@ -3629,7 +3715,7 @@ async function submitLead(container) {
         sellerContactEmail: answers.sellerContactEmail,
         street: answers.street, parcelIds: answers.parcelIds, city: answers.city, state: answers.state, zip: answers.zip, units: answers.units,
         assetType: answers.assetType, assetSubtype: answers.assetSubtype,
-        beds: answers.beds, baths: answers.baths, sqft: answers.sqft, acreage: answers.acreage, landZoning: answers.landZoning,
+        beds: answers.beds, baths: answers.baths, sqft: answers.sqft, sellerReportedSqft: answers.sellerReportedSqft, acreage: answers.acreage, landZoning: answers.landZoning,
         dealType: answers.dealType, dealCategory: answers.dealCategory,
         arv: answers.arv, askingPrice: answers.askingPrice, chaseEstimate: answers.chaseEstimate, asIsValue: answers.asIsValue, picturesLink: answers.picturesLink, rehabEstimate: answers.rehabEstimate,
         rehabEstimateLow: answers.rehabEstimateLow, rehabEstimateHigh: answers.rehabEstimateHigh,
@@ -3889,6 +3975,9 @@ function buildLeadFields(lead) {
     ["Beds", lead["Beds"] || "—"], ["Baths", lead["Baths"] || "—"], ["Acreage", lead["Acreage"] || "—"], ["Sq Ft", lead["Sq Ft"] || "—"],
     ["Deal Type", lead["Deal Type"] || "—"]
   );
+  if (lead["Asset Type"] === "Commercial Property" && lead["Market Status"] === "Off-Market") {
+    fields.push(["Seller Reported Sq Ft", lead["Seller Reported Sq Ft"] || "—"]);
+  }
   if (lead["Deal Category"]) {
     fields.push(["Deal Category", lead["Deal Category"]]);
   }
