@@ -123,6 +123,13 @@ const steps = [
     render(root) {
       root.innerHTML = `
         <h2 class="step-title">Before You Start</h2>
+        <div class="banner danger">
+          <strong>STOP — don't fill this out yet if you're working with us on deal acquisitions.</strong>
+          Read the <strong>Outreach SOP</strong> (button at the top of the page) first, and send your
+          outreach texts and/or make your calls to actually get a hold of a seller who's responsive and
+          open to selling. Only start filling this out once you have that response. If you're the
+          seller yourself, this doesn't apply to you — go ahead and continue below.
+        </div>
         <div class="banner info">
           Any agreement on payment terms — down payment, monthly payments, timing, or price — will be
           discussed and confirmed directly with the admin you're in contact with before anything closes.
@@ -131,9 +138,6 @@ const steps = [
         <p>Admin contact: <strong>${ADMIN_CONTACT_PHONE}</strong></p>
         <p class="hint">This should take about 5 minutes. You can identify yourself as the seller, or as a
         connector/bird dog, wholesaler, realtor, consultant, associate, or referral bringing us a seller.</p>
-        <p class="hint">Working with us on deal acquisitions? Use the <strong>Outreach SOP</strong> button at
-        the top of the page first — it's our full playbook for sourcing, screening, and pricing these deals.
-        If you're the seller yourself, no need, just continue below.</p>
         <p class="hint">If anything here is marked required and you don't have that information yet — for
         example, you're not the seller yourself and need to check with them — stop and use
         <strong>"Save My Progress"</strong> at the top of the page. That saves a link back to exactly where you
