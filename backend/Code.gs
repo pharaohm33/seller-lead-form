@@ -11,6 +11,11 @@
  *   ADMIN_EMAIL         - where recovery emails are sent (fixed, not caller-supplied)
  *   SESSION_SECRET      - random long string, used to sign session tokens
  *   SHARED_SECRET       - (optional) simple app key the frontend also sends
+ *   BEEHIIV_API_KEY, BEEHIIV_PUBLICATION_ID - (optional) every submitter is
+ *                         synced to beehiiv, tagged 'seller-lead' plus a
+ *                         role/state tag, so a real email only ever goes
+ *                         through beehiiv, not this app's Google account.
+ *                         See beehiivUpsertSubscriber near the bottom.
  */
 
 const LEADS_SHEET = 'Leads';
@@ -345,7 +350,52 @@ function submitLead(body) {
   forceTextValue(sheet, newRow, 'Referrer Phone', referrerPhone);
   forceTextValue(sheet, newRow, 'Zip', d.zip);
 
+  // Tagged with role + state on top of the flat 'seller-lead' tag, so a
+  // real send in beehiiv can be aimed at e.g. "wholesalers in Texas"
+  // instead of always blasting every submitter. Never blocks the actual
+  // lead submission if beehiiv is unreachable.
+  const tags = ['seller-lead'];
+  if (d.role) tags.push('role-' + slugifyTag(d.role));
+  if (d.state) tags.push('state-' + slugifyTag(d.state));
+  beehiivUpsertSubscriber(d.email, d.name, tags);
+
   return { ok: true, leadId: leadId };
+}
+
+// ---------- Beehiiv sync ----------
+//
+// Keeps every submitter's contact email out of this app's own Google
+// account entirely -- any real outreach email goes out through beehiiv,
+// picking the right segment from its own compose screen, never MailApp.
+// Never throws -- a beehiiv hiccup must never block someone's lead from
+// actually saving.
+function beehiivUpsertSubscriber(email, name, tags) {
+  const props = PropertiesService.getScriptProperties();
+  const apiKey = props.getProperty('BEEHIIV_API_KEY');
+  const pubId = props.getProperty('BEEHIIV_PUBLICATION_ID');
+  if (!apiKey || !pubId || !email) return;
+  try {
+    UrlFetchApp.fetch('https://api.beehiiv.com/v2/publications/' + pubId + '/subscriptions', {
+      method: 'post',
+      contentType: 'application/json',
+      headers: { Authorization: 'Bearer ' + apiKey },
+      muteHttpExceptions: true,
+      payload: JSON.stringify({
+        email: email,
+        reactivate_existing: true,
+        send_welcome_email: false,
+        utm_source: 'seller-lead-form',
+        custom_fields: name ? [{ name: 'Name', value: name }] : [],
+        tags: tags || []
+      })
+    });
+  } catch (err) {
+    // Swallow -- see comment above.
+  }
+}
+
+function slugifyTag(str) {
+  return String(str || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 }
 
 // ---------- Admin auth ----------
