@@ -31,7 +31,7 @@ one at a time:
 | `RECOVERY_CODE_WORD` | A word/phrase only you know, used to trigger a password-recovery email |
 | `ADMIN_EMAIL` | `montanoemmanuel@gmail.com` (or whichever inbox should receive recovery emails) |
 | `SESSION_SECRET` | Any long random string (e.g. mash the keyboard for 30+ characters) — this signs your login sessions |
-| `BEEHIIV_API_KEY` | (optional) From beehiiv → Settings → Integrations → API — every submitter gets synced and tagged `seller-lead` |
+| `BEEHIIV_API_KEY` | (optional) From beehiiv → Settings → Integrations → API — every submitter gets synced and tagged `seller-lead`, plus `acquisitions-team` for everyone except an actual property Seller |
 | `BEEHIIV_PUBLICATION_ID` | (optional) From beehiiv → Settings → Publication (starts with `pub_`) |
 
 None of these ever appear in the public GitHub repo or the browser — they live

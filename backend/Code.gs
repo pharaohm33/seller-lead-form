@@ -15,7 +15,10 @@
  *                         synced to beehiiv, tagged 'seller-lead' plus a
  *                         role/state tag, so a real email only ever goes
  *                         through beehiiv, not this app's Google account.
- *                         See beehiivUpsertSubscriber near the bottom.
+ *                         Non-Seller roles also get 'acquisitions-team' so
+ *                         a welcome automation can reach the team without
+ *                         also emailing actual property Sellers.
+ *                         See leadTags/beehiivUpsertSubscriber near the bottom.
  */
 
 const LEADS_SHEET = 'Leads';
@@ -352,16 +355,30 @@ function submitLead(body) {
   forceTextValue(sheet, newRow, 'Referrer Phone', referrerPhone);
   forceTextValue(sheet, newRow, 'Zip', d.zip);
 
-  // Tagged with role + state on top of the flat 'seller-lead' tag, so a
-  // real send in beehiiv can be aimed at e.g. "wholesalers in Texas"
-  // instead of always blasting every submitter. Never blocks the actual
-  // lead submission if beehiiv is unreachable.
-  const tags = ['seller-lead'];
-  if (d.role) tags.push('role-' + slugifyTag(d.role));
-  if (d.state) tags.push('state-' + slugifyTag(d.state));
-  beehiivUpsertSubscriber(d.email, d.name, tags);
+  beehiivUpsertSubscriber(d.email, d.name, leadTags(d.role, d.state));
 
   return { ok: true, leadId: leadId };
+}
+
+// Shared by submitLead and earlyCaptureLead so their tag lists can never
+// drift apart. 'seller-lead' is the flat catch-all tag every submitter
+// gets. 'acquisitions-team' is the one that actually matters for an
+// automation: it's ONLY added when the submitter's own Role isn't
+// "Seller" (Bird Dog/Connector, Wholesaler, Realtor, Consultant,
+// Associate, Referral Source) -- someone submitting their own property
+// for sale is a customer, not a team member finding deals for us, and a
+// welcome-to-the-acquisitions-team email would just confuse them. Build a
+// beehiiv automation on "Segment action: enters segment" with the segment
+// condition "tags include acquisitions-team" to reach only the actual
+// team, never a Seller. role/state tags are still added for everyone
+// (Sellers included) so you can still segment/target by those on their
+// own if you ever need to.
+function leadTags(role, state) {
+  const tags = ['seller-lead'];
+  if (role) tags.push('role-' + slugifyTag(role));
+  if (role && role !== 'Seller') tags.push('acquisitions-team');
+  if (state) tags.push('state-' + slugifyTag(state));
+  return tags;
 }
 
 // Called from step 1 of the wizard (email + role, long before the rest of
@@ -375,9 +392,7 @@ function earlyCaptureLead(body) {
   const d = body.data || {};
   const email = String(d.email || '').trim().toLowerCase();
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, error: 'Invalid email.' };
-  const tags = ['seller-lead'];
-  if (d.role) tags.push('role-' + slugifyTag(d.role));
-  beehiivUpsertSubscriber(email, d.name, tags);
+  beehiivUpsertSubscriber(email, d.name, leadTags(d.role, ''));
   return { ok: true };
 }
 
