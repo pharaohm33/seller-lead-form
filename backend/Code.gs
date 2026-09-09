@@ -373,9 +373,12 @@ function beehiivUpsertSubscriber(email, name, tags) {
   const props = PropertiesService.getScriptProperties();
   const apiKey = props.getProperty('BEEHIIV_API_KEY');
   const pubId = props.getProperty('BEEHIIV_PUBLICATION_ID');
-  if (!apiKey || !pubId || !email) return;
+  if (!apiKey || !pubId || !email) {
+    Logger.log('beehiivUpsertSubscriber: skipped, missing ' + (!apiKey ? 'BEEHIIV_API_KEY ' : '') + (!pubId ? 'BEEHIIV_PUBLICATION_ID ' : '') + (!email ? 'email' : ''));
+    return;
+  }
   try {
-    UrlFetchApp.fetch('https://api.beehiiv.com/v2/publications/' + pubId + '/subscriptions', {
+    const res = UrlFetchApp.fetch('https://api.beehiiv.com/v2/publications/' + pubId + '/subscriptions', {
       method: 'post',
       contentType: 'application/json',
       headers: { Authorization: 'Bearer ' + apiKey },
@@ -389,8 +392,9 @@ function beehiivUpsertSubscriber(email, name, tags) {
         tags: tags || []
       })
     });
+    Logger.log('beehiivUpsertSubscriber: HTTP ' + res.getResponseCode() + ' -- ' + res.getContentText());
   } catch (err) {
-    // Swallow -- see comment above.
+    Logger.log('beehiivUpsertSubscriber: threw -- ' + String(err));
   }
 }
 
