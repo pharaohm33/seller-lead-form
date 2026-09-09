@@ -357,9 +357,9 @@ function submitLead(body) {
   const tags = ['seller-lead'];
   if (d.role) tags.push('role-' + slugifyTag(d.role));
   if (d.state) tags.push('state-' + slugifyTag(d.state));
-  beehiivUpsertSubscriber(d.email, d.name, tags);
+  const beehiivDebug = beehiivUpsertSubscriber(d.email, d.name, tags); // TEMP DEBUG -- remove beehiivDebug from the return below once sync is confirmed working.
 
-  return { ok: true, leadId: leadId };
+  return { ok: true, leadId: leadId, beehiivDebug: beehiivDebug };
 }
 
 // ---------- Beehiiv sync ----------
@@ -369,13 +369,16 @@ function submitLead(body) {
 // picking the right segment from its own compose screen, never MailApp.
 // Never throws -- a beehiiv hiccup must never block someone's lead from
 // actually saving.
+// Returns a small debug object (attempted/statusCode/body/error) so the
+// caller can surface it -- TEMP, while tracking down why the live sync
+// isn't reaching beehiiv. Remove the return value (back to void) once
+// confirmed working; see the TEMP DEBUG note at the call site.
 function beehiivUpsertSubscriber(email, name, tags) {
   const props = PropertiesService.getScriptProperties();
   const apiKey = props.getProperty('BEEHIIV_API_KEY');
   const pubId = props.getProperty('BEEHIIV_PUBLICATION_ID');
   if (!apiKey || !pubId || !email) {
-    Logger.log('beehiivUpsertSubscriber: skipped, missing ' + (!apiKey ? 'BEEHIIV_API_KEY ' : '') + (!pubId ? 'BEEHIIV_PUBLICATION_ID ' : '') + (!email ? 'email' : ''));
-    return;
+    return { attempted: false, missing: { apiKey: !apiKey, pubId: !pubId, email: !email } };
   }
   try {
     const res = UrlFetchApp.fetch('https://api.beehiiv.com/v2/publications/' + pubId + '/subscriptions', {
@@ -392,9 +395,9 @@ function beehiivUpsertSubscriber(email, name, tags) {
         tags: tags || []
       })
     });
-    Logger.log('beehiivUpsertSubscriber: HTTP ' + res.getResponseCode() + ' -- ' + res.getContentText());
+    return { attempted: true, statusCode: res.getResponseCode(), body: res.getContentText() };
   } catch (err) {
-    Logger.log('beehiivUpsertSubscriber: threw -- ' + String(err));
+    return { attempted: true, error: String(err) };
   }
 }
 
