@@ -369,6 +369,17 @@ function submitLead(body) {
 // picking the right segment from its own compose screen, never MailApp.
 // Never throws -- a beehiiv hiccup must never block someone's lead from
 // actually saving.
+// Select this function in the dropdown at the top of the editor and click
+// Run, once -- doGet/doPost never reach a UrlFetchApp call on their own
+// when run manually (doGet errors out immediately on the missing request
+// object), so the "allow external requests" permission prompt never
+// actually appears just from running those. This one guarantees it does.
+// Safe to run more than once; delete once the beehiiv sync is confirmed
+// working.
+function authorizeExternalRequests() {
+  UrlFetchApp.fetch('https://www.google.com');
+}
+
 // Returns a small debug object (attempted/statusCode/body/error) so the
 // caller can surface it -- TEMP, while tracking down why the live sync
 // isn't reaching beehiiv. Remove the return value (back to void) once
