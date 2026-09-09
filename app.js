@@ -3739,9 +3739,27 @@ function renderStep() {
   if (stepIndex > 0) container.querySelector("#back-btn").onclick = () => goTo(prevIndex(stepIndex));
   container.querySelector("#next-btn").onclick = () => {
     if (step.validate && !step.validate(container)) return;
+    maybeEarlyCaptureEmail();
     if (isLast) { submitLead(container); return; }
     goTo(nextIndex(stepIndex));
   };
+}
+
+// Syncs to beehiiv (tagged seller-lead + role, same as a real submission)
+// the moment email + role are known -- step 1, long before the 13-step
+// wizard actually finishes. Without this, anyone who abandons partway
+// through never gets captured at all. Fires once per session (harmless if
+// it somehow fired twice -- beehiiv's reactivate_existing just re-syncs
+// the same subscriber), fire-and-forget so a slow/failed network call
+// never blocks navigation.
+let earlyCaptureDone = false;
+function maybeEarlyCaptureEmail() {
+  if (earlyCaptureDone || !answers.email) return;
+  const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(answers.email);
+  if (!emailOk) return;
+  earlyCaptureDone = true;
+  rememberEmail(answers.email);
+  api("earlyCaptureLead", { data: { name: answers.name, email: answers.email, role: answers.role } }).catch(() => {});
 }
 
 function goTo(idx) {
@@ -3870,6 +3888,19 @@ function buildShareUrl() {
   return url.toString();
 }
 
+// Lightweight "remember me" -- no password, no account, just avoids
+// retyping the same email on a repeat visit from the same browser. Wrapped
+// in try/catch since localStorage can throw (private browsing, blocked
+// site data) and a missing value must never break the page.
+const REMEMBERED_EMAIL_KEY = "sms_email";
+function rememberEmail(email) {
+  if (!email) return;
+  try { localStorage.setItem(REMEMBERED_EMAIL_KEY, email); } catch (e) {}
+}
+function getRememberedEmail() {
+  try { return localStorage.getItem(REMEMBERED_EMAIL_KEY) || ""; } catch (e) { return ""; }
+}
+
 function restoreFromUrl() {
   const params = new URLSearchParams(window.location.search);
   const raw = params.get("resume"); // already decoded by URLSearchParams
@@ -3923,7 +3954,9 @@ document.getElementById("save-progress-btn").onclick = () => {
   }
 };
 
-restoreFromUrl();
+if (!restoreFromUrl() && !answers.email) {
+  answers.email = getRememberedEmail();
+}
 renderStep();
 
 /* ============================================================
@@ -3977,6 +4010,7 @@ document.getElementById("status-lookup-btn").onclick = async () => {
   const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   errEl.classList.toggle("show", !emailOk);
   if (!emailOk) return;
+  rememberEmail(email);
 
   statusSearchQuery = "";
   statusPage = 1;

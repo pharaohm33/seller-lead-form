@@ -111,6 +111,8 @@ function doPost(e) {
     switch (action) {
       case 'submitLead':
         return jsonOut(submitLead(body));
+      case 'earlyCaptureLead':
+        return jsonOut(earlyCaptureLead(body));
       case 'adminLogin':
         return jsonOut(adminLogin(body));
       case 'forgotPassword':
@@ -360,6 +362,23 @@ function submitLead(body) {
   beehiivUpsertSubscriber(d.email, d.name, tags);
 
   return { ok: true, leadId: leadId };
+}
+
+// Called from step 1 of the wizard (email + role, long before the rest of
+// the 13-step form) rather than waiting for a full submitLead -- someone
+// who abandons partway through still gets captured in beehiiv, which is
+// the actual point (previously they'd vanish with no record at all).
+// Deliberately does NOT write to the Leads sheet -- this is a real deal
+// submission's job, and a half-filled row there would just be confusing
+// data with none of the property/financial fields submitLead requires.
+function earlyCaptureLead(body) {
+  const d = body.data || {};
+  const email = String(d.email || '').trim().toLowerCase();
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, error: 'Invalid email.' };
+  const tags = ['seller-lead'];
+  if (d.role) tags.push('role-' + slugifyTag(d.role));
+  beehiivUpsertSubscriber(email, d.name, tags);
+  return { ok: true };
 }
 
 // ---------- Beehiiv sync ----------
