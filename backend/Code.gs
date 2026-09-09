@@ -357,9 +357,9 @@ function submitLead(body) {
   const tags = ['seller-lead'];
   if (d.role) tags.push('role-' + slugifyTag(d.role));
   if (d.state) tags.push('state-' + slugifyTag(d.state));
-  const beehiivDebug = beehiivUpsertSubscriber(d.email, d.name, tags); // TEMP DEBUG -- remove beehiivDebug from the return below once sync is confirmed working.
+  beehiivUpsertSubscriber(d.email, d.name, tags);
 
-  return { ok: true, leadId: leadId, beehiivDebug: beehiivDebug };
+  return { ok: true, leadId: leadId };
 }
 
 // ---------- Beehiiv sync ----------
@@ -369,28 +369,26 @@ function submitLead(body) {
 // picking the right segment from its own compose screen, never MailApp.
 // Never throws -- a beehiiv hiccup must never block someone's lead from
 // actually saving.
-// Select this function in the dropdown at the top of the editor and click
-// Run, once -- doGet/doPost never reach a UrlFetchApp call on their own
-// when run manually (doGet errors out immediately on the missing request
-// object), so the "allow external requests" permission prompt never
-// actually appears just from running those. This one guarantees it does.
-// Safe to run more than once; delete once the beehiiv sync is confirmed
-// working.
-function authorizeExternalRequests() {
-  UrlFetchApp.fetch('https://www.google.com');
-}
-
-// Returns a small debug object (attempted/statusCode/body/error) so the
-// caller can surface it -- TEMP, while tracking down why the live sync
-// isn't reaching beehiiv. Remove the return value (back to void) once
-// confirmed working; see the TEMP DEBUG note at the call site.
+// beehiiv's Create Subscription endpoint has NO field to set tags at
+// creation time (confirmed against their API reference -- 'tags' there is
+// response-only). Tags only apply through a SECOND call, POST
+// /subscriptions/{id}/tags, after the subscriber exists. Two requests,
+// both still swallowed on failure -- never blocks the actual lead from
+// saving. Splits a full name into First/Last since that's beehiiv's actual
+// built-in custom field naming (a plain 'Name' field silently doesn't
+// save -- it isn't a field beehiiv recognizes).
 function beehiivUpsertSubscriber(email, name, tags) {
   const props = PropertiesService.getScriptProperties();
   const apiKey = props.getProperty('BEEHIIV_API_KEY');
   const pubId = props.getProperty('BEEHIIV_PUBLICATION_ID');
-  if (!apiKey || !pubId || !email) {
-    return { attempted: false, missing: { apiKey: !apiKey, pubId: !pubId, email: !email } };
-  }
+  if (!apiKey || !pubId || !email) return;
+
+  const nameParts = String(name || '').trim().split(/\s+/);
+  const customFields = [];
+  if (nameParts[0]) customFields.push({ name: 'First Name', value: nameParts[0] });
+  if (nameParts.length > 1) customFields.push({ name: 'Last Name', value: nameParts.slice(1).join(' ') });
+
+  let subscriptionId = '';
   try {
     const res = UrlFetchApp.fetch('https://api.beehiiv.com/v2/publications/' + pubId + '/subscriptions', {
       method: 'post',
@@ -402,13 +400,26 @@ function beehiivUpsertSubscriber(email, name, tags) {
         reactivate_existing: true,
         send_welcome_email: false,
         utm_source: 'seller-lead-form',
-        custom_fields: name ? [{ name: 'Name', value: name }] : [],
-        tags: tags || []
+        custom_fields: customFields
       })
     });
-    return { attempted: true, statusCode: res.getResponseCode(), body: res.getContentText() };
+    const body = JSON.parse(res.getContentText());
+    subscriptionId = body && body.data && body.data.id;
   } catch (err) {
-    return { attempted: true, error: String(err) };
+    return;
+  }
+  if (!subscriptionId || !tags || !tags.length) return;
+
+  try {
+    UrlFetchApp.fetch('https://api.beehiiv.com/v2/publications/' + pubId + '/subscriptions/' + subscriptionId + '/tags', {
+      method: 'post',
+      contentType: 'application/json',
+      headers: { Authorization: 'Bearer ' + apiKey },
+      muteHttpExceptions: true,
+      payload: JSON.stringify({ tags: tags })
+    });
+  } catch (err) {
+    // Swallow -- the subscriber itself is already saved either way.
   }
 }
 
