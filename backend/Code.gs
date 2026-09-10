@@ -256,6 +256,35 @@ function sanitizePhone(phone) {
   return String(phone || '').replace(/\+/g, '').trim();
 }
 
+// Server-side mirror of the Deal Status MAO gate in app.js (cashDealOutcome.validate) -- the
+// frontend check alone doesn't stop anyone hitting this endpoint directly, so it has to be
+// enforced here too, not just in the wizard UI.
+function checkMaoCap(d) {
+  const isEligibleAssetType = d.assetType === 'Residential Property (1-4 units)'
+    || d.assetType === 'Commercial Property' || d.assetType === 'Land';
+  if (!isEligibleAssetType) return null;
+
+  const highestMao = Math.max(Number(d.maoCash) || 0, Number(d.maoHardMoney10) || 0, Number(d.maoHardMoney20) || 0);
+  if (!(highestMao > 0)) return null;
+
+  const isPreforeclosureAuction = d.dealCategory === 'Upcoming Auction/Preforeclosure Property';
+  const financingAvailable = !isPreforeclosureAuction && !d.sellerDeclinedSellerFinancing;
+  const cashRejected = isPreforeclosureAuction
+    ? !!d.subjectToOnlyPossible && d.subjectToOnlyPossible !== 'No'
+    : financingAvailable && !!d.sellerDeclinedCash;
+
+  const price = Number(d.sellerAcceptedPrice) || 0;
+  if (!price) return null;
+
+  if (!cashRejected && price >= highestMao) {
+    return 'Seller Accepted Price is at or above the highest Max Allowable Offer ($' + highestMao.toLocaleString() + ') on a cash deal -- this has to land below that number.';
+  }
+  if (cashRejected && !isPreforeclosureAuction && price > highestMao && d.sellerFinancingAccepted !== 'Yes') {
+    return 'Seller Accepted Price is above the highest Max Allowable Offer ($' + highestMao.toLocaleString() + ') -- a price this high only works as seller financing, and Seller Financing Accepted must be confirmed "Yes" before this can be submitted.';
+  }
+  return null;
+}
+
 function submitLead(body) {
   const d = body.data || {};
   const required = ['role', 'name', 'email', 'phone', 'street', 'city', 'state', 'zip', 'units', 'assetType', 'marketStatus'];
@@ -263,6 +292,11 @@ function submitLead(body) {
     if (d[key] === undefined || d[key] === null || d[key] === '') {
       return { ok: false, error: 'Missing required field: ' + key };
     }
+  }
+
+  const maoError = checkMaoCap(d);
+  if (maoError) {
+    return { ok: false, error: maoError };
   }
 
   const sheet = getSheet(LEADS_SHEET, LEAD_COLUMNS);
