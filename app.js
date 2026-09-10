@@ -3156,6 +3156,21 @@ If this suggests the property is worth meaningfully less than expected, say so p
               errorEl.classList.remove("show");
             }
           };
+        } else if (!isPreforeclosureAuction) {
+          // Cash being ruled out doesn't mean any price is now fair game -- once the asking price is
+          // above MAO, the only thing that makes the deal pencil is the seller actually agreeing to
+          // seller financing (20% down now, balance paid off within the payoff window). Without that
+          // confirmed with the seller/realtor, this is just a full-asking-price cash lead in disguise.
+          root.querySelector("#accepted-price-input").oninput = (e) => {
+            const price = Number(e.target.value) || 0;
+            const errorEl = root.querySelector("#accepted-price-error");
+            if (price && highestMao > 0 && price > highestMao && answers.sellerFinancingAccepted !== "Yes") {
+              errorEl.textContent = `This is above the highest Max Allowable Offer (${fmt(highestMao)}) -- a price this high only works as seller financing. Go back to Make Your Offers and confirm with the seller/realtor that they accept seller financing (20% down, balance paid off within the payoff window) before this can be submitted.`;
+              errorEl.classList.add("show");
+            } else {
+              errorEl.classList.remove("show");
+            }
+          };
         }
       }
     },
@@ -3191,6 +3206,14 @@ If this suggests the property is worth meaningfully less than expected, say so p
             : financingAvailable
             ? `This is at or above the highest Max Allowable Offer (${fmt(highestMao)}) -- keep negotiating toward that number. If the seller genuinely won't come down below it, let them know we'd need to do this as seller financing instead, then press the "Seller did not agree to a cash price below MAO" button above.`
             : `This is at or above the highest Max Allowable Offer (${fmt(highestMao)}) -- the seller already declined seller financing, so keep negotiating until this comes in below that number.`;
+          priceErrorEl.classList.add("show");
+          ok = false;
+        } else if (cashRejected && !isPreforeclosureAuction && highestMao > 0 && price > highestMao && answers.sellerFinancingAccepted !== "Yes") {
+          // Cash was ruled out, but that doesn't waive the MAO cap -- it just changes what has to be
+          // true to justify going above it. A price above MAO only pencils if the seller has actually
+          // agreed to seller financing (20% down, balance paid off within the payoff window); without
+          // that confirmed, this would submit as a full-price cash-equivalent lead with no backing math.
+          priceErrorEl.textContent = `This is above the highest Max Allowable Offer (${fmt(highestMao)}) -- a price this high only works as seller financing. Go back to Make Your Offers and confirm with the seller/realtor that they accept seller financing (20% down, balance paid off within the payoff window) before this can be submitted.`;
           priceErrorEl.classList.add("show");
           ok = false;
         } else {
