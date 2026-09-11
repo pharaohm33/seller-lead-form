@@ -35,7 +35,7 @@ const LEAD_COLUMNS = [
   'CMA Screenshot URLs',
   'Bottom Dollar Price', 'Cash Deal Notes', 'Wholesale Fee',
   'MAO Cash', 'MAO Hard Money (10% Down)', 'MAO Hard Money (20% Down)', 'MAO Breakdown',
-  'Under Contract', 'Seller Accepted Price',
+  'Under Contract', 'Seller Accepted Price', 'Full Tear-Down / Rebuild', 'Exclusive Agreement Through Due Diligence',
   'Seller Declined Cash', 'Seller Declined Seller Financing', 'Seller Financing Accepted', 'Seller Financing Negotiation Notes',
   'Preforeclosure Debt', 'Arrears Amount', 'Subject To Only Possible', 'Payoff Statement URLs', 'Payoff Statement Notes',
   'Loan Monthly Payment', 'Loan Monthly Principal', 'Loan Monthly Interest', 'Loan Monthly Taxes', 'Loan Monthly Insurance',
@@ -285,6 +285,30 @@ function checkMaoCap(d) {
   return null;
 }
 
+// Server-side mirror of the Deal Status Exclusive Agreement Through Due Diligence gate in app.js
+// (cashDealOutcome.validate) -- same reasoning as checkMaoCap above, this can't only live in the
+// wizard UI. Anyone but the seller themselves, submitting a Cash Deal on an on-market (FSBO or MLS)
+// property that isn't preforeclosure/auction, has to confirm the seller/listing agent agreed to at
+// least one of the two forms of agreement -- Exclusive, or (if the seller pushed back) the
+// Non-Exclusive fallback, where the seller can keep sourcing a buyer themselves but the listing still
+// has to come down through the end of due diligence, and they're free to relist if we don't perform --
+// before this can submit. Regardless of which form, the accepted price being low enough (at or below
+// 50% of ARV/As-Is Value, and not a full tear-down) only changes whether the listing itself is allowed
+// to stay up during that window, never whether some agreement is required.
+function checkOffMarketAgreement(d) {
+  if (d.role === 'Seller' || d.dealType !== 'Cash Deal') return null;
+  const isEligibleAssetType = d.assetType === 'Residential Property (1-4 units)'
+    || d.assetType === 'Commercial Property' || d.assetType === 'Land';
+  if (!isEligibleAssetType) return null;
+  if (d.marketStatus !== 'On-Market') return null;
+  if (d.dealCategory === 'Upcoming Auction/Preforeclosure Property') return null;
+
+  if (d.exclusiveDdAgreed !== 'Yes - Exclusive' && d.exclusiveDdAgreed !== 'Yes - Non-Exclusive') {
+    return 'This is an on-market cash deal submitted by someone other than the seller, so the seller/listing agent has to agree to an Exclusive Agreement Through Due Diligence (or the Non-Exclusive fallback) before this can be submitted.';
+  }
+  return null;
+}
+
 function submitLead(body) {
   const d = body.data || {};
   const required = ['role', 'name', 'email', 'phone', 'street', 'city', 'state', 'zip', 'units', 'assetType', 'marketStatus'];
@@ -297,6 +321,11 @@ function submitLead(body) {
   const maoError = checkMaoCap(d);
   if (maoError) {
     return { ok: false, error: maoError };
+  }
+
+  const offMarketError = checkOffMarketAgreement(d);
+  if (offMarketError) {
+    return { ok: false, error: offMarketError };
   }
 
   const sheet = getSheet(LEADS_SHEET, LEAD_COLUMNS);
@@ -339,6 +368,7 @@ function submitLead(body) {
     'MAO Cash': d.maoCash || '', 'MAO Hard Money (10% Down)': d.maoHardMoney10 || '',
     'MAO Hard Money (20% Down)': d.maoHardMoney20 || '', 'MAO Breakdown': d.maoBreakdown || '',
     'Under Contract': d.underContract || '', 'Seller Accepted Price': d.sellerAcceptedPrice || '',
+    'Full Tear-Down / Rebuild': d.isTearDown || '', 'Exclusive Agreement Through Due Diligence': d.exclusiveDdAgreed || '',
     'Seller Declined Cash': d.sellerDeclinedCash || '', 'Seller Declined Seller Financing': d.sellerDeclinedSellerFinancing || '',
     'Seller Financing Accepted': d.sellerFinancingAccepted || '', 'Seller Financing Negotiation Notes': d.sellerFinancingNegotiationNotes || '',
     'Preforeclosure Debt': d.preforeclosureDebt || '', 'Arrears Amount': d.arrearsAmount || '',

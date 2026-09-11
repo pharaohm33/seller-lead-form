@@ -1029,8 +1029,9 @@ const steps = [
             sale, not used as a raw historical number — Google AI will handle that math.</p>
             <p class="hint">Only fall back to your own hand-picked comps if AI Mode can't find anything usable —
             same zoning/topography/access rules apply, and try to match similar acreage and land type. Note what
-            you found in Notes below. Lean toward the lowest comps or an average — never cherry-pick the highest
-            value in the area, since that usually doesn't sell.</p>
+            you found in Notes below. Anchor on the <strong>lowest comp(s) that are also nearest</strong> to the
+            property — never average across every comp you found, and never cherry-pick the highest value in
+            the area, since that usually doesn't sell.</p>
           ` : isCommercial ? "" : `
             <p class="hint"><strong>Comps must be within a 1-mile radius of the property — no exceptions.</strong>
             Comps farther out drastically reduce the chance this deal actually closes, so be very cautious about
@@ -1038,8 +1039,9 @@ const steps = [
             ideally <strong>under 6 months old</strong> — the fresher the better.</p>
             <p class="hint">Only fall back to your own hand-picked comps if AI Mode can't find anything usable —
             same rules apply (within 1 mile, ideally under 6 months old, same beds, same baths, similar square
-            footage), and note what you found in Notes below. Lean toward the lowest comps or an average — never
-            cherry-pick the highest ARV in the area, since that usually doesn't sell.</p>
+            footage), and note what you found in Notes below. Anchor on the <strong>lowest comp(s) that are also
+            nearest</strong> to the property — never average across every comp you found, and never cherry-pick
+            the highest ARV in the area, since that usually doesn't sell.</p>
           `}
 
           ${isCommercial ? `
@@ -1121,9 +1123,9 @@ const steps = [
         <input type="number" id="arv-input" placeholder="$">
         <div class="error-text" id="arv-error">Required.</div>
         ${hasCompsWorkflow ? `
-          <p class="hint">Google AI will usually give you a range here rather than one number -- enter its
-          <strong>single most likely estimate</strong> based on the data it found, not the high or low end,
-          unless you have a specific reason to lean toward one side.</p>
+          <p class="hint">The prompt below already tells Google AI to anchor its estimate on the
+          <strong>lowest comp(s) nearest to the property</strong>, rather than a straight average across
+          every comp it finds — enter that number here, not a blended or high-end figure.</p>
         ` : ""}
         ${!hasCompsWorkflow ? `
           <p class="hint">${googleAiHow}, copy a listing link if you have one (or just use the address), then ask:
@@ -1229,6 +1231,17 @@ const steps = [
           <div class="banner info" id="rehab-average-banner" hidden></div>
 
           ${hasCompsWorkflow ? `<div class="banner info" id="as-is-value-banner" hidden></div>` : ""}
+
+          ${!isSellerFinancing && !isPreforeclosureAuction && isOnMarket ? `
+            <label class="field-label" style="margin-top:16px;">Is this a full tear-down / rebuild? <span class="req">*</span>
+              <span class="small-muted">(the structure comes down entirely -- not just a heavy gut/reno.
+              This determines whether the 50% ARV off-market exception on the Deal Status step later
+              applies to this deal.)</span></label>
+            <div class="choice-group" id="tear-down-group">
+              ${["Yes", "No"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
+            </div>
+            <div class="error-text" id="tear-down-error">Please choose one.</div>
+          ` : ""}
         ` : ""}
 
         <label class="field-label">County Assessed Value <span class="small-muted">(optional, if known)</span></label>
@@ -1297,6 +1310,9 @@ const steps = [
       if (!isLand) {
         root.querySelector("#rehab-low-input").value = answers.rehabEstimateLow || "";
         root.querySelector("#rehab-high-input").value = answers.rehabEstimateHigh || "";
+        if (!isSellerFinancing && !isPreforeclosureAuction && isOnMarket) {
+          bindChoiceGroup(root, "#tear-down-group", "isTearDown");
+        }
       }
       root.querySelector("#assessed-value-input").value = answers.countyAssessedValue || "";
       if (!isPreforeclosureAuction) {
@@ -1653,7 +1669,7 @@ For each comp, list:
 
 After listing the comps, calculate and show your work:
 1. Acreage Difference %: (Average Comp Acreage - Subject Acreage) / Subject Acreage x 100
-2. Estimated As-Is Value: Average (time-adjusted) Price per Acre of the comps x Subject Acreage — give a final range, plus your single most likely estimate within that range based on the data you found, not just the range itself.
+2. Estimated As-Is Value: rank the qualifying comps by distance from the subject, then anchor on the lowest (time-adjusted) Price per Acre among the nearest ones — do not dilute that with a straight average across every comp you found, since a farther or pricier comp overstates what this specific parcel is worth. State clearly which comp(s) you anchored on. Estimated As-Is Value = that lowest-and-nearest Price per Acre x Subject Acreage — give a final range, plus your single most likely estimate within that range, still favoring the low end unless you have a specific reason not to.
 
 If the value comes out lower than what you might initially expect, say so plainly — that's an important finding, not something to smooth over.`
 : isCommercial
@@ -1686,14 +1702,14 @@ For each comp, list:
 
 After listing the comps, calculate BOTH approaches below and reconcile them if they meaningfully disagree:
 
-1. Sales Comparison Approach: ${matchByUnitsOnly
-  ? `Average Sale Price Per Unit of the comps x Subject Unit Count (${answers.units || "[UNIT COUNT]"}) = Estimated Value Range, plus your single most likely estimate within that range based on the data you found, not just the range itself.`
-  : `Average Price per Square Foot (or Acre) of the comps x Subject Size = Estimated Value Range, plus your single most likely estimate within that range based on the data you found, not just the range itself.`}
+1. Sales Comparison Approach: rank the qualifying comps by distance from the subject, then anchor on the lowest ${matchByUnitsOnly ? "Price Per Unit" : "Price per Square Foot (or Acre)"} among the nearest ones — do not dilute that with a straight average across every comp you found, since a farther or pricier comp overstates what this specific property is worth. State clearly which comp(s) you anchored on. ${matchByUnitsOnly
+  ? `Estimated Value = that lowest-and-nearest Price Per Unit x Subject Unit Count (${answers.units || "[UNIT COUNT]"})`
+  : `Estimated Value = that lowest-and-nearest Price per Square Foot (or Acre) x Subject Size`} — give a final range, plus your single most likely estimate within that range, still favoring the low end unless you have a specific reason not to.
 2. Income Approach: ${liveNOI
-  ? `Using the subject's current NOI of $${Number(liveNOI).toLocaleString()}${occupancyPart && answers.commercialOccupancyStatus !== "Fully Occupied" ? ` (in-place NOI — the property is only ${occupancyPart.toLowerCase()}, not fully occupied)` : ""} and the average cap rate from the sold comps above, calculate Estimated Value = NOI ÷ Average Comp Cap Rate.${occupancyPart && answers.commercialOccupancyStatus !== "Fully Occupied" ? ` Since it isn't fully occupied, also estimate a stabilized NOI at full occupancy using typical market rents for this asset type and size, and show that as a second Income Approach value alongside the in-place one.` : ""} If this NOI implies unusually low operating expenses for a property like this in this market (a suspiciously high margin), flag that clearly as a possible red flag -- seller-reported NOI is often optimistic and may be missing real costs like insurance, maintenance, or property management -- and state what a more realistic NOI would likely be instead.`
-  : `We don't have a confirmed current NOI for this property${occupancyPart ? ` (currently ${occupancyPart.toLowerCase()})` : ""}. If you can reasonably estimate one from market rents typical for this asset type and size${occupancyPart && answers.commercialOccupancyStatus !== "Fully Occupied" ? `, accounting for that occupancy level` : ""}, calculate an Income Approach value using that estimate and the average cap rate from the sold comps, but flag it clearly as an estimate rather than confirmed income. When estimating expenses to derive that NOI, flag plainly if operating costs (taxes and insurance especially) in this specific market tend to run meaningfully higher or lower than a typical 35 to 45% expense ratio, and state your single most likely NOI estimate, not just a range. Otherwise, lean primarily on the Sales Comparison Approach above since there's no reliable income data to anchor an Income Approach.`}
+  ? `Using the subject's current NOI of $${Number(liveNOI).toLocaleString()}${occupancyPart && answers.commercialOccupancyStatus !== "Fully Occupied" ? ` (in-place NOI — the property is only ${occupancyPart.toLowerCase()}, not fully occupied)` : ""} and the highest cap rate among the nearest sold comps above (the most conservative, lowest-value read, not an average across every comp), calculate Estimated Value = NOI ÷ that cap rate.${occupancyPart && answers.commercialOccupancyStatus !== "Fully Occupied" ? ` Since it isn't fully occupied, also estimate a stabilized NOI at full occupancy using typical market rents for this asset type and size, and show that as a second Income Approach value alongside the in-place one.` : ""} If this NOI implies unusually low operating expenses for a property like this in this market (a suspiciously high margin), flag that clearly as a possible red flag -- seller-reported NOI is often optimistic and may be missing real costs like insurance, maintenance, or property management -- and state what a more realistic NOI would likely be instead.`
+  : `We don't have a confirmed current NOI for this property${occupancyPart ? ` (currently ${occupancyPart.toLowerCase()})` : ""}. If you can reasonably estimate one from market rents typical for this asset type and size${occupancyPart && answers.commercialOccupancyStatus !== "Fully Occupied" ? `, accounting for that occupancy level` : ""}, calculate an Income Approach value using that estimate and the highest cap rate among the nearest sold comps (not an average across every comp), but flag it clearly as an estimate rather than confirmed income. When estimating expenses to derive that NOI, flag plainly if operating costs (taxes and insurance especially) in this specific market tend to run meaningfully higher or lower than a typical 35 to 45% expense ratio, and state your single most likely NOI estimate, not just a range. Otherwise, lean primarily on the Sales Comparison Approach above since there's no reliable income data to anchor an Income Approach.`}
 
-If the two approaches disagree by more than roughly 15%, say so plainly and explain the likely reason (below-market in-place rents, deferred capital expenditures, a below-market lease in place, etc.) — that's an important finding, not something to smooth over. Then give one final reconciled ARV: your single most likely estimate, not just a range, weighing both approaches.`
+If the two approaches disagree by more than roughly 15%, say so plainly and explain the likely reason (below-market in-place rents, deferred capital expenditures, a below-market lease in place, etc.) — that's an important finding, not something to smooth over. Then give one final reconciled ARV: your single most likely estimate, not just a range, weighing both approaches but favoring the more conservative (lower) one unless the higher figure is clearly better supported by the data.`
 : `Act as a professional real estate data analyst. Explain your math simply and avoid real estate jargon — I have no real estate experience.
 
 Find recent comparable sales (comps) and an estimated After Repair Value (ARV) for this property:
@@ -1717,7 +1733,7 @@ For each comp, list:
 
 After listing the comps, calculate and show your work:
 1. Square Footage Difference %: (Average Comp SqFt - Subject SqFt) / Subject SqFt x 100
-2. Estimated ARV: Average Price per Square Foot of the comps x Subject SqFt — give a final range, plus your single most likely estimate within that range based on the data you found, not just the range itself.
+2. Estimated ARV: rank the qualifying comps by distance from the subject, then anchor on the lowest Price per Square Foot among the nearest ones — do not dilute that with a straight average across every comp you found, since a farther or pricier comp overstates what this specific property will actually sell for. State clearly which comp(s) you anchored on. Estimated ARV = that lowest-and-nearest Price per Square Foot x Subject SqFt — give a final range, plus your single most likely estimate within that range, still favoring the low end unless you have a specific reason not to.
 
 If the ARV comes out lower than what a bank's automated home value estimate would show, say so plainly — that's an important finding, not something to smooth over.`;
 
@@ -1734,8 +1750,8 @@ What is the average sold cap rate for multifamily properties in ${cityState} (or
 
 Give me:
 1. The market cap rate range you're using and where it comes from.
-2. The implied property value at both ends of that range (NOI divided by cap rate), as a range, not one number -- plus your single most likely estimate within that range based on the data you found.
-3. If you're aware of any specific recent multifamily sales nearby, mention them for context, but don't force a comp if you can't find a genuinely comparable one — a bad comp is worse than no comp.
+2. The implied property value at both ends of that range (NOI divided by cap rate), as a range, not one number -- plus your single most likely estimate, favoring the higher end of the cap rate range (the more conservative, lower-value read) unless the data clearly supports a lower cap rate.
+3. If you're aware of any specific recent multifamily sales nearby, mention them for context, and if you find genuinely comparable ones, anchor toward whichever is both lowest-priced and nearest rather than a straight average -- but don't force a comp if you can't find a genuinely comparable one, a bad comp is worse than no comp.
 4. ${liveNOI
   ? `If this NOI implies unusually low operating expenses for a property like this in this market (a suspiciously high margin), flag that clearly as a possible red flag -- seller-reported NOI is often optimistic and may be missing real costs like insurance, maintenance, or property management -- and state what a more realistic NOI would likely be instead.`
   : `A flag if operating expenses (taxes and insurance especially) in this specific market tend to run higher or lower than a typical 35 to 45% expense ratio, and your single most likely NOI estimate, not just a range.`}
@@ -1968,6 +1984,12 @@ If this suggests the property is worth meaningfully less than expected, say so p
           toggleError(root, "#commercial-photos-error", !hasPhotos);
           if (!hasPhotos) ok = false;
         }
+      }
+      // Feeds the Deal Status step's off-market/50%-ARV exception logic -- a full tear-down never
+      // qualifies for that exception, so it has to be known before that step can gate correctly.
+      if (!isLand && !isSellerFinancing && !isPreforeclosureAuction && answers.marketStatus === "On-Market") {
+        toggleError(root, "#tear-down-error", !answers.isTearDown);
+        if (!answers.isTearDown) ok = false;
       }
       return ok;
     }
@@ -2862,6 +2884,11 @@ If this suggests the property is worth meaningfully less than expected, say so p
       const addressLine = `${answers.street || ""}, ${answers.city || ""}, ${answers.state || ""} ${answers.zip || ""}`.trim();
       const sellerName = answers.sellerContactName || "[Name]";
       const isMultifamily5Plus = Number(answers.units) > 4;
+      // Drives whether the "who's the buyer / how does this get sold" FAQ script below shows -- that
+      // script's whole pitch (exclusive agreement through due diligence so we can shop it to our buyer
+      // network) only makes sense for a listed property. An already off-market property was never
+      // something to "take off market" in the first place.
+      const isOnMarket = answers.marketStatus === "On-Market";
       // This whole "fix and flip" seller-financing structure (down now, payoff within a year or two)
       // assumes the property needs work. A turnkey property with no rehab gets a different, longer-
       // horizon structure instead -- rehabEstimate is already 0/blank whenever nothing was entered.
@@ -2947,9 +2974,18 @@ If this suggests the property is worth meaningfully less than expected, say so p
             + "isn't enough, let me know what you have in mind and we'll review it and get back to you."
           : "Good question, it really depends on the terms we land on together, typically 20 to 50% down with "
             + "a 5 to 15 year payoff. Let me know what you're looking for and we'll put a real offer together for you.";
-        const mfCashScript = "We work with a partner who has a network of over 6 million buyers. That's how "
-          + "we'd get this property sold. It wouldn't be exclusive, so you're free to keep marketing "
-          + "and selling it yourself while we bring a buyer forward.";
+        // Same answer for cash whether they're just asking who the buyer is, or specifically pressing
+        // on whether we're the end buyer -- one variable, used in both spots below.
+        const cashBuyerScript = "We have a database of over 6 million buyers we can send this deal to "
+          + "once we agree on cash terms together.";
+        const whoBuyerScript = cashBuyerScript;
+        const endBuyerScript = cashBuyerScript;
+        // Same "only if asked" treatment as endBuyerScript above, for the seller financing side of the
+        // deal: the seller carries the financing, while the buyer taking on the property separately
+        // gets an investment loan against it, and we already have an end buyer lined up ready to close.
+        const financeEndBuyerScript = "For seller financing, you'd be carrying it, and the buyer taking "
+          + "over the property would be getting an investment loan on it. We already have an end buyer "
+          + "ready to close on it right now.";
         const mfFinanceScript = "For seller financing, we already have a specific buyer ready to go.";
 
         wrap.innerHTML = `
@@ -2974,18 +3010,32 @@ If this suggests the property is worth meaningfully less than expected, say so p
           ` : `
             <p class="hint">Enter an ARV in ${answers.dealType === "Cash Deal" ? "Cash Deal Details" : "Property Value & Repair Research"} to generate an offer text.</p>
           `}
-          ${isMultifamily5Plus && (!cashDeclined || !financeDeclined) ? `
+          ${isOnMarket && (!cashDeclined || !financeDeclined) ? `
             <div style="margin-top:16px;">
-              <p class="hint"><strong>If they ask how this actually gets sold (5+ unit deals):</strong></p>
+              <p class="hint"><strong>If they ask who the buyer is:</strong></p>
               ${!cashDeclined ? `
-                <p class="hint"><span class="small-muted">Cash: "${mfCashScript}"</span>
-                <br><button type="button" class="btn secondary" id="mf-cash-script-copy-btn" style="margin-top:6px;">Copy Text</button></p>
+                <p class="hint"><span class="small-muted">Cash: "${whoBuyerScript}"</span>
+                <br><button type="button" class="btn secondary" id="who-buyer-script-copy-btn" style="margin-top:6px;">Copy Text</button></p>
               ` : ""}
               ${!financeDeclined ? `
                 <p class="hint" style="margin-top:${!cashDeclined ? "10px" : "0"};"><span class="small-muted">Seller Financing: "${mfFinanceScript}"</span>
                 <br><button type="button" class="btn secondary" id="mf-finance-script-copy-btn" style="margin-top:6px;">Copy Text</button></p>
               ` : ""}
             </div>
+            ${(!cashDeclined || !financeDeclined) ? `
+              <div style="margin-top:12px;">
+                <p class="hint"><strong>Only if they specifically ask whether we're the end buyer</strong>
+                (don't volunteer this otherwise):</p>
+                ${!cashDeclined ? `
+                  <p class="hint"><span class="small-muted">Cash: "${endBuyerScript}"</span>
+                  <br><button type="button" class="btn secondary" id="end-buyer-script-copy-btn" style="margin-top:6px;">Copy Text</button></p>
+                ` : ""}
+                ${!financeDeclined ? `
+                  <p class="hint" style="margin-top:${!cashDeclined ? "10px" : "0"};"><span class="small-muted">Seller Financing: "${financeEndBuyerScript}"</span>
+                  <br><button type="button" class="btn secondary" id="finance-end-buyer-script-copy-btn" style="margin-top:6px;">Copy Text</button></p>
+                ` : ""}
+              </div>
+            ` : ""}
           ` : ""}
           ${showFinanceFollowup ? `
             <p class="hint" style="margin-top:16px;"><strong>If they ask how much down:</strong> don't commit
@@ -3013,7 +3063,9 @@ If this suggests the property is worth meaningfully less than expected, say so p
         };
         wireCopyPromptButton(wrap, "#offer-script-copy-btn", () => script);
         wireCopyPromptButton(wrap, "#down-payment-script-copy-btn", () => downPaymentResponse);
-        wireCopyPromptButton(wrap, "#mf-cash-script-copy-btn", () => mfCashScript);
+        wireCopyPromptButton(wrap, "#who-buyer-script-copy-btn", () => whoBuyerScript);
+        wireCopyPromptButton(wrap, "#end-buyer-script-copy-btn", () => endBuyerScript);
+        wireCopyPromptButton(wrap, "#finance-end-buyer-script-copy-btn", () => financeEndBuyerScript);
         wireCopyPromptButton(wrap, "#mf-finance-script-copy-btn", () => mfFinanceScript);
         if (showFinanceFollowup) {
           bindChoiceGroup(wrap, "#sf-accept-group", "sellerFinancingAccepted");
@@ -3065,6 +3117,20 @@ If this suggests the property is worth meaningfully less than expected, say so p
       const cashRejected = isPreforeclosureAuction
         ? !!answers.subjectToOnlyPossible && answers.subjectToOnlyPossible !== "No"
         : financingAvailable && !!answers.sellerDeclinedCash;
+
+      // Anyone but the seller themselves selling this as a cash deal, on an on-market (FSBO or MLS)
+      // property that isn't preforeclosure/auction, needs the seller/listing agent to agree to an
+      // Exclusive Agreement Through Due Diligence before this can submit: the listing comes off
+      // market while we're in due diligence, we close if we proceed past due diligence, and the
+      // seller is free to go find another buyer if we don't. The only way around that agreement is
+      // landing the accepted price at or below 50% of ARV (As-Is Value for land) -- and that
+      // exception never applies to a full tear-down, set on Cash Deal Details.
+      const isOnMarket = answers.marketStatus === "On-Market";
+      const needsExclusiveDdAgreement = isEligibleAssetType && isOnMarket && !isPreforeclosureAuction;
+      const valueLabel = answers.assetType === "Land" ? "As-Is Value" : "ARV";
+      const arvBase = Number(answers.asIsValue) || Number(answers.arv) || 0;
+      const halfArv = arvBase * 0.5;
+      const isTearDown = answers.isTearDown === "Yes";
 
       root.innerHTML = `
         <h2 class="step-title">Deal Status</h2>
@@ -3126,9 +3192,63 @@ If this suggests the property is worth meaningfully less than expected, say so p
         <div class="error-text" id="accepted-price-error"></div>
         <p class="hint">Once you enter ${cashRejected ? "an asking price" : "an accepted price"}, admin will reach out to you with next steps for
         sending a formal offer (assuming it's not already under contract).</p>
+
+        ${needsExclusiveDdAgreement ? `
+          <div class="banner warn" id="exclusive-dd-banner" style="margin-top:16px;"></div>
+          <label class="field-label" style="margin-top:12px;">Has the seller/listing agent agreed to an
+            Exclusive Agreement Through Due Diligence? <span class="req">*</span></label>
+          <div class="choice-group" id="exclusive-dd-group">
+            <button type="button" class="choice-btn" data-value="Yes - Exclusive">Yes, Exclusive</button>
+            <button type="button" class="choice-btn" data-value="Yes - Non-Exclusive">Yes, Non-Exclusive (fallback)</button>
+            <button type="button" class="choice-btn" data-value="No">No</button>
+          </div>
+          <p class="hint">If they push back too hard on full exclusivity, fall back to
+            <strong>Non-Exclusive</strong>: the seller can keep seeking a buyer on their own, but the
+            property still has to come off market (or off MLS) through the end of our due diligence
+            period. If we don't bring a buyer by then, they're free to relist it. Either way, the
+            seller's own listing agent stays involved and still gets paid by the seller as usual --
+            nothing here cuts the listing agent out or blocks their commission.</p>
+          <div class="error-text" id="exclusive-dd-error">Required before this can be submitted.</div>
+        ` : ""}
       `;
       root.querySelector("#accepted-price-input").value = answers.sellerAcceptedPrice || "";
       bindChoiceGroup(root, "#under-contract-group", "underContract");
+      if (needsExclusiveDdAgreement) {
+        bindChoiceGroup(root, "#exclusive-dd-group", "exclusiveDdAgreed");
+        // Every on-market cash deal here needs at least the non-exclusive fallback confirmed -- close
+        // if we proceed past due diligence, seller's free to source another buyer (Exclusive) or relist
+        // it (Non-Exclusive) if we don't. What varies by price/tear-down is only whether the listing
+        // itself has to come down for that window (below), never whether some form of agreement, and
+        // the listing coming down, is required.
+        const updateExclusiveDdUi = () => {
+          const price = Number(root.querySelector("#accepted-price-input").value) || 0;
+          const staysListed = !isTearDown && arvBase > 0 && price > 0 && price <= halfArv;
+          const banner = root.querySelector("#exclusive-dd-banner");
+          banner.className = "banner warn";
+          banner.innerHTML = `<strong>This needs an Exclusive Agreement Through Due Diligence (or the
+            Non-Exclusive fallback below).</strong> Since this is an on-market (FSBO or MLS) cash deal
+            and you're not the seller listing this directly, the seller/listing agent has to agree that
+            we're the buyer through our due diligence period, either exclusively or (if they push back)
+            non-exclusively. If we proceed past due diligence, we close. If we don't proceed, the seller
+            is free to go source another buyer (Exclusive) or relist it (Non-Exclusive).
+            The seller keeps working with their own listing agent through all of this in every scenario
+            -- this never cuts the listing agent out or blocks their commission from the seller, and if
+            we don't bring a cash buyer within due diligence, the listing agent is free to put it back
+            on MLS.
+            ${staysListed
+              ? ` The accepted price (${fmt(price)}) is at or below 50% of ${valueLabel} (${fmt(halfArv)}),
+                so the listing itself can stay up (FSBO/MLS) during due diligence -- an agreement with us
+                still has to be confirmed below either way.`
+              : isTearDown
+              ? ` This is a full tear-down, so the 50% ${valueLabel} exception doesn't apply -- the
+                listing has to come off market entirely during due diligence, no exceptions.`
+              : ` The listing has to come off market entirely during due diligence, unless the accepted
+                price comes down to 50% of ${valueLabel} or below (${fmt(halfArv)}), in which case it can
+                stay listed instead.`}`;
+        };
+        root.querySelector("#accepted-price-input").addEventListener("input", updateExclusiveDdUi);
+        updateExclusiveDdUi();
+      }
 
       if (isEligibleAssetType && highestMao > 0) {
         if (isPreforeclosureAuction || financingAvailable) {
@@ -3222,6 +3342,17 @@ If this suggests the property is worth meaningfully less than expected, say so p
       } else {
         priceErrorEl.classList.remove("show");
       }
+
+      // See render()'s comment above -- every on-market cash deal here needs at least the Non-Exclusive
+      // fallback confirmed, regardless of whether the 50% ARV price lets the listing itself stay up.
+      // That price only changes whether the listing comes down, never whether some form of agreement
+      // (Exclusive or Non-Exclusive) is required.
+      const isOnMarket = answers.marketStatus === "On-Market";
+      if (isEligibleAssetType && isOnMarket && !isPreforeclosureAuction) {
+        const agreed = answers.exclusiveDdAgreed === "Yes - Exclusive" || answers.exclusiveDdAgreed === "Yes - Non-Exclusive";
+        toggleError(root, "#exclusive-dd-error", !agreed);
+        if (!agreed) ok = false;
+      }
       return ok;
     }
   },
@@ -3314,6 +3445,14 @@ function buildAnswerRows() {
           ["Under Contract", answers.underContract || "—"],
           ["Seller Accepted Price", answers.sellerAcceptedPrice || "—"]
         );
+        if (answers.assetType !== "Land" && answers.marketStatus === "On-Market"
+          && answers.dealCategory !== "Upcoming Auction/Preforeclosure Property") {
+          rows.push(["Full Tear-Down / Rebuild", answers.isTearDown || "—"]);
+        }
+        if (answers.marketStatus === "On-Market" && answers.dealCategory !== "Upcoming Auction/Preforeclosure Property"
+          && (answers.assetType === "Residential Property (1-4 units)" || answers.assetType === "Commercial Property" || answers.assetType === "Land")) {
+          rows.push(["Exclusive Agreement Through Due Diligence", answers.exclusiveDdAgreed || "—"]);
+        }
       }
       // Make Your Offers runs for Cash Deal and Seller Financing alike (see dualOfferTemplates'
       // skip()) so these fields, and the Highest MAO it's built around, need to show for both --
@@ -3816,6 +3955,7 @@ async function submitLead(container) {
         maoCash: answers.maoCash, maoHardMoney10: answers.maoHardMoney10, maoHardMoney20: answers.maoHardMoney20,
         maoBreakdown: answers.maoBreakdown,
         underContract: answers.underContract, sellerAcceptedPrice: answers.sellerAcceptedPrice,
+        isTearDown: answers.isTearDown || "", exclusiveDdAgreed: answers.exclusiveDdAgreed || "",
         sellerDeclinedCash: answers.sellerDeclinedCash ? "Yes" : "",
         sellerDeclinedSellerFinancing: answers.sellerDeclinedSellerFinancing ? "Yes" : "",
         sellerFinancingAccepted: answers.sellerFinancingAccepted, sellerFinancingNegotiationNotes: answers.sellerFinancingNegotiationNotes,
@@ -4127,6 +4267,14 @@ function buildLeadFields(lead) {
           ["Under Contract", lead["Under Contract"] || "—"],
           ["Seller Accepted Price", lead["Seller Accepted Price"] || "—"]
         );
+        if (lead["Asset Type"] !== "Land" && lead["Market Status"] === "On-Market"
+          && lead["Deal Category"] !== "Upcoming Auction/Preforeclosure Property") {
+          fields.push(["Full Tear-Down / Rebuild", lead["Full Tear-Down / Rebuild"] || "—"]);
+        }
+        if (lead["Market Status"] === "On-Market" && lead["Deal Category"] !== "Upcoming Auction/Preforeclosure Property"
+          && (lead["Asset Type"] === "Residential Property (1-4 units)" || lead["Asset Type"] === "Commercial Property" || lead["Asset Type"] === "Land")) {
+          fields.push(["Exclusive Agreement Through Due Diligence", lead["Exclusive Agreement Through Due Diligence"] || "—"]);
+        }
       }
       // Make Your Offers runs for Cash Deal and Seller Financing alike, so these fields (and the
       // Highest MAO it's built around) need to show for both -- previously gated to Cash Deal only,
@@ -4897,15 +5045,24 @@ function openOutreachSop() {
       [Address] is for sale. Would you be open to $[cash] cash to purchase outright, with a 30-day close
       (our requirement for deals like this, though we have closed in under 2 weeks before)?"
     </div>
-    <p class="hint" style="margin-top:14px;"><strong>5+ unit multifamily — if they ask how this actually
-    gets sold:</strong></p>
+    <p class="hint" style="margin-top:14px;"><strong>If they ask who the buyer is:</strong></p>
     <div class="banner info">
-      <strong>Cash:</strong> "We work with a partner who has a network of over 6 million buyers. That's
-      how we'd get this property sold. It wouldn't be exclusive, so you're free to keep marketing
-      and selling it yourself while we bring a buyer forward."
+      <strong>Cash:</strong> "We have a database of over 6 million buyers we can send this deal to once
+      we agree on cash terms together."
     </div>
     <div class="banner info" style="margin-top:10px;">
       <strong>Seller financing:</strong> "For seller financing, we already have a specific buyer ready to go."
+    </div>
+    <p class="hint" style="margin-top:14px;"><strong>Only if they specifically ask whether we're the end
+    buyer</strong> (don't volunteer this otherwise, same answer as above for cash):</p>
+    <div class="banner info">
+      <strong>Cash:</strong> "We have a database of over 6 million buyers we can send this deal to once
+      we agree on cash terms together."
+    </div>
+    <div class="banner info" style="margin-top:10px;">
+      <strong>Seller financing:</strong> "For seller financing, you'd be carrying it, and the buyer
+      taking over the property would be getting an investment loan on it. We already have an end buyer
+      ready to close on it right now."
     </div>
 
     <h3 style="margin-top:22px;">5. If they ask "how much down?"</h3>
