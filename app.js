@@ -4902,9 +4902,9 @@ function openOutreachSop() {
   panel.innerHTML = `
     <button class="link-btn" id="close-outreach-sop-btn" style="float:right;">Close ✕</button>
     <h2>Acquisition SOP</h2>
-    <p class="small-muted">Two outreach tracks, run alongside each other. Option 1 (preforeclosure
+    <p class="small-muted">Two outreach tracks, run alongside each other. Option 2 (preforeclosure
     auction) has the higher probability of getting accepted and closing fast — prioritize it first
-    each day, then fill remaining volume with Option 2.</p>
+    each day, then fill remaining volume with Option 1.</p>
 
     <div class="banner info"><strong>Batch workflow, both tracks:</strong> send your day's outreach
     texts to your <em>entire</em> list first, before opening the wizard for any single property —
@@ -4916,72 +4916,7 @@ function openOutreachSop() {
     later in the day, reopen that <em>same</em> saved link again and repeat — no need to retype your
     own info each time.</div>
 
-    <h2 style="margin-top:28px;">Option 1: Preforeclosure Auction Soon — High Deal Probability Of Being
-    Accepted and Closing</h2>
-    <p class="small-muted">Cash offer if there's equity to work with; a subject-to pitch (never a
-    dollar figure) if there isn't. <strong>No standard seller-financing/carryback offers here.
-    Single-family properties only.</strong></p>
-
-    <div class="banner warn"><strong>Why the urgency in these scripts (for you, not the seller):</strong>
-    sellers in this situation routinely wait until it's genuinely too late for a deal to close before
-    the auction date. Framing time as almost up is what actually gets them to act while there's still
-    enough runway left to close and get them real help. Keep this reasoning to yourself — never explain
-    it to the seller, just use the scripts as written.</div>
-
-    <h3 style="margin-top:22px;">1. Source</h3>
-    <p class="hint">auction.com. Filter for single-family preforeclosure properties with <strong>27 to
-    30 days left</strong> until the auction date, and pull about 50 of them into a spreadsheet/CSV per
-    day.</p>
-
-    <h3 style="margin-top:22px;">2. Skip trace</h3>
-    <p class="hint">auction.com doesn't give you a phone number. Look up each owner on
-    <strong>truepeoplesearch.com</strong> (free, one at a time) or pay for a bulk skip tracing service
-    if you want to move through 50 at once faster.</p>
-
-    <h3 style="margin-top:22px;">3. Text once, then call</h3>
-    <p class="hint"><strong>Single-family only</strong> — unlike Option 2 below, this track doesn't
-    have a 5+ unit variant. Send the text below <strong>one time only</strong> — do not send multiple
-    texts to the same owner. After that single opening text, switch to <strong>calling the owner and
-    leaving voicemails</strong>, and keep calling/leaving voicemails from there (no more texts) until
-    they respond. If there's still no response after <strong>3 to 7 total touch points</strong> (the
-    text plus calls/voicemails combined), stop and move on to different auction properties elsewhere
-    in the US.</p>
-    <div class="banner info">
-      "Hey [Name], this is [Your Name]. Would you consider an offer on [Address]? I couldn't help but
-      notice that its auction date is around the corner, next week or so. I was planning to go and bid on
-      it, but figured it wouldn't hurt to try and work something out with you before it's gone."
-    </div>
-    <p class="hint"><strong>Volume:</strong> 50 new owners contacted a day for 7 days (350 total) — at
-    that volume you're very likely to land a deal. Follow ups (the 3 to 7 touch points above) matter
-    just as much as new outreach — don't skip them to chase new volume. If you can't handle both
-    50 new contacts a day and every follow up that's due, cap your day at <strong>50 total contacts</strong>
-    — new leads and follow ups combined — rather than dropping follow ups.</p>
-
-    <h3 style="margin-top:22px;">4. Existing debt &amp; equity check</h3>
-    <p class="hint"><strong>Single-family only</strong> — same as the rest of Option 1. Once they
-    respond, run the address through the SendMySeller wizard for the MAO numbers (Asset Type:
-    Residential Property, 1-4 units), then check <strong><a href="https://propwire.com/" target="_blank" rel="noopener">PropWire</a></strong> for their approximate
-    existing debt (the wizard has a dedicated step for this once you pick "Upcoming
-    Auction/Preforeclosure Property" as the deal type).</p>
-    <p class="hint">If PropWire doesn't have it, ask the seller directly. If they're hesitant to share
-    it:</p>
-    <div class="banner info">"I want to ensure you get a fair offer and we don't waste time. If the
-    offer is below existing debt, we wasted a day or longer and we don't have much time to prevent you
-    from getting nothing if you do nothing."</div>
-    <p class="hint">Also ask how far behind on payments (arrears) they are — needed to know if a
-    subject-to structure is even workable.</p>
-    <p class="hint"><strong>Debt below our highest MAO (has equity):</strong> proceed as a normal cash
-    offer, texted with a real dollar number, same as Option 2's cash offers below.
-    <br><strong>Debt at or above our highest MAO (no equity):</strong> don't quote a dollar figure —
-    the wizard gives you a subject-to script instead, along the lines of "we can put together an offer
-    that saves your credit from being damaged any further, and gets you as much money as possible at
-    closing, by taking over your existing mortgage payments." Text that, then have the seller call
-    their lender for a payoff statement, screenshot it, and upload it in the wizard, along with
-    whatever loan details they know (monthly payment, principal, interest, taxes, insurance). Submit
-    the lead to admin as a <strong>Subject To - Only Possible</strong> lead — admin structures the
-    actual offer directly with the seller from there.</p>
-
-    <h2 style="margin-top:32px;">Option 2: FSBO + On Market Acquisition</h2>
+    <h2 style="margin-top:28px;">Option 1: FSBO + On Market Acquisition</h2>
     <p class="small-muted">This SOP is for deals that need rehab/renovation (fix and flip). Cold-text every
     lead with two soft offers, cash and seller financing, unless the seller's already ruled one out.
     <strong>Daily target: 50 new properties texted per day.</strong></p>
@@ -5087,6 +5022,71 @@ function openOutreachSop() {
     — only stretch to day 7 if the conversation itself makes that the smarter call (e.g. the seller said
     they need more time, or you're waiting on something specific from them). Log every counter or objection
     in the lead's notes — admin uses it to decide how to adjust either offer.</p>
+
+    <h2 style="margin-top:32px;">Option 2: Preforeclosure Auction Soon — High Deal Probability Of Being
+    Accepted and Closing</h2>
+    <p class="small-muted">Cash offer if there's equity to work with; a subject-to pitch (never a
+    dollar figure) if there isn't. <strong>No standard seller-financing/carryback offers here.
+    Single-family properties only.</strong></p>
+
+    <div class="banner warn"><strong>Why the urgency in these scripts (for you, not the seller):</strong>
+    sellers in this situation routinely wait until it's genuinely too late for a deal to close before
+    the auction date. Framing time as almost up is what actually gets them to act while there's still
+    enough runway left to close and get them real help. Keep this reasoning to yourself — never explain
+    it to the seller, just use the scripts as written.</div>
+
+    <h3 style="margin-top:22px;">1. Source</h3>
+    <p class="hint">auction.com. Filter for single-family preforeclosure properties with <strong>27 to
+    30 days left</strong> until the auction date, and pull about 50 of them into a spreadsheet/CSV per
+    day.</p>
+
+    <h3 style="margin-top:22px;">2. Skip trace</h3>
+    <p class="hint">auction.com doesn't give you a phone number. Look up each owner on
+    <strong>truepeoplesearch.com</strong> (free, one at a time) or pay for a bulk skip tracing service
+    if you want to move through 50 at once faster.</p>
+
+    <h3 style="margin-top:22px;">3. Text once, then call</h3>
+    <p class="hint"><strong>Single-family only</strong> — unlike Option 1 above, this track doesn't
+    have a 5+ unit variant. Send the text below <strong>one time only</strong> — do not send multiple
+    texts to the same owner. After that single opening text, switch to <strong>calling the owner and
+    leaving voicemails</strong>, and keep calling/leaving voicemails from there (no more texts) until
+    they respond. If there's still no response after <strong>3 to 7 total touch points</strong> (the
+    text plus calls/voicemails combined), stop and move on to different auction properties elsewhere
+    in the US.</p>
+    <div class="banner info">
+      "Hey [Name], this is [Your Name]. Would you consider an offer on [Address]? I couldn't help but
+      notice that its auction date is around the corner, next week or so. I was planning to go and bid on
+      it, but figured it wouldn't hurt to try and work something out with you before it's gone."
+    </div>
+    <p class="hint"><strong>Volume:</strong> 50 new owners contacted a day for 7 days (350 total) — at
+    that volume you're very likely to land a deal. Follow ups (the 3 to 7 touch points above) matter
+    just as much as new outreach — don't skip them to chase new volume. If you can't handle both
+    50 new contacts a day and every follow up that's due, cap your day at <strong>50 total contacts</strong>
+    — new leads and follow ups combined — rather than dropping follow ups.</p>
+
+    <h3 style="margin-top:22px;">4. Existing debt &amp; equity check</h3>
+    <p class="hint"><strong>Single-family only</strong> — same as the rest of Option 2. Once they
+    respond, run the address through the SendMySeller wizard for the MAO numbers (Asset Type:
+    Residential Property, 1-4 units), then check <strong><a href="https://propwire.com/" target="_blank" rel="noopener">PropWire</a></strong> for their approximate
+    existing debt (the wizard has a dedicated step for this once you pick "Upcoming
+    Auction/Preforeclosure Property" as the deal type).</p>
+    <p class="hint">If PropWire doesn't have it, ask the seller directly. If they're hesitant to share
+    it:</p>
+    <div class="banner info">"I want to ensure you get a fair offer and we don't waste time. If the
+    offer is below existing debt, we wasted a day or longer and we don't have much time to prevent you
+    from getting nothing if you do nothing."</div>
+    <p class="hint">Also ask how far behind on payments (arrears) they are — needed to know if a
+    subject-to structure is even workable.</p>
+    <p class="hint"><strong>Debt below our highest MAO (has equity):</strong> proceed as a normal cash
+    offer, texted with a real dollar number, same as Option 1's cash offers above.
+    <br><strong>Debt at or above our highest MAO (no equity):</strong> don't quote a dollar figure —
+    the wizard gives you a subject-to script instead, along the lines of "we can put together an offer
+    that saves your credit from being damaged any further, and gets you as much money as possible at
+    closing, by taking over your existing mortgage payments." Text that, then have the seller call
+    their lender for a payoff statement, screenshot it, and upload it in the wizard, along with
+    whatever loan details they know (monthly payment, principal, interest, taxes, insurance). Submit
+    the lead to admin as a <strong>Subject To - Only Possible</strong> lead — admin structures the
+    actual offer directly with the seller from there.</p>
   `;
   panel.querySelector("#close-outreach-sop-btn").onclick = () => overlay.hidden = true;
 }
