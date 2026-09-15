@@ -1014,6 +1014,10 @@ const steps = [
             they disagree.</p>
           ` : ""}
           ${isLand ? `
+            ${isOnMarket ? `
+              <p class="hint"><strong>City population must be 50,000+</strong> for an FSBO/on-market land
+              deal — same sourcing bar as Option 1 in the Outreach SOP. Skip it if the city falls short of that.</p>
+            ` : ""}
             <p class="hint"><strong>For land, what a comp has in common matters more than how close it is.</strong>
             A comp must match on <strong>zoning</strong> (never compare commercial-zoned to residential-zoned
             land), <strong>topography/usability</strong> (a flat, buildable lot isn't comparable to a steep or
@@ -1132,6 +1136,23 @@ const steps = [
           <br><span class="small-muted">"${arvPrompt}"</span></p>
         ` : ""}
         ${isResidential && !isPreforeclosureAuction ? `<div class="banner danger" id="arv-vs-asking-banner" hidden style="margin-top:12px;"></div>` : ""}
+
+        ${isLand ? `
+          <label class="field-label" style="margin-top:16px;">Is the land free and clear
+            <span class="small-muted">(no mortgage or liens against it)?</span></label>
+          <div class="choice-group" id="land-free-clear-group">
+            ${["Yes", "No"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
+          </div>
+
+          <label class="field-label" style="margin-top:16px;">Would the seller be willing to wait to get
+            paid until the land is developed and sold, instead of getting paid at closing?</label>
+          <div class="choice-group" id="land-willing-wait-group">
+            ${["Yes", "No"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
+          </div>
+          <p class="hint">If both are <strong>Yes</strong>, this qualifies for a <strong>100% of As-Is
+          Value</strong> deferred offer instead of the normal on-market/off-market percentage offer below —
+          see the Make Your Offer banner once you've entered As-Is Value.</p>
+        ` : ""}
 
         <label class="field-label">Pictures Link <span class="small-muted">(optional, if available)</span></label>
         <input type="text" id="pictures-link-input" placeholder="https://...">
@@ -1431,29 +1452,56 @@ const steps = [
           const wholesaleFee = feeInput ? (Number(feeInput.value) || formulaFee) : formulaFee;
 
           const maxOfferBanner = root.querySelector("#max-offer-banner");
-          const maoSuite = computeMaoSuite(arv, rehab, answers.assetType, wholesaleFee);
+          const landDeferredFullValue = isLand && answers.landFreeAndClear === "Yes" && answers.landWillingToWaitForDev === "Yes";
+          const maoSuite = computeMaoSuite(arv, rehab, answers.assetType, wholesaleFee, answers.marketStatus, landDeferredFullValue);
           if (!maoSuite) {
             maxOfferBanner.hidden = true;
           } else {
             const fmt = n => "$" + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
             maxOfferBanner.hidden = false;
-            maxOfferBanner.innerHTML = `
-              <strong>Cash Buyer MAO:</strong> ${fmt(maoSuite.maoCash)}
-              <br><span class="small-muted">(${maoSuite.cashExplanation})</span>
-              <hr style="border: none; border-top: 1px solid currentColor; opacity: 0.2; margin: 10px 0;">
-              <strong>Hard Money Buyer MAO (${maoSuite.hm10Label} Down):</strong> ${fmt(maoSuite.maoHardMoney10)}
-              <br><span class="small-muted">(${maoSuite.hm10Explanation})</span>
-              <hr style="border: none; border-top: 1px solid currentColor; opacity: 0.2; margin: 10px 0;">
-              <strong>Hard Money Buyer MAO (${maoSuite.hm20Label} Down):</strong> ${fmt(maoSuite.maoHardMoney20)}
-              <br><span class="small-muted">(${maoSuite.hm20Explanation})</span>
-              <br><br><strong>Start well below the Cash Buyer number and try to close there in negotiation.</strong>
-              <br><span class="small-muted">The hard money numbers show what a leveraged buyer could still pay and
-              hit the same target return, since less of their own cash is tied up in the deal — useful when
-              presenting to a hard-money buyer, or to justify going higher if the seller won't move off a price
-              above the Cash Buyer number after you've already started low. This can take a while — use
-              "Save My Progress" at the top of the page to pause here and come back once the seller has agreed
-              to a number.</span>
-            `;
+            if (maoSuite.isLand) {
+              maxOfferBanner.innerHTML = maoSuite.landDeferredFullValue ? `
+                <strong>Full Value Offer (Deferred):</strong> ${fmt(maoSuite.maoCash)}
+                <br><span class="small-muted">(${maoSuite.cashExplanation})</span>
+                <br><br><strong>This only applies because the land is free and clear and the seller agreed to
+                wait to get paid until it's developed/sold.</strong> If either answer changes, come back to this
+                step to recompute the normal ${maoSuite.isOnMarket ? "on-market" : "off-market"} percentage-based offer instead.
+              ` : `
+                <strong>Opening Offer${maoSuite.isOnMarket ? " (On-Market/FSBO)" : " (Off-Market)"}:</strong> ${fmt(maoSuite.maoCash)}
+                <br><span class="small-muted">(${maoSuite.cashExplanation})</span>
+                <hr style="border: none; border-top: 1px solid currentColor; opacity: 0.2; margin: 10px 0;">
+                <strong>${maoSuite.hm10Label} — hard ceiling:</strong> ${fmt(maoSuite.maoHardMoney10)}
+                <br><span class="small-muted">(${maoSuite.hm10Explanation})</span>
+                <br><br><strong>Start at the opening offer and negotiate up from there — never go above the
+                ceiling.</strong>
+                ${maoSuite.isOnMarket ? `
+                  <br><span class="small-muted">If the seller won't accept anywhere at or below the ceiling,
+                  this needs to come <strong>off-market</strong> before we can go any higher — let them know
+                  we can revisit at a better number once the listing comes down.</span>
+                ` : `
+                  <br><span class="small-muted">Off-market gives more room than a live listing — it's fine to
+                  work up to the ceiling if that's what it takes to close, just don't start there.</span>
+                `}
+              `;
+            } else {
+              maxOfferBanner.innerHTML = `
+                <strong>Cash Buyer MAO:</strong> ${fmt(maoSuite.maoCash)}
+                <br><span class="small-muted">(${maoSuite.cashExplanation})</span>
+                <hr style="border: none; border-top: 1px solid currentColor; opacity: 0.2; margin: 10px 0;">
+                <strong>Hard Money Buyer MAO (${maoSuite.hm10Label} Down):</strong> ${fmt(maoSuite.maoHardMoney10)}
+                <br><span class="small-muted">(${maoSuite.hm10Explanation})</span>
+                <hr style="border: none; border-top: 1px solid currentColor; opacity: 0.2; margin: 10px 0;">
+                <strong>Hard Money Buyer MAO (${maoSuite.hm20Label} Down):</strong> ${fmt(maoSuite.maoHardMoney20)}
+                <br><span class="small-muted">(${maoSuite.hm20Explanation})</span>
+                <br><br><strong>Start well below the Cash Buyer number and try to close there in negotiation.</strong>
+                <br><span class="small-muted">The hard money numbers show what a leveraged buyer could still pay and
+                hit the same target return, since less of their own cash is tied up in the deal — useful when
+                presenting to a hard-money buyer, or to justify going higher if the seller won't move off a price
+                above the Cash Buyer number after you've already started low. This can take a while — use
+                "Save My Progress" at the top of the page to pause here and come back once the seller has agreed
+                to a number.</span>
+              `;
+            }
           }
 
           // Off-market negotiating strategy: county assessed value if we have it, otherwise fall
@@ -1520,6 +1568,15 @@ const steps = [
           feeManuallyEdited = true;
           recomputeCashDeal();
         };
+      }
+
+      if (isLand) {
+        bindChoiceGroup(root, "#land-free-clear-group", "landFreeAndClear");
+        bindChoiceGroup(root, "#land-willing-wait-group", "landWillingToWaitForDev");
+        root.querySelectorAll("#land-free-clear-group .choice-btn, #land-willing-wait-group .choice-btn").forEach(btn => {
+          const rebindClick = btn.onclick;
+          btn.onclick = () => { rebindClick(); recomputeCashDeal(); };
+        });
       }
 
       if (!isLand) {
@@ -1870,7 +1927,8 @@ If this suggests the property is worth meaningfully less than expected, say so p
       answers.wholesaleFee = isSellerFinancing
         ? formulaFee
         : (root.querySelector("#wholesale-fee-input").value || formulaFee);
-      const maoSuite = computeMaoSuite(arvNum, Number(answers.rehabEstimate) || 0, answers.assetType, answers.wholesaleFee);
+      const landDeferredFullValue = isLand && answers.landFreeAndClear === "Yes" && answers.landWillingToWaitForDev === "Yes";
+      const maoSuite = computeMaoSuite(arvNum, Number(answers.rehabEstimate) || 0, answers.assetType, answers.wholesaleFee, answers.marketStatus, landDeferredFullValue);
       if (maoSuite) {
         answers.maoCash = Math.round(maoSuite.maoCash);
         answers.maoHardMoney10 = Math.round(maoSuite.maoHardMoney10);
@@ -3157,8 +3215,9 @@ If this suggests the property is worth meaningfully less than expected, say so p
         ${isEligibleAssetType && highestMao > 0 ? `
           <div class="banner warn" style="margin-top:16px;">
             <strong>Highest Max Allowable Offer:</strong> ${fmt(highestMao)}
-            <span class="small-muted">(the greater of the Cash Buyer / Hard Money ${answers.assetType === "Land" ? "30%" : "10%"} Down / Hard Money ${answers.assetType === "Land" ? "50%" : "20%"}
-            Down numbers from the Cash Deal Details step)</span>
+            <span class="small-muted">(${answers.assetType === "Land"
+              ? "the ceiling percentage of As-Is Value from the Cash Deal Details step -- 60% on-market, 70% off-market, or 100% if this qualifies as a free-and-clear deferred-value deal"
+              : "the greater of the Cash Buyer / Hard Money 10% Down / Hard Money 20% Down numbers from the Cash Deal Details step"})</span>
             <br><span class="small-muted">The seller's accepted price has to land below this number for
             a cash offer to work. Negotiate toward it.${isPreforeclosureAuction
               ? ` If they won't come down that far, let them know they'll get nothing if this goes to
@@ -3746,26 +3805,69 @@ function escapeHtml(str) {
 // Wholesale Fee defaults to the greater of $25,000 or 3% of ARV, applied to every variant -- pass a
 // 4th argument (wholesaleFeeOverride) to use a specific dollar amount instead, e.g. when an associate
 // has negotiated a smaller fee for a given deal.
-function computeMaoSuite(arv, rehab, assetType, wholesaleFeeOverride) {
+function computeMaoSuite(arv, rehab, assetType, wholesaleFeeOverride, marketStatus, landDeferredFullValue) {
   if (!arv) return null;
-  const isCommercial = assetType !== "Residential Property (1-4 units)";
+  const isLand = assetType === "Land";
   // Land has no separate ARV/rehab concept -- the value plugged in here is already the As-Is
   // Value entered in Cash Deal Details (rehab is always 0), so the explanation text should say
-  // that instead of "ARV" to match. The math itself is asset-type-agnostic either way.
-  const valueLabel = assetType === "Land" ? "As-Is Value" : "ARV";
-  const isLand = assetType === "Land";
+  // that instead of "ARV" to match.
+  const valueLabel = isLand ? "As-Is Value" : "ARV";
+  const money = n => "$" + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  const pct0 = n => (n * 100).toFixed(0) + "%";
+  const hasOverride0 = wholesaleFeeOverride !== undefined && wholesaleFeeOverride !== null && wholesaleFeeOverride !== "";
+  const wholesaleFee0 = hasOverride0 ? Number(wholesaleFeeOverride) : Math.max(25000, 0.03 * arv);
+
+  // Land skips the leveraged/hard-money underwriting model below entirely -- there's no rehab/
+  // resale cycle to run a target-ROI formula against, so land offers are priced as a straight
+  // percentage of As-Is Value (from the land comps prompt in Cash Deal Details) instead:
+  //   - On-Market / FSBO: open at 50% of As-Is Value, ceiling at 60% -- if the seller won't accept
+  //     anywhere in that band, the listing needs to come OFF market before we can go any higher (an
+  //     on-market seller has a realtor/buyer pool already working the listing, so there's no case
+  //     for paying more while it's still up).
+  //   - Off-Market: base the offer at 60% of As-Is Value, with room to negotiate up to a 70%
+  //     ceiling if that's what it takes to close -- an off-market seller came to us directly, so
+  //     there's more room to work with than a live listing.
+  //   - Free and clear (no mortgage/liens) AND the seller is willing to wait to get paid until the
+  //     land is developed/sold: 100% of As-Is Value, paid out of development/resale proceeds
+  //     instead of at closing (see landFreeAndClear / landWillingToWaitForDev in Cash Deal Details).
+  // Every variant still nets out the wholesale/assignment fee the same way the leveraged formula
+  // does below (the greater of $25,000 or 3% of As-Is Value, or a manually negotiated override).
+  if (isLand) {
+    const isOnMarket = marketStatus !== "Off-Market"; // default to the more conservative on-market band
+    let openPct, ceilPct;
+    if (landDeferredFullValue) { openPct = 1.00; ceilPct = 1.00; }
+    else if (isOnMarket) { openPct = 0.50; ceilPct = 0.60; }
+    else { openPct = 0.60; ceilPct = 0.70; }
+    const openMao = (arv * openPct) - wholesaleFee0;
+    const ceilMao = (arv * ceilPct) - wholesaleFee0;
+    const feeNote = `minus a ${money(wholesaleFee0)} wholesale/assignment fee — the greater of $25,000 or 3% of As-Is Value`;
+    const openExplanation = landDeferredFullValue
+      ? `${money(arv)} As-Is Value at 100% (free and clear, paid once the land is developed/sold -- not at closing), ${feeNote}`
+      : `${money(arv)} As-Is Value x ${pct0(openPct)} opening offer (${isOnMarket ? "On-Market/FSBO" : "Off-Market"}), ${feeNote}`;
+    const ceilExplanation = landDeferredFullValue
+      ? openExplanation
+      : `${money(arv)} As-Is Value x ${pct0(ceilPct)} -- the absolute ceiling${isOnMarket
+          ? ", above which this needs to come off-market before we can go any higher"
+          : ", only go this high if it's what it takes to close off-market"}, ${feeNote}`;
+    const openLabel = landDeferredFullValue ? "Full Value (Deferred)" : `Opening Offer (${pct0(openPct)})`;
+    const ceilLabel = landDeferredFullValue ? "Full Value (Deferred)" : `Ceiling (${pct0(ceilPct)})`;
+    const sheetBlurbLand = (label, mao, explanation) =>
+      `Maximum Allowable Offer — ${label}: ${money(mao)}\n(${explanation}) = ${money(mao)}`;
+    const fullBreakdownLand = landDeferredFullValue
+      ? sheetBlurbLand(openLabel, openMao, openExplanation)
+      : [sheetBlurbLand(openLabel, openMao, openExplanation), sheetBlurbLand(ceilLabel, ceilMao, ceilExplanation)].join("\n\n");
+    return {
+      isLand: true, isOnMarket, landDeferredFullValue: !!landDeferredFullValue,
+      maoCash: openMao, maoHardMoney10: ceilMao, maoHardMoney20: ceilMao,
+      cashExplanation: openExplanation, hm10Explanation: ceilExplanation, hm20Explanation: ceilExplanation,
+      fullBreakdown: fullBreakdownLand, tierName: "Land", targetRoi: null, hm10Label: ceilLabel, hm20Label: ceilLabel
+    };
+  }
+
+  const isCommercial = assetType !== "Residential Property (1-4 units)";
   const ratio = rehab / arv;
   let tierName, months, targetRoi, cashTargetRoc;
-  if (isLand) {
-    // Rehab is always 0 for land (no repair/reno concept), so the rehab-ratio tiers below would
-    // always land on the lightest bucket anyway -- name it for what it actually is instead of
-    // reusing "Light Tenant Improvement" wording that implies a building with tenants.
-    // Numbers are Tier 1 ("Micro/Small Projects", $20K-$250K land cost) of the land underwriting
-    // framework: 22-30%+ target IRR (25% used here) and an 11-24 month lifecycle -- 15 months
-    // matches the framework's own worked example ($100K equity returning $140K, a 1.4x multiple,
-    // squarely inside its 1.3x-1.6x Tier 1 target).
-    tierName = "Land Acquisition"; months = 15; targetRoi = 0.25; cashTargetRoc = targetRoi;
-  } else if (isCommercial) {
+  if (isCommercial) {
     if (ratio < 0.10) { tierName = "Light Tenant Improvement"; months = 3.5; targetRoi = 0.18; }
     else if (ratio < 0.25) { tierName = "Heavy Adaptive Reuse / Value-Add"; months = 9; targetRoi = 0.22; }
     else { tierName = "Ground-Up / Major Expansion"; months = 15; targetRoi = 0.25; }
@@ -3784,9 +3886,7 @@ function computeMaoSuite(arv, rehab, assetType, wholesaleFeeOverride) {
   const hasOverride = wholesaleFeeOverride !== undefined && wholesaleFeeOverride !== null && wholesaleFeeOverride !== "";
   const wholesaleFee = hasOverride ? Number(wholesaleFeeOverride) : Math.max(25000, 0.03 * arv);
 
-  const money = n => "$" + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
   const pct1 = n => (n * 100).toFixed(1) + "%";
-  const pct0 = n => (n * 100).toFixed(0) + "%";
 
   // Cash Buyer has no loan at all, so it isn't the "100% down payment" case of the leveraged
   // formula below -- plugging DP%=100% into that formula's "1 + [DP%x(1+ROI)]" denominator double
@@ -3820,15 +3920,13 @@ function computeMaoSuite(arv, rehab, assetType, wholesaleFeeOverride) {
     return { mao, explanation };
   }
 
-  // Land uses much heavier down payments than the other asset types -- 30%/50% instead of
-  // 10%/20% -- reflecting how much harder land is to get conventional leverage on. The "10"/"20"
-  // suffixes on the returned/stored field names (maoHardMoney10, MAO Hard Money (10% Down), etc.)
-  // stay fixed regardless -- they just mean "lower-leverage variant" / "higher-leverage variant"
-  // now, not literally 10%/20% -- renaming them would touch live Sheet column names for no benefit.
-  const dp1Pct = isLand ? 0.30 : 0.10;
-  const dp1Label = isLand ? "30%" : "10%";
-  const dp2Pct = isLand ? 0.50 : 0.20;
-  const dp2Label = isLand ? "50%" : "20%";
+  // Land no longer reaches this code at all (see the early return above) -- it's priced as a
+  // straight percentage of As-Is Value, not this leveraged hard-money model, so these are always
+  // the residential/commercial 10%/20% down payment figures now.
+  const dp1Pct = 0.10;
+  const dp1Label = "10%";
+  const dp2Pct = 0.20;
+  const dp2Label = "20%";
   const hm10 = variant(dp1Pct, dp1Label, targetRoi, "ROI");
   const hm20 = variant(dp2Pct, dp2Label, targetRoi, "ROI");
 
@@ -3945,6 +4043,7 @@ async function submitLead(container) {
         street: answers.street, parcelIds: answers.parcelIds, city: answers.city, state: answers.state, zip: answers.zip, units: answers.units,
         assetType: answers.assetType, assetSubtype: answers.assetSubtype,
         beds: answers.beds, baths: answers.baths, sqft: answers.sqft, sellerReportedSqft: answers.sellerReportedSqft, acreage: answers.acreage, landZoning: answers.landZoning,
+        landFreeAndClear: answers.landFreeAndClear || "", landWillingToWaitForDev: answers.landWillingToWaitForDev || "",
         dealType: answers.dealType, dealCategory: answers.dealCategory,
         arv: answers.arv, askingPrice: answers.askingPrice, chaseEstimate: answers.chaseEstimate, asIsValue: answers.asIsValue, picturesLink: answers.picturesLink, rehabEstimate: answers.rehabEstimate,
         rehabEstimateLow: answers.rehabEstimateLow, rehabEstimateHigh: answers.rehabEstimateHigh,
@@ -4807,6 +4906,19 @@ function openMaoCalculator() {
       <option value="Land">Land</option>
     </select>
 
+    <div id="mao-calc-land-fields" hidden>
+      <label class="field-label" style="margin-top:16px;">Market Status <span class="small-muted">(land only -- ARV field above is As-Is Value)</span></label>
+      <select id="mao-calc-market-status">
+        <option value="On-Market">On-Market / FSBO</option>
+        <option value="Off-Market">Off-Market</option>
+      </select>
+
+      <label class="field-label" style="margin-top:16px;">
+        <input type="checkbox" id="mao-calc-land-deferred" style="width:auto; margin-right:8px; vertical-align:middle;">
+        Free and clear, and seller willing to wait to get paid until developed/sold (100% of value)
+      </label>
+    </div>
+
     <div class="banner warn" id="mao-calc-output" hidden style="margin-top:16px;"></div>
 
     ${isAdmin ? `
@@ -4824,11 +4936,15 @@ function openMaoCalculator() {
     const arv = Number(panel.querySelector("#mao-calc-arv").value) || 0;
     const rehab = Number(panel.querySelector("#mao-calc-rehab").value) || 0;
     const assetType = panel.querySelector("#mao-calc-asset-type").value;
+    const isLandCalc = assetType === "Land";
+    panel.querySelector("#mao-calc-land-fields").hidden = !isLandCalc;
+    const marketStatus = isLandCalc ? panel.querySelector("#mao-calc-market-status").value : "";
+    const landDeferred = isLandCalc && panel.querySelector("#mao-calc-land-deferred").checked;
     const output = panel.querySelector("#mao-calc-output");
     const saveBtn = panel.querySelector("#mao-calc-save-btn");
     const leadSelected = isAdmin && !!panel.querySelector("#mao-calc-lead-select").value;
 
-    lastMaoCalcSuite = computeMaoSuite(arv, rehab, assetType);
+    lastMaoCalcSuite = computeMaoSuite(arv, rehab, assetType, undefined, marketStatus, landDeferred);
     if (!lastMaoCalcSuite) {
       output.hidden = true;
       if (saveBtn) saveBtn.disabled = true;
@@ -4836,16 +4952,29 @@ function openMaoCalculator() {
     }
     const fmt = n => "$" + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
     output.hidden = false;
-    output.innerHTML = `
-      <strong>Cash Buyer MAO:</strong> ${fmt(lastMaoCalcSuite.maoCash)}
-      <br><span class="small-muted">(${lastMaoCalcSuite.cashExplanation})</span>
-      <hr style="border: none; border-top: 1px solid currentColor; opacity: 0.2; margin: 10px 0;">
-      <strong>Hard Money Buyer MAO (${lastMaoCalcSuite.hm10Label} Down):</strong> ${fmt(lastMaoCalcSuite.maoHardMoney10)}
-      <br><span class="small-muted">(${lastMaoCalcSuite.hm10Explanation})</span>
-      <hr style="border: none; border-top: 1px solid currentColor; opacity: 0.2; margin: 10px 0;">
-      <strong>Hard Money Buyer MAO (${lastMaoCalcSuite.hm20Label} Down):</strong> ${fmt(lastMaoCalcSuite.maoHardMoney20)}
-      <br><span class="small-muted">(${lastMaoCalcSuite.hm20Explanation})</span>
-    `;
+    if (lastMaoCalcSuite.isLand) {
+      output.innerHTML = lastMaoCalcSuite.landDeferredFullValue ? `
+        <strong>Full Value Offer (Deferred):</strong> ${fmt(lastMaoCalcSuite.maoCash)}
+        <br><span class="small-muted">(${lastMaoCalcSuite.cashExplanation})</span>
+      ` : `
+        <strong>Opening Offer${lastMaoCalcSuite.isOnMarket ? " (On-Market/FSBO)" : " (Off-Market)"}:</strong> ${fmt(lastMaoCalcSuite.maoCash)}
+        <br><span class="small-muted">(${lastMaoCalcSuite.cashExplanation})</span>
+        <hr style="border: none; border-top: 1px solid currentColor; opacity: 0.2; margin: 10px 0;">
+        <strong>${lastMaoCalcSuite.hm10Label} — hard ceiling:</strong> ${fmt(lastMaoCalcSuite.maoHardMoney10)}
+        <br><span class="small-muted">(${lastMaoCalcSuite.hm10Explanation})</span>
+      `;
+    } else {
+      output.innerHTML = `
+        <strong>Cash Buyer MAO:</strong> ${fmt(lastMaoCalcSuite.maoCash)}
+        <br><span class="small-muted">(${lastMaoCalcSuite.cashExplanation})</span>
+        <hr style="border: none; border-top: 1px solid currentColor; opacity: 0.2; margin: 10px 0;">
+        <strong>Hard Money Buyer MAO (${lastMaoCalcSuite.hm10Label} Down):</strong> ${fmt(lastMaoCalcSuite.maoHardMoney10)}
+        <br><span class="small-muted">(${lastMaoCalcSuite.hm10Explanation})</span>
+        <hr style="border: none; border-top: 1px solid currentColor; opacity: 0.2; margin: 10px 0;">
+        <strong>Hard Money Buyer MAO (${lastMaoCalcSuite.hm20Label} Down):</strong> ${fmt(lastMaoCalcSuite.maoHardMoney20)}
+        <br><span class="small-muted">(${lastMaoCalcSuite.hm20Explanation})</span>
+      `;
+    }
     if (saveBtn) saveBtn.disabled = !leadSelected;
   };
 
@@ -4863,6 +4992,8 @@ function openMaoCalculator() {
   }
   ["#mao-calc-arv", "#mao-calc-rehab"].forEach(sel => { panel.querySelector(sel).oninput = recompute; });
   panel.querySelector("#mao-calc-asset-type").onchange = recompute;
+  panel.querySelector("#mao-calc-market-status").onchange = recompute;
+  panel.querySelector("#mao-calc-land-deferred").onchange = recompute;
 
   if (isAdmin) {
     panel.querySelector("#mao-calc-save-btn").onclick = async () => {
@@ -4902,9 +5033,9 @@ function openOutreachSop() {
   panel.innerHTML = `
     <button class="link-btn" id="close-outreach-sop-btn" style="float:right;">Close ✕</button>
     <h2>Acquisition SOP</h2>
-    <p class="small-muted">Two outreach tracks, run alongside each other. Option 2 (preforeclosure
+    <p class="small-muted">Three outreach tracks, run alongside each other. Option 2 (preforeclosure
     auction) has the higher probability of getting accepted and closing fast — prioritize it first
-    each day, then fill remaining volume with Option 1.</p>
+    each day, then fill remaining volume with Option 1 and Option 3 (land).</p>
 
     <div class="banner info"><strong>Batch workflow, both tracks:</strong> send your day's outreach
     texts to your <em>entire</em> list first, before opening the wizard for any single property —
@@ -5087,6 +5218,51 @@ function openOutreachSop() {
     whatever loan details they know (monthly payment, principal, interest, taxes, insurance). Submit
     the lead to admin as a <strong>Subject To - Only Possible</strong> lead — admin structures the
     actual offer directly with the seller from there.</p>
+
+    <h2 style="margin-top:32px;">Option 3: Land Acquisition</h2>
+    <p class="small-muted">Land is always a cash deal — no seller financing/carryback offers here. Which of
+    the three paths below applies depends on how the land is sourced and the seller's own situation; run
+    the address through the SendMySeller wizard (Asset Type: Land) for the actual comps and MAO numbers in
+    every case — don't estimate any of this by hand.</p>
+
+    <h3 style="margin-top:22px;">3a. FSBO / On-Market Land (Recommended — simplest, start here)</h3>
+    <p class="hint">Source the same way as Option 1: Zillow/Redfin FSBO listings and MLS, land parcels only.
+    <strong>City population must be 50,000+</strong> — same bar as Option 1, skip anything smaller.</p>
+    <p class="hint">Run the address through the wizard's land comps prompt (Google AI, matched on zoning/
+    topography/access per the wizard's own comping criteria) for a current As-Is Value — never a house's
+    ARV, land has no post-repair value. Off of that As-Is Value:</p>
+    <div class="banner info"><strong>Open at 50% of As-Is Value</strong>, and never go above a
+    <strong>60% ceiling</strong> (both numbers already net out the wholesale/assignment fee — the wizard
+    computes them for you). <strong>If the seller won't accept anywhere at or below the 60% ceiling, this
+    deal needs to come off-market</strong> before we can offer more — let them know we can revisit at a
+    better number once the listing comes down, then work it as Option 3b instead.</div>
+    <p class="hint">Once the seller is interested at a number in range, submit the lead through the site,
+    <strong>then separately contact admin directly</strong> so they can move on it fast — don't rely on
+    admin noticing the new submission on its own.</p>
+
+    <h3 style="margin-top:22px;">3b. Off-Market Land</h3>
+    <p class="hint">Sourced directly (referral, driving for dollars, a seller who reached out, or a listing
+    that came off-market per 3a above) — no population minimum, since there's no live listing to compete
+    with. Same land comps prompt for As-Is Value.</p>
+    <div class="banner info"><strong>Base the offer at 60% of As-Is Value</strong>, with room to negotiate
+    up to a <strong>70% ceiling</strong> if that's what it takes to close — off-market gives more room than
+    a live listing, but don't open at 70%, work up to it.</div>
+    <p class="hint">Same as 3a: once the seller is interested, submit the lead through the site, then
+    contact admin directly.</p>
+
+    <h3 style="margin-top:22px;">3c. Free and Clear, Seller Willing to Wait for Development (100% of Value)</h3>
+    <p class="hint">Only applies if <strong>both</strong> are true: the land is <strong>free and clear</strong>
+    (no mortgage or liens to pay off now) and the seller is <strong>willing to wait to get paid until the
+    land is developed and sold</strong>, instead of getting paid at closing. Ask both questions directly —
+    the wizard has dedicated Yes/No fields for them right under As-Is Value on the Cash Deal Details step.</p>
+    <div class="banner info">If both are <strong>Yes</strong>, the offer is <strong>100% of As-Is Value</strong>
+    (still net of the wholesale/assignment fee), paid out of proceeds once the property is developed/sold —
+    not at closing. This applies regardless of on-market or off-market status; it replaces the 3a/3b
+    percentage bands entirely once both conditions are confirmed.</div>
+    <p class="hint">This is a bigger ask of the seller (deferred payout, not a normal closing) so expect it to
+    convert less often than 3a/3b — still worth offering whenever a land seller mentions no mortgage and no
+    urgency to get paid soon. Submit through the site and contact admin directly once they're interested,
+    same as the other two paths.</p>
   `;
   panel.querySelector("#close-outreach-sop-btn").onclick = () => overlay.hidden = true;
 }
@@ -5126,9 +5302,14 @@ function openDetail(lead) {
     ${lead["MAO Cash"] ? `
       <div class="banner info" style="margin-top:16px; text-align:left; white-space:pre-wrap;">
         <strong>Wholesale Offer Math (admin-only)</strong>
-        <br>Cash Buyer MAO: $${Number(lead["MAO Cash"]).toLocaleString()}
-        <br>Hard Money Buyer MAO (${lead["Asset Type"] === "Land" ? "30%" : "10%"} Down): $${Number(lead["MAO Hard Money (10% Down)"]).toLocaleString()}
-        <br>Hard Money Buyer MAO (${lead["Asset Type"] === "Land" ? "50%" : "20%"} Down): $${Number(lead["MAO Hard Money (20% Down)"]).toLocaleString()}
+        ${lead["Asset Type"] === "Land" ? `
+          <br>Opening/Base Offer: $${Number(lead["MAO Cash"]).toLocaleString()}
+          <br>Ceiling: $${Number(lead["MAO Hard Money (10% Down)"]).toLocaleString()}
+        ` : `
+          <br>Cash Buyer MAO: $${Number(lead["MAO Cash"]).toLocaleString()}
+          <br>Hard Money Buyer MAO (10% Down): $${Number(lead["MAO Hard Money (10% Down)"]).toLocaleString()}
+          <br>Hard Money Buyer MAO (20% Down): $${Number(lead["MAO Hard Money (20% Down)"]).toLocaleString()}
+        `}
         <hr style="border: none; border-top: 1px solid currentColor; opacity: 0.2; margin: 10px 0;">
         ${escapeHtml(lead["MAO Breakdown"] || "")}
       </div>
