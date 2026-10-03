@@ -2030,9 +2030,9 @@ For land, what a comp has in common matters more than how close it is. Search li
 3. Comparable access and utilities — road access (paved vs. dirt vs. none) and utility hookups (electric, water, septic/sewer) should be similar, or clearly flagged as different along with how that affects value.
 4. Similar in acreage (or square footage, for small in-town lots) to the subject property — avoid comps that are dramatically larger or smaller.
 
-Only after a comp passes ALL four rules above should distance be weighed — prefer the closest qualifying comps, but a comp farther away that matches on zoning/topography/access beats a closer one that doesn't. As a rough guide, expect comps within about 1 to 5 miles in suburban areas, and 10 to 50+ miles in rural or remote areas with few land sales — state each comp's straight-line distance, and note if you had to go unusually far to find a qualifying match.
+Only after a comp passes ALL four rules above should distance be weighed — prefer the closest qualifying comps, but a comp farther away that matches on zoning/topography/access beats a closer one that doesn't. Distance tiers as a rough guide: Urban/Dense Suburban — 0.25 to 1 mile; Suburban/Master-Planned — 1 to 2 miles; Rural/Unique Acreage — 3 to 10 miles (up to 30 miles in sparse markets with very few land sales). Always state each comp's straight-line distance and note if you had to go unusually far to find a qualifying match.
 
-Recency: comps sold within the last 6 months are ideal. Up to 12 months is acceptable in a normal market. In slow or rural markets with low transaction volume, going back up to 24 months is standard practice. For any comp older than 6 months, apply a reasonable adjustment to its sale price to reflect market movement (appreciation or depreciation) between the sale date and today, show that adjustment explicitly, and use the adjusted price (not the raw historical price) in the calculation below.
+Recency: 1 to 2 years is acceptable as a catch-all for land — prefer more recent sales where available. For any comp older than 6 months, apply a reasonable adjustment to its sale price to reflect market movement (appreciation or depreciation) between the sale date and today, show that adjustment explicitly, and use the adjusted price (not the raw historical price) in the calculation below.
 
 If this is a non-disclosure state and you can't find actual sold prices, use active for-sale listings instead that meet the other rules, and clearly label them as asking prices, not confirmed sale prices.
 
@@ -3332,12 +3332,49 @@ If this suggests the property is worth meaningfully less than expected, say so p
     // dedicated cash-offer text in preforeclosureDebtCheck instead.
     skip() {
       return (answers.dealType !== "Cash Deal" && answers.dealType !== "Seller Financing / Creative Finance")
-        || answers.assetType === "Land"
         || answers.assetType === "Business"
         || answers.role === "Seller"
         || answers.dealCategory === "Upcoming Auction/Preforeclosure Property";
     },
     render(root) {
+      const isLand = answers.assetType === "Land";
+      if (isLand) {
+        const addressLine = `${answers.street || ""}, ${answers.city || ""}, ${answers.state || ""} ${answers.zip || ""}`.trim();
+        const sellerName = answers.sellerContactName || "[Name]";
+        const maoCandidates = [answers.maoCash, answers.maoHardMoney10].map(Number).filter(n => n > 0);
+        const cashOfferAmt = maoCandidates.length ? Math.round(Math.min(...maoCandidates)) : 0;
+        const highestMao = maoCandidates.length ? Math.round(Math.max(...maoCandidates)) : 0;
+        const fmt = n => "$" + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
+        const offerText = cashOfferAmt > 0 ? `Hi ${sellerName}, saw ${addressLine} is for sale. Would you be open to ${fmt(cashOfferAmt)} cash for it?` : "";
+        const pushbackText = highestMao > 0 ? `The price reflects buying as-is, all cash, with no financing contingencies. We can close quickly. Would ${fmt(highestMao)} work?` : "";
+        root.innerHTML = `
+          <h2 class="step-title">Make Your Cash Offer</h2>
+          <p class="step-sub">Land is always a cash deal — no seller financing option. Start at the opening offer and negotiate up to the ceiling if needed, but never go above it.</p>
+          ${highestMao > 0 ? `
+            <div class="banner warn" style="margin-bottom:16px;">
+              <strong>Opening Offer:</strong> ${fmt(cashOfferAmt)}&nbsp;&nbsp;|&nbsp;&nbsp;<strong>Ceiling:</strong> ${fmt(highestMao)}
+              <br><span class="small-muted">Start at the opening offer. If they push back, you can negotiate up to the ceiling — but never go above it.</span>
+            </div>
+            <div class="banner info" style="margin-top:12px;">
+              <strong>Text this to make your offer:</strong><br>
+              <span class="small-muted">${escapeHtml(offerText)}</span>
+              <br><button type="button" class="btn secondary" id="land-offer-copy-btn" style="margin-top:8px;">Copy Text</button>
+            </div>
+            <div class="banner info" style="margin-top:10px;">
+              <strong>If they push back on price:</strong><br>
+              <span class="small-muted">${escapeHtml(pushbackText)}</span>
+              <br><button type="button" class="btn secondary" id="land-pushback-copy-btn" style="margin-top:8px;">Copy Text</button>
+            </div>
+          ` : `
+            <div class="banner warn" style="margin-bottom:16px;">No offer amount yet — go back to Cash Deal Details and enter an As-Is Value so the offer can be calculated.</div>
+          `}
+        `;
+        if (cashOfferAmt > 0) {
+          wireCopyPromptButton(root, "#land-offer-copy-btn", () => offerText);
+          wireCopyPromptButton(root, "#land-pushback-copy-btn", () => pushbackText);
+        }
+        return;
+      }
       const addressLine = `${answers.street || ""}, ${answers.city || ""}, ${answers.state || ""} ${answers.zip || ""}`.trim();
       const sellerName = answers.sellerContactName || "[Name]";
       const isMultifamily5Plus = Number(answers.units) > 4;
@@ -3566,14 +3603,16 @@ If this suggests the property is worth meaningfully less than expected, say so p
       // no fallback structure at all, so this page has to stay a hard block until the cash price
       // actually comes down below MAO.
       const isPreforeclosureAuction = answers.dealCategory === "Upcoming Auction/Preforeclosure Property";
+      const isLand = answers.assetType === "Land";
       // Preforeclosure has no seller-financing fallback at all (see dealType's comment) -- "seller
       // won't accept a price below MAO" means the same thing preforeclosureDebtCheck already checks
       // for (no equity), so the button there flags Subject To Only Possible instead of pivoting
       // dealType to Seller Financing, which isn't a real option for this category.
-      const financingAvailable = !isPreforeclosureAuction && !answers.sellerDeclinedSellerFinancing;
+      // Land is also always cash-only -- no seller financing pivot exists for land.
+      const financingAvailable = !isPreforeclosureAuction && !isLand && !answers.sellerDeclinedSellerFinancing;
       const cashRejected = isPreforeclosureAuction
         ? !!answers.subjectToOnlyPossible && answers.subjectToOnlyPossible !== "No"
-        : financingAvailable && !!answers.sellerDeclinedCash;
+        : (isLand || financingAvailable) && !!answers.sellerDeclinedCash;
 
       // Anyone but the seller themselves selling this as a cash deal, on an on-market (FSBO or MLS)
       // property that isn't preforeclosure/auction, needs the seller/listing agent to agree to an
@@ -3602,6 +3641,9 @@ If this suggests the property is worth meaningfully less than expected, say so p
           this goes to auction -- they either need to agree to a price below this number to continue
           as a cash deal, or use the button below to flag this as a subject-to lead instead, same as
           the debt/equity check earlier.`
+          : isLand
+          ? ` Land deals are always cash — there is no seller financing option. If the seller genuinely
+          won't come down below the ceiling, the deal doesn't work at this price.`
           : financingAvailable
           ? ` If the seller genuinely won't come down below it, let them know we'd need to do this as
           seller financing instead, then use the button below to submit it that way, at the seller's
@@ -3626,18 +3668,25 @@ If this suggests the property is worth meaningfully less than expected, say so p
             a cash offer to work. Negotiate toward it.${isPreforeclosureAuction
               ? ` If they won't come down that far, let them know they'll get nothing if this goes to
               auction, then flag it as subject-to below if they still won't move.`
+              : isLand
+              ? ` Land is always cash — there is no seller financing fallback. If they won't come down
+              below this number, the deal doesn't work at this price.`
               : financingAvailable
               ? ` If they won't come down that far, let them know we'd need to go with seller financing instead.`
               : ` The seller already declined seller financing, so there's no fallback here -- it has to land below this number.`}</span>
           </div>
-          ${isPreforeclosureAuction || financingAvailable ? `
+          ${isPreforeclosureAuction || isLand || financingAvailable ? `
             <div style="margin-top:12px;">
-              <button type="button" class="btn ghost-small${cashRejected ? " active" : ""}" id="cash-rejected-btn">${isPreforeclosureAuction ? "Seller will not agree to a cash price below MAO" : "Seller did not agree to a cash price below MAO"}</button>
+              <button type="button" class="btn ghost-small${cashRejected ? " active" : ""}" id="cash-rejected-btn">${isPreforeclosureAuction ? "Seller will not agree to a cash price below MAO" : "Seller will not come down to a cash price below the ceiling"}</button>
             </div>
             ${cashRejected ? `
               <div class="banner info" style="margin-top:12px;">${isPreforeclosureAuction
                 ? `This will submit as a <strong>Subject To - Only Possible</strong> lead instead of a
                 cash deal, same as picking "no equity" on the debt/equity check earlier.`
+                : isLand
+                ? `Land is cash-only — there is no seller financing fallback. The deal has to come in
+                below the ceiling, or it doesn't work at this price. Submit this as-is so admin has
+                the lead on file, or go back and keep negotiating.`
                 : `This will submit as a seller financing offer only, at the seller's full asking price
                 with an appraisal contingency, instead of a cash deal.`}</div>
             ` : ""}
@@ -3733,7 +3782,7 @@ If this suggests the property is worth meaningfully less than expected, say so p
       }
 
       if (isEligibleAssetType && highestMao > 0) {
-        if (isPreforeclosureAuction || financingAvailable) {
+        if (isPreforeclosureAuction || isLand || financingAvailable) {
           root.querySelector("#cash-rejected-btn").onclick = () => {
             if (isPreforeclosureAuction) {
               answers.subjectToOnlyPossible = cashRejected ? "No" : "Yes";
@@ -3750,8 +3799,10 @@ If this suggests the property is worth meaningfully less than expected, say so p
             if (price && price >= highestMao) {
               errorEl.textContent = isPreforeclosureAuction
                 ? `This is at or above the highest Max Allowable Offer (${fmt(highestMao)}) -- let the seller know they'll get nothing if this goes to auction. Keep negotiating toward that number, or press the "Seller will not agree to a cash price below MAO" button above to flag it as subject-to instead.`
+                : isLand
+                ? `This is at or above the ceiling (${fmt(highestMao)}) — land is always cash and there is no seller financing fallback. Keep negotiating toward that number, or press the button above to record that the seller won't come down.`
                 : financingAvailable
-                ? `This is at or above the highest Max Allowable Offer (${fmt(highestMao)}) -- keep negotiating toward that number. If the seller genuinely won't come down below it, let them know we'd need to do this as seller financing instead, then press the "Seller did not agree to a cash price below MAO" button above.`
+                ? `This is at or above the highest Max Allowable Offer (${fmt(highestMao)}) -- keep negotiating toward that number. If the seller genuinely won't come down below it, let them know we'd need to do this as seller financing instead, then press the "Seller will not come down to a cash price below the ceiling" button above.`
                 : `This is at or above the highest Max Allowable Offer (${fmt(highestMao)}) -- the seller already declined seller financing, so keep negotiating until this comes in below that number.`;
               errorEl.classList.add("show");
             } else {
@@ -3759,14 +3810,17 @@ If this suggests the property is worth meaningfully less than expected, say so p
             }
           };
         } else if (!isPreforeclosureAuction) {
-          // Cash being ruled out doesn't mean any price is now fair game -- once the asking price is
-          // above MAO, the only thing that makes the deal pencil is the seller actually agreeing to
-          // seller financing (20% down now, balance paid off within the payoff window). Without that
-          // confirmed with the seller/realtor, this is just a full-asking-price cash lead in disguise.
           root.querySelector("#accepted-price-input").oninput = (e) => {
             const price = Number(e.target.value) || 0;
             const errorEl = root.querySelector("#accepted-price-error");
-            if (price && highestMao > 0 && price > highestMao && answers.sellerFinancingAccepted !== "Yes") {
+            if (isLand && price && highestMao > 0 && price > highestMao) {
+              // Land is always cash — no seller financing fallback even when cash offer is rejected.
+              errorEl.textContent = `This is above the ceiling (${fmt(highestMao)}) — land is cash-only with no seller financing option. Either negotiate to a price below the ceiling, or this deal doesn't work.`;
+              errorEl.classList.add("show");
+            } else if (!isLand && price && highestMao > 0 && price > highestMao && answers.sellerFinancingAccepted !== "Yes") {
+              // Cash being ruled out doesn't mean any price is now fair game -- once the asking price
+              // is above MAO, the only thing that makes the deal pencil is the seller agreeing to
+              // seller financing (20% down now, balance paid off within the payoff window).
               errorEl.textContent = `This is above the highest Max Allowable Offer (${fmt(highestMao)}) -- a price this high only works as seller financing. Go back to Make Your Offers and confirm with the seller/realtor that they accept seller financing (20% down, balance paid off within the payoff window) before this can be submitted.`;
               errorEl.classList.add("show");
             } else {
@@ -3782,10 +3836,11 @@ If this suggests the property is worth meaningfully less than expected, say so p
       const highestMao = Math.max(answers.maoCash || 0, answers.maoHardMoney10 || 0, answers.maoHardMoney20 || 0);
       const fmt = n => "$" + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
       const isPreforeclosureAuction = answers.dealCategory === "Upcoming Auction/Preforeclosure Property";
-      const financingAvailable = !isPreforeclosureAuction && !answers.sellerDeclinedSellerFinancing;
+      const isLand = answers.assetType === "Land";
+      const financingAvailable = !isPreforeclosureAuction && !isLand && !answers.sellerDeclinedSellerFinancing;
       const cashRejected = isPreforeclosureAuction
         ? !!answers.subjectToOnlyPossible && answers.subjectToOnlyPossible !== "No"
-        : financingAvailable && !!answers.sellerDeclinedCash;
+        : (isLand || financingAvailable) && !!answers.sellerDeclinedCash;
 
       answers.sellerAcceptedPrice = root.querySelector("#accepted-price-input").value;
       let ok = !!answers.underContract;
@@ -3798,6 +3853,8 @@ If this suggests the property is worth meaningfully less than expected, say so p
           priceErrorEl.textContent = cashRejected
             ? (isPreforeclosureAuction
               ? "Required -- enter the seller's asking price so admin can structure the subject-to offer."
+              : isLand
+              ? "Required -- enter the seller's asking price so admin has the lead on file."
               : "Required -- enter the seller's asking price so admin can structure the seller financing offer.")
             : "Required -- the seller needs to agree to a price before this lead can be submitted.";
           priceErrorEl.classList.add("show");
@@ -3805,17 +3862,23 @@ If this suggests the property is worth meaningfully less than expected, say so p
         } else if (!cashRejected && highestMao > 0 && price >= highestMao) {
           priceErrorEl.textContent = isPreforeclosureAuction
             ? `This is at or above the highest Max Allowable Offer (${fmt(highestMao)}) -- let the seller know they'll get nothing if this goes to auction. Keep negotiating toward that number, or press the "Seller will not agree to a cash price below MAO" button above to flag it as subject-to instead.`
+            : isLand
+            ? `This is at or above the ceiling (${fmt(highestMao)}) — land is always cash and there is no seller financing fallback. Keep negotiating toward that number, or press the button above to record that the seller won't come down.`
             : financingAvailable
-            ? `This is at or above the highest Max Allowable Offer (${fmt(highestMao)}) -- keep negotiating toward that number. If the seller genuinely won't come down below it, let them know we'd need to do this as seller financing instead, then press the "Seller did not agree to a cash price below MAO" button above.`
+            ? `This is at or above the highest Max Allowable Offer (${fmt(highestMao)}) -- keep negotiating toward that number. If the seller genuinely won't come down below it, let them know we'd need to do this as seller financing instead, then press the "Seller will not come down to a cash price below the ceiling" button above.`
             : `This is at or above the highest Max Allowable Offer (${fmt(highestMao)}) -- the seller already declined seller financing, so keep negotiating until this comes in below that number.`;
           priceErrorEl.classList.add("show");
           ok = false;
-        } else if (cashRejected && !isPreforeclosureAuction && highestMao > 0 && price > highestMao && answers.sellerFinancingAccepted !== "Yes") {
+        } else if (cashRejected && !isPreforeclosureAuction && !isLand && highestMao > 0 && price > highestMao && answers.sellerFinancingAccepted !== "Yes") {
           // Cash was ruled out, but that doesn't waive the MAO cap -- it just changes what has to be
           // true to justify going above it. A price above MAO only pencils if the seller has actually
           // agreed to seller financing (20% down, balance paid off within the payoff window); without
           // that confirmed, this would submit as a full-price cash-equivalent lead with no backing math.
           priceErrorEl.textContent = `This is above the highest Max Allowable Offer (${fmt(highestMao)}) -- a price this high only works as seller financing. Go back to Make Your Offers and confirm with the seller/realtor that they accept seller financing (20% down, balance paid off within the payoff window) before this can be submitted.`;
+          priceErrorEl.classList.add("show");
+          ok = false;
+        } else if (cashRejected && isLand && highestMao > 0 && price > highestMao) {
+          priceErrorEl.textContent = `This is above the ceiling (${fmt(highestMao)}) — land is cash-only with no seller financing option. Either negotiate to a price below the ceiling, or this deal doesn't work.`;
           priceErrorEl.classList.add("show");
           ok = false;
         } else {
