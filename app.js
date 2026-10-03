@@ -4199,6 +4199,9 @@ function buildAnswerRows() {
       ["Rehab AI Response", answers.rehabAiText || "—"],
       ["County Assessed Value", answers.countyAssessedValue || "—"],
       ["CMA Screenshots", (answers.cmaScreenshotUrls || []).join("\n") || "—"],
+      [answers.assetType === "Land" ? "As-Is Value Range (AI Comps)" : "ARV Range (AI Comps)", answers.arvRange || "—"],
+      ["Sold Comps (count)", answers.soldCompsJson ? JSON.parse(answers.soldCompsJson).length + " comps" : "—"],
+      ["Active Comps (count)", answers.activeCompsJson ? JSON.parse(answers.activeCompsJson).length + " comps" : "—"],
       ["Bottom Dollar Price", answers.bottomDollarPrice || "—"],
       ["Notes (Why Sell / Good Lead)", answers.cashDealNotes || "—"]
     );
@@ -6137,7 +6140,7 @@ function openDetail(lead) {
       try { soldComps = lead["Sold Comps"] ? JSON.parse(lead["Sold Comps"]) : []; } catch(e) {}
       try { activeComps = lead["Active Comps"] ? JSON.parse(lead["Active Comps"]) : []; } catch(e) {}
       return `<div class="banner info" style="margin-top:16px;text-align:left;">
-        <strong>AI Comps Data${lead["ARV Range"] ? " — ARV Range: " + escapeHtml(lead["ARV Range"]) : ""}</strong>
+        <strong>AI Comps Data${lead["ARV Range"] ? " — " + (lead["Asset Type"] === "Land" ? "As-Is Value Range" : "ARV Range") + ": " + escapeHtml(lead["ARV Range"]) : ""}</strong>
         ${soldComps.length ? `
           <div style="margin-top:10px;font-weight:600;font-size:12px;color:#374151;">SOLD COMPS (${soldComps.length})</div>
           <div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;margin-top:4px;">${colHeaders}${soldComps.map(rowHtml).join("")}</table></div>
