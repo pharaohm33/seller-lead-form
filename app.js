@@ -4,7 +4,7 @@
 // ── AI RESPONSE PARSER ──
 // Parses the structured summary block from Google AI Mode comps responses.
 // Expects the ---COMPS SUMMARY--- block the prompt asks AI to output.
-function parseAICompsResponse(text, isLand) {
+function parseAICompsResponse(text, isLand, isBusiness) {
   const parseDollar = s => {
     if (!s) return 0;
     const n = Number(String(s).replace(/[$,\s]/g, ""));
@@ -34,18 +34,23 @@ function parseAICompsResponse(text, isLand) {
     const comps = [];
     const lines = section.split("\n").map(l => l.trim()).filter(Boolean);
     for (const line of lines) {
-      if (/^(SOLD|ACTIVE|ARV)/i.test(line)) continue;
+      if (/^(SOLD|ACTIVE|BUSINESS|ARV)/i.test(line)) continue;
       const parts = line.split("|").map(p => p.trim());
       if (parts.length >= 2) {
         const comp = { address: parts[0] };
+        comp.price = parseDollar(parts[1]) || 0;
         if (isLand) {
-          comp.price = parseDollar(parts[1]) || 0;
           comp.acres = parts[2] || "";
           comp.pricePerUnit = parts[3] || "";
           comp.distance = parts[4] || "";
           comp.date = parts[5] || "";
+        } else if (isBusiness) {
+          comp.revenue = parts[2] || "";
+          comp.earnings = parts[3] || "";
+          comp.multiple = parts[4] || "";
+          comp.location = parts[5] || "";
+          comp.date = parts[6] || "";
         } else {
-          comp.price = parseDollar(parts[1]) || 0;
           comp.sqft = parts[2] || "";
           comp.pricePerSqft = parts[3] || "";
           comp.beds = parts[4] || "";
@@ -59,8 +64,10 @@ function parseAICompsResponse(text, isLand) {
     return comps;
   }
 
-  const soldMatch = block.match(/SOLD COMPS:\s*([\s\S]*?)(?=ACTIVE COMPS:|ARV RANGE:|$)/i);
-  const activeMatch = block.match(/ACTIVE COMPS:\s*([\s\S]*?)(?=ARV RANGE:|$)/i);
+  const soldMatch = isBusiness
+    ? block.match(/BUSINESS COMPS:\s*([\s\S]*?)(?=ARV RANGE:|$)/i)
+    : block.match(/SOLD COMPS:\s*([\s\S]*?)(?=ACTIVE COMPS:|ARV RANGE:|$)/i);
+  const activeMatch = !isBusiness && block.match(/ACTIVE COMPS:\s*([\s\S]*?)(?=ARV RANGE:|$)/i);
   const soldComps = soldMatch ? parseCompLines(soldMatch[1]) : [];
   const activeComps = activeMatch ? parseCompLines(activeMatch[1]) : [];
 
@@ -1202,6 +1209,8 @@ const steps = [
       const isResidential = answers.assetType === "Residential Property (1-4 units)";
       const isLand = answers.assetType === "Land";
       const isCommercial = answers.assetType === "Commercial Property";
+      const isBusiness = answers.assetType === "Business";
+      const earningsType = answers.businessEarningsType || "SDE";
       const isMultifamilySubtype = answers.assetSubtype === "Multifamily";
       const hasCompsWorkflow = isResidential || isLand || isCommercial;
       const isOnMarket = answers.marketStatus === "On-Market";
@@ -1293,14 +1302,16 @@ const steps = [
           straight into pricing.</p>
         ` : ""}
 
-        ${hasCompsWorkflow ? `
+        ${(hasCompsWorkflow || isBusiness) ? `
           <!-- How this works accordion -->
           <details id="how-it-works-details" style="margin-bottom:16px;border:1px solid #ddd6fe;border-radius:8px;background:#faf5ff;">
             <summary style="cursor:pointer;padding:11px 14px;font-weight:600;color:#5b21b6;font-size:13px;list-style:none;display:flex;align-items:center;gap:6px;" onclick="this.parentElement.querySelector('.how-it-works-arrow').textContent=this.parentElement.open?'▶':'▼'">
               <span class="how-it-works-arrow">▶</span> How this works — tap to expand
             </summary>
             <div style="padding:0 14px 14px;">
-              ${isResidential ? (isSellerFinancing ? `
+              ${isBusiness ? `
+                <p class="hint"><strong>Business valuation uses earnings multiples, not property comps.</strong> The prompt below asks Google AI to find recently sold comparable businesses and the typical ${earningsType} multiple range for this type of business — then calculates an estimated value from the subject's own earnings.</p>
+              ` : isResidential ? (isSellerFinancing ? `
                 <p class="hint"><strong>Get a baseline from Chase (optional).</strong> Use
                 <a href="https://www.chase.com/personal/mortgage/calculators-resources/home-value-estimator" target="_blank" rel="noopener">Chase's Home Value Estimator</a>
                 for a quick reference — admin uses this to sanity-check numbers. If no repairs are needed, that's your As-Is Value too. The Google AI comps in Step 1 below are the real source of truth.</p>
@@ -1315,8 +1326,8 @@ const steps = [
                 <li>Go to <strong>google.com</strong>, search anything (typing "ai" works fine), and click the
                 <strong>"AI Mode"</strong> tab near the top of the results.</li>
                 <li>Press <strong>"Copy Comps Prompt"</strong> in Step 1 below, paste it into AI Mode.</li>
-                <li>Google AI will pull real recent comps (sold AND active for-sale listings) and calculate ${isLand ? "a value range" : isCommercial ? "an ARV range from both a sales-comps and an income approach" : "an ARV range"} — this is your CMA.</li>
-                <li>At the bottom of the AI response, press the <strong>Copy</strong> button — then paste it into Step 2 below. The form will auto-fill the ARV and comps for you.</li>
+                <li>Google AI will pull real recent comps and calculate ${isBusiness ? `an estimated business value using ${earningsType} multiples` : isLand ? "a value range" : isCommercial ? "an ARV range from both a sales-comps and an income approach" : "an ARV range"} — this is your CMA.</li>
+                <li>At the bottom of the AI response, press the <strong>Copy</strong> button — then paste it into Step 2 below. The form will auto-fill the ${isBusiness ? "value" : "ARV"} and comps for you.</li>
                 <li><strong>Review before trusting</strong> — if anything looks off (a comp too far away, wrong condition, math that doesn't add up), note it below so admin can see your reasoning.</li>
               </ol>
               ${isResidential ? `
@@ -1325,7 +1336,9 @@ const steps = [
               ${isCommercial ? `
                 <p class="hint"><strong>Comps must match the asset type first</strong> — never compare retail to multifamily. Expect 0.5–1 mile in urban areas, up to 3–5 miles rural. Up to 12 months old.</p>
               ` : ""}
-              ${isLand ? `
+              ${isBusiness ? `
+                <p class="hint"><strong>Business comps use EBITDA/SDE multiples, not location.</strong> AI will look for recently sold businesses of the same type and revenue size to establish the typical multiple range — then multiply that by the subject's ${earningsType} to estimate value.</p>
+              ` : isLand ? `
                 ${isOnMarket ? `<p class="hint"><strong>City population must be 50,000+</strong> for on-market land deals.</p>` : ""}
                 <p class="hint"><strong>For land, zoning match matters more than distance.</strong> A comp must match on zoning, topography, and access/utilities before distance is weighed. Expect 1–5 miles suburban, 10–50+ miles rural. Up to 24 months old in slow markets — AI will time-adjust prices automatically.</p>
               ` : isCommercial ? "" : `
@@ -1370,7 +1383,7 @@ const steps = [
 
           <button type="button" class="btn secondary" id="comps-prompt-toggle-btn" style="margin-top:6px;">Get Comps Research Prompt for Google AI &#9662;</button>
           <div id="comps-prompt-panel" hidden style="margin-top:10px;">
-            <p class="hint">This is pre-filled with the address/${isLand ? "acreage or square footage" : isCommercial ? "asset type/size" : "beds/baths/sqft"}
+            <p class="hint">This is pre-filled with the ${isBusiness ? "business type and earnings" : `address/${isLand ? "acreage or square footage" : isCommercial ? "asset type/size" : "beds/baths/sqft"}`}
             already on file. Copy it, ${googleAiHow}, and paste it in.</p>
             <textarea id="comps-prompt-text" readonly rows="16" style="width:100%; font-size:12px; font-family:'IBM Plex Mono', ui-monospace, monospace;"></textarea>
             <button type="button" class="btn secondary" id="comps-prompt-copy-btn" style="margin-top:8px;">Copy Prompt</button>
@@ -1406,20 +1419,22 @@ const steps = [
           <input type="file" id="cma-screenshots-input" accept="image/*" multiple>
           <div id="cma-screenshots-list" style="margin-top:8px;"></div>
 
-          <label class="field-label" style="margin-top:16px;">${isLand ? "As-Is Value" : "ARV"}
-            <span class="small-muted">${isLand ? "(current market value — land offers are based on this directly, not a post-repair value)" : "(After Repair Value)"}</span>${isResidential ? "" : ` <span class="req">*</span>`}</label>
+          <label class="field-label" style="margin-top:16px;">${isLand ? "As-Is Value" : isBusiness ? "Estimated Business Value" : "ARV"}
+            <span class="small-muted">${isLand ? "(current market value — land offers are based on this directly, not a post-repair value)" : isBusiness ? `(estimated from ${earningsType} multiples — this is the number offers are based on)` : "(After Repair Value)"}</span>${isResidential ? "" : ` <span class="req">*</span>`}</label>
           <input type="number" id="arv-input" placeholder="$">
           <div class="error-text" id="arv-error">Required.</div>
-          <p class="hint">The AI prompt anchors on the <strong>lowest comp(s) nearest to the property</strong> — enter that number here, not a blended or high-end figure.</p>
+          <p class="hint">${isBusiness ? `The AI prompt anchors on the <strong>lowest multiple among the most recent comps</strong> — enter the resulting low-end value estimate here, not a blended or high-end figure.` : `The AI prompt anchors on the <strong>lowest comp(s) nearest to the property</strong> — enter that number here, not a blended or high-end figure.`}</p>
           ${isResidential && !isPreforeclosureAuction ? `<div class="banner danger" id="arv-vs-asking-banner" hidden style="margin-top:12px;"></div>` : ""}
 
-          <!-- STEP 3 header -->
-          <div style="border-left:3px solid #7c3aed;padding:4px 0 4px 12px;margin:20px 0 4px;">
-            <strong style="color:#7c3aed;font-size:14px;">Step 3 — Listing/photos link, rehab estimate &amp; remaining details</strong>
-            <p class="hint" style="margin:3px 0 0;">Enter the listing or photos link first — it feeds directly into the repair estimate prompt below.</p>
-          </div>
-          <label class="field-label">Pictures / Listing Link <span class="small-muted">(paste the for-sale listing URL or photos link — this is what Google AI uses to see the property's condition)</span></label>
-          <input type="text" id="pictures-link-input" placeholder="https://...">
+          ${!isBusiness ? `
+            <!-- STEP 3 header -->
+            <div style="border-left:3px solid #7c3aed;padding:4px 0 4px 12px;margin:20px 0 4px;">
+              <strong style="color:#7c3aed;font-size:14px;">Step 3 — Listing/photos link, rehab estimate &amp; remaining details</strong>
+              <p class="hint" style="margin:3px 0 0;">Enter the listing or photos link first — it feeds directly into the repair estimate prompt below.</p>
+            </div>
+            <label class="field-label">Pictures / Listing Link <span class="small-muted">(paste the for-sale listing URL or photos link — this is what Google AI uses to see the property's condition)</span></label>
+            <input type="text" id="pictures-link-input" placeholder="https://...">
+          ` : ""}
         ` : ""}
 
         ${isLand ? `
@@ -1506,7 +1521,7 @@ const steps = [
           </div>
         ` : ""}
 
-        ${!isLand ? `
+        ${!isLand && !isBusiness ? `
           ${isPreforeclosureAuction ? `
             <p class="hint" style="margin:16px 0;">This rehab estimate feeds the MAO used to decide cash
             vs subject-to on the Existing Debt &amp; Arrears step next.</p>
@@ -1607,12 +1622,12 @@ const steps = [
         <div class="banner warn" id="max-offer-banner" hidden style="margin-top:16px;"></div>
         <div class="banner warn" id="assessed-max-offer-banner" hidden style="margin-top:16px;"></div>
       `;
-      root.querySelector("#arv-input").value = answers.arv || "";
+      if (hasCompsWorkflow || isBusiness) root.querySelector("#arv-input").value = answers.arv || "";
       if (isResidential) {
         root.querySelector("#chase-estimate-input").value = answers.chaseEstimate || "";
         if (!isPreforeclosureAuction) root.querySelector("#asking-price-input").value = answers.askingPrice || "";
       }
-      root.querySelector("#pictures-link-input").value = answers.picturesLink || "";
+      if (!isBusiness) root.querySelector("#pictures-link-input").value = answers.picturesLink || "";
       if (isResidential && isPreforeclosureAuction) {
         root.querySelector("#year-built-input").value = answers.yearBuilt || "";
         root.querySelector("#purchase-year-input").value = answers.purchaseYear || "";
@@ -1634,7 +1649,7 @@ const steps = [
         root.querySelector("#property-photos-link-input").value = answers.propertyPhotosLink || "";
         root.querySelector("#property-photos-link-input").oninput = (e) => { answers.propertyPhotosLink = e.target.value.trim(); };
       }
-      if (!isLand) {
+      if (!isLand && !isBusiness) {
         root.querySelector("#rehab-low-input").value = answers.rehabEstimateLow || "";
         root.querySelector("#rehab-high-input").value = answers.rehabEstimateHigh || "";
         root.querySelector("#rehab-ai-text-input").value = answers.rehabAiText || "";
@@ -1654,17 +1669,17 @@ const steps = [
       let feeManuallyEdited = !!answers.wholesaleFee;
 
       const recomputeCashDeal = () => {
-        // Land has no Rehab Estimate inputs -- offers run purely off the As-Is Value entered above,
-        // so rehab stays 0 and never gets subtracted from anything below.
-        const rehabLow = isLand ? 0 : (Number(root.querySelector("#rehab-low-input").value) || 0);
-        const rehabHigh = isLand ? 0 : (Number(root.querySelector("#rehab-high-input").value) || 0);
-        const hasSupplementary = !!(root.querySelector("#pictures-link-input").value.trim()
+        // Land and Business have no Rehab Estimate inputs -- offers run purely off the As-Is/Business
+        // Value entered above, so rehab stays 0 and never gets subtracted from anything below.
+        const rehabLow = (isLand || isBusiness) ? 0 : (Number(root.querySelector("#rehab-low-input").value) || 0);
+        const rehabHigh = (isLand || isBusiness) ? 0 : (Number(root.querySelector("#rehab-high-input").value) || 0);
+        const hasSupplementary = !!(!isBusiness && root.querySelector("#pictures-link-input")?.value.trim()
           || rehabLow || rehabHigh
           || root.querySelector("#assessed-value-input").value);
         if (!isPreforeclosureAuction) {
           root.querySelector("#cash-notes-hint").textContent = hasSupplementary
             ? "(optional)"
-            : `(required since pictures${isLand ? "" : "/rehab estimate"}/assessed value are all blank)`;
+            : `(required since pictures${(isLand || isBusiness) ? "" : "/rehab estimate"}/assessed value are all blank)`;
         }
 
         const arv = Number(root.querySelector("#arv-input").value) || 0;
@@ -1685,7 +1700,7 @@ const steps = [
           )}"`;
         }
 
-        if (!isLand) {
+        if (!isLand && !isBusiness) {
           root.querySelector("#repair-prompt-hint").textContent = `"${buildRepairPrompt(arv, root.querySelector("#pictures-link-input").value.trim())}"`;
           const rehabAverageBanner = root.querySelector("#rehab-average-banner");
           if (rehabLow && rehabHigh) {
@@ -1857,8 +1872,10 @@ const steps = [
       // NOI/occupancy handlers (wired before that block runs, but only ever called after render()
       // finishes) can call the real implementation through the same closure.
       let updateCompsPromptText = () => {};
-      const recomputeTriggerSelectors = ["#arv-input", "#pictures-link-input", "#assessed-value-input"];
-      if (!isLand) recomputeTriggerSelectors.push("#rehab-low-input", "#rehab-high-input");
+      const recomputeTriggerSelectors = isBusiness
+        ? ["#arv-input", "#assessed-value-input"]
+        : ["#arv-input", "#pictures-link-input", "#assessed-value-input"];
+      if (!isLand && !isBusiness) recomputeTriggerSelectors.push("#rehab-low-input", "#rehab-high-input");
       if (isResidential) {
         if (isPreforeclosureAuction) {
           recomputeTriggerSelectors.push("#year-built-input", "#purchase-year-input", "#months-behind-input", "#annual-maintenance-input");
@@ -1885,7 +1902,7 @@ const steps = [
         });
       }
 
-      if (!isLand) {
+      if (!isLand && !isBusiness) {
         root.querySelector("#repair-prompt-copy-btn").onclick = () => {
           const arv = Number(root.querySelector("#arv-input").value) || 0;
           const text = buildRepairPrompt(arv, root.querySelector("#pictures-link-input").value.trim());
@@ -1960,7 +1977,7 @@ const steps = [
         });
       }
 
-      if (hasCompsWorkflow) {
+      if (hasCompsWorkflow || isBusiness) {
         const compsPromptToggleBtn = root.querySelector("#comps-prompt-toggle-btn");
         const compsPromptPanel = root.querySelector("#comps-prompt-panel");
         compsPromptToggleBtn.onclick = () => {
@@ -1977,7 +1994,9 @@ const steps = [
         // this whole thing is a function re-run on every relevant edit rather than computed once at
         // initial render -- otherwise it would permanently show blank/stale NOI and occupancy.
         updateCompsPromptText = () => {
-        const detailsPart = isLand
+        const detailsPart = isBusiness
+          ? ""
+          : isLand
           ? (answers.acreage
               ? `${answers.acreage} acre(s)${answers.sqft ? ` (${answers.sqft} square feet)` : ""}${answers.landZoning ? `, zoned ${answers.landZoning}` : ""}`
               : (answers.sqft ? `${answers.sqft} square feet${answers.landZoning ? `, zoned ${answers.landZoning}` : ""}` : "[ACREAGE/SQUARE FEET]"))
@@ -2097,6 +2116,42 @@ After listing the comps, calculate BOTH approaches below and reconcile them if t
   : `We don't have a confirmed current NOI for this property${occupancyPart ? ` (currently ${occupancyPart.toLowerCase()})` : ""}. If you can reasonably estimate one from market rents typical for this asset type and size${occupancyPart && answers.commercialOccupancyStatus !== "Fully Occupied" ? `, accounting for that occupancy level` : ""}, calculate an Income Approach value using that estimate and the highest cap rate among the nearest sold comps (not an average across every comp), but flag it clearly as an estimate rather than confirmed income. When estimating expenses to derive that NOI, flag plainly if operating costs (taxes and insurance especially) in this specific market tend to run meaningfully higher or lower than a typical 35 to 45% expense ratio, and state your single most likely NOI estimate, not just a range. Otherwise, lean primarily on the Sales Comparison Approach above since there's no reliable income data to anchor an Income Approach.`}
 
 If the two approaches disagree by more than roughly 15%, say so plainly and explain the likely reason (below-market in-place rents, deferred capital expenditures, a below-market lease in place, etc.) — that's an important finding, not something to smooth over. Then give one final reconciled ARV: your single most likely estimate, not just a range, weighing both approaches but favoring the more conservative (lower) one unless the higher figure is clearly better supported by the data.`
+: isBusiness
+? `Act as a professional business valuation analyst. Explain your math simply and avoid business jargon — I have no business brokerage experience.
+
+Find recent comparable business sales and an estimated market value for this business:
+- Business Type: ${answers.assetSubtype || "[BUSINESS TYPE]"}
+- Annual Revenue: ${answers.businessRevenue ? "$" + Number(answers.businessRevenue).toLocaleString() : "[REVENUE UNKNOWN]"}
+- Annual ${earningsType}: ${answers.businessEarnings ? "$" + Number(answers.businessEarnings).toLocaleString() : "[EARNINGS UNKNOWN]"}
+
+Search for up to 3 comparable recently sold businesses that meet ALL of these rules, prioritizing the most recent matches first:
+1. Same or very similar business type and industry — never comp an unrelated business type against this one.
+2. Sold within the last 2 years — prefer the most recent sales where available.
+3. Similar revenue and size — ideally within roughly the same revenue bracket (under $500K, $500K–$2M, $2M–$10M, etc.).
+4. ${earningsType} multiples are the standard valuation metric for this type of business.
+
+For each comp, list:
+- Business type and brief description
+- Sale price
+- Annual revenue at time of sale
+- Annual ${earningsType} at time of sale
+- Sale multiple (${earningsType} multiple = Sale Price ÷ ${earningsType})
+- Location (city/state)
+- Date of sale (or year)
+
+After listing the comps:
+1. ${earningsType} Multiple Range: state the typical ${earningsType} multiple range for this type of business at this revenue level, anchored on the most recent comps with the lowest multiples — do not average all comps indiscriminately, since older or outlier multiples overstate what a buyer would actually pay today.
+2. Estimated Business Value: anchor on the lowest multiple among the most recent and most relevant comps. Estimated Value = Subject ${earningsType} ($${answers.businessEarnings ? Number(answers.businessEarnings).toLocaleString() : "[EARNINGS]"}) × that multiple — give a final range, plus your single most likely estimate within that range, still favoring the low end unless you have a specific reason not to.
+
+If the value comes out lower than what the seller is asking, say so plainly — that's an important finding, not something to smooth over.
+
+At the very end of your response, after all analysis, output a structured summary block in EXACTLY this format (no deviations — this is machine-read):
+---COMPS SUMMARY---
+BUSINESS COMPS:
+[For each comp: BUSINESS TYPE | SALE PRICE | REVENUE | ${earningsType.toUpperCase()} | MULTIPLE | LOCATION | DATE]
+ARV RANGE: $[low] to $[high]
+ARV ESTIMATE: $[single best estimate]
+---END SUMMARY---`
 : `Act as a professional real estate data analyst. Explain your math simply and avoid real estate jargon — I have no real estate experience.
 
 Find recent comparable sales (comps) and an estimated After Repair Value (ARV) for this property:
@@ -2179,7 +2234,7 @@ If this suggests the property is worth meaningfully less than expected, say so p
           parseBtn.onclick = () => {
             const text = aiResponseInput.value.trim();
             if (!text) { alert("Paste the Google AI response first."); return; }
-            const parsed = parseAICompsResponse(text, isLand);
+            const parsed = parseAICompsResponse(text, isLand, isBusiness);
             if (!parsed.arvLow && !parsed.arvHigh && !parsed.arvEstimate) {
               aiParseResults.hidden = false;
               aiParseResults.innerHTML = `<div class="banner warn">Couldn't find an ARV range in the response. Make sure you copied the full AI response including the summary block at the bottom, then try again.</div>`;
@@ -2199,9 +2254,13 @@ If this suggests the property is worth meaningfully less than expected, say so p
             const fmt = n => n ? "$" + Number(n).toLocaleString() : "—";
             const compRow = (c, isLandComp) => isLandComp
               ? `<tr><td>${c.address}</td><td>${fmt(c.price)}</td><td>${c.acres || "—"}</td><td>${c.pricePerUnit || "—"}</td><td>${c.distance || "—"}</td><td>${c.date || "—"}</td></tr>`
+              : isBusiness
+              ? `<tr><td>${c.address}</td><td>${fmt(c.price)}</td><td>${c.revenue || "—"}</td><td>${c.earnings || "—"}</td><td>${c.multiple || "—"}</td><td>${c.location || "—"}</td><td>${c.date || "—"}</td></tr>`
               : `<tr><td>${c.address}</td><td>${fmt(c.price)}</td><td>${c.sqft || "—"}</td><td>${c.pricePerSqft || "—"}</td><td>${c.beds || "—"}</td><td>${c.baths || "—"}</td><td>${c.distance || "—"}</td><td>${c.date || "—"}</td></tr>`;
             const colHeaders = isLand
               ? "<tr><th>Address</th><th>Price</th><th>Acres</th><th>Price/Acre</th><th>Distance</th><th>Date / DOM</th></tr>"
+              : isBusiness
+              ? `<tr><th>Business Type</th><th>Sale Price</th><th>Revenue</th><th>${earningsType}</th><th>Multiple</th><th>Location</th><th>Date</th></tr>`
               : "<tr><th>Address</th><th>Price</th><th>Sqft</th><th>$/Sqft</th><th>Beds</th><th>Baths</th><th>Distance</th><th>Date / DOM</th></tr>";
             const tableStyle = "width:100%;border-collapse:collapse;font-size:12px;margin-top:6px;";
             const tdStyle = "border:1px solid #e5e7eb;padding:5px 7px;";
@@ -2211,14 +2270,14 @@ If this suggests the property is worth meaningfully less than expected, say so p
             aiParseResults.hidden = false;
             aiParseResults.innerHTML = `
               <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:14px;">
-                <strong style="color:#166534;font-size:14px;">✓ Results parsed — ARV auto-filled</strong>
+                <strong style="color:#166534;font-size:14px;">✓ Results parsed — ${isBusiness ? "Business Value" : "ARV"} auto-filled</strong>
                 <div style="margin-top:10px;display:flex;gap:16px;flex-wrap:wrap;">
-                  <div><span class="small-muted">ARV Range</span><br><strong>${fmt(parsed.arvLow)} – ${fmt(parsed.arvHigh)}</strong></div>
+                  <div><span class="small-muted">${isBusiness ? "Value Range" : "ARV Range"}</span><br><strong>${fmt(parsed.arvLow)} – ${fmt(parsed.arvHigh)}</strong></div>
                   <div><span class="small-muted">Best Estimate</span><br><strong>${fmt(parsed.arvEstimate)}</strong></div>
-                  <div><span class="small-muted">Starting Offer (low ARV)</span><br><strong style="color:#7c3aed;">${fmt(parsed.arvLow)}</strong></div>
+                  <div><span class="small-muted">${isBusiness ? "Starting Offer (low value)" : "Starting Offer (low ARV)"}</span><br><strong style="color:#7c3aed;">${fmt(parsed.arvLow)}</strong></div>
                 </div>
                 ${parsed.soldComps.length ? `
-                  <div style="margin-top:12px;font-weight:600;font-size:12px;color:#374151;">SOLD COMPS (${parsed.soldComps.length})</div>
+                  <div style="margin-top:12px;font-weight:600;font-size:12px;color:#374151;">${isBusiness ? "BUSINESS COMPS" : "SOLD COMPS"} (${parsed.soldComps.length})</div>
                   <table style="${tableStyle}">${styledHeaders}${soldRows}</table>
                 ` : ""}
                 ${parsed.activeComps.length ? `
@@ -2300,14 +2359,15 @@ If this suggests the property is worth meaningfully less than expected, say so p
         return ok;
       }
       const isLand = answers.assetType === "Land";
+      const isBusiness = answers.assetType === "Business";
       const isResidentialForChase = answers.assetType === "Residential Property (1-4 units)";
-      answers.arv = root.querySelector("#arv-input").value;
+      answers.arv = root.querySelector("#arv-input")?.value || answers.arv || "";
       if (isResidentialForChase) answers.chaseEstimate = root.querySelector("#chase-estimate-input").value;
-      answers.picturesLink = root.querySelector("#pictures-link-input").value.trim();
-      // Land has no Rehab Estimate inputs -- offers run purely off the As-Is Value entered above.
-      if (!isLand) answers.rehabAiText = root.querySelector("#rehab-ai-text-input").value.trim();
-      answers.rehabEstimateLow = isLand ? "" : root.querySelector("#rehab-low-input").value;
-      answers.rehabEstimateHigh = isLand ? "" : root.querySelector("#rehab-high-input").value;
+      if (!isBusiness) answers.picturesLink = root.querySelector("#pictures-link-input").value.trim();
+      // Land and Business have no Rehab Estimate inputs -- offers run purely off As-Is/Business Value.
+      if (!isLand && !isBusiness) answers.rehabAiText = root.querySelector("#rehab-ai-text-input").value.trim();
+      answers.rehabEstimateLow = (isLand || isBusiness) ? "" : root.querySelector("#rehab-low-input").value;
+      answers.rehabEstimateHigh = (isLand || isBusiness) ? "" : root.querySelector("#rehab-high-input").value;
       const rLow = Number(answers.rehabEstimateLow) || 0;
       const rHigh = Number(answers.rehabEstimateHigh) || 0;
       answers.rehabEstimate = rLow && rHigh ? String((rLow + rHigh) / 2) : String(rLow || rHigh || "");
@@ -5869,14 +5929,19 @@ function openDetail(lead) {
     ` : ""}
     ${(lead["Sold Comps"] || lead["Active Comps"]) ? (() => {
       const isLandLead = lead["Asset Type"] === "Land";
+      const isBusinessLead = lead["Asset Type"] === "Business";
       const tdS = "border:1px solid #e5e7eb;padding:5px 7px;font-size:12px;";
       const thS = tdS + "background:#f3f4f6;font-weight:600;";
       const colHeaders = isLandLead
         ? `<tr><th style="${thS}">Address</th><th style="${thS}">Price</th><th style="${thS}">Acres</th><th style="${thS}">Price/Acre</th><th style="${thS}">Distance</th><th style="${thS}">Date / DOM</th></tr>`
+        : isBusinessLead
+        ? `<tr><th style="${thS}">Business Type</th><th style="${thS}">Sale Price</th><th style="${thS}">Revenue</th><th style="${thS}">EBITDA/SDE</th><th style="${thS}">Multiple</th><th style="${thS}">Location</th><th style="${thS}">Date</th></tr>`
         : `<tr><th style="${thS}">Address</th><th style="${thS}">Price</th><th style="${thS}">Sqft</th><th style="${thS}">$/Sqft</th><th style="${thS}">Beds</th><th style="${thS}">Baths</th><th style="${thS}">Distance</th><th style="${thS}">Date / DOM</th></tr>`;
       const fmtC = n => n ? "$" + Number(n).toLocaleString() : "—";
       const rowHtml = (c) => isLandLead
         ? `<tr><td style="${tdS}">${escapeHtml(c.address||"")}</td><td style="${tdS}">${fmtC(c.price)}</td><td style="${tdS}">${escapeHtml(c.acres||"—")}</td><td style="${tdS}">${escapeHtml(c.pricePerUnit||"—")}</td><td style="${tdS}">${escapeHtml(c.distance||"—")}</td><td style="${tdS}">${escapeHtml(c.date||"—")}</td></tr>`
+        : isBusinessLead
+        ? `<tr><td style="${tdS}">${escapeHtml(c.address||"")}</td><td style="${tdS}">${fmtC(c.price)}</td><td style="${tdS}">${escapeHtml(c.revenue||"—")}</td><td style="${tdS}">${escapeHtml(c.earnings||"—")}</td><td style="${tdS}">${escapeHtml(c.multiple||"—")}</td><td style="${tdS}">${escapeHtml(c.location||"—")}</td><td style="${tdS}">${escapeHtml(c.date||"—")}</td></tr>`
         : `<tr><td style="${tdS}">${escapeHtml(c.address||"")}</td><td style="${tdS}">${fmtC(c.price)}</td><td style="${tdS}">${escapeHtml(c.sqft||"—")}</td><td style="${tdS}">${escapeHtml(c.pricePerSqft||"—")}</td><td style="${tdS}">${escapeHtml(c.beds||"—")}</td><td style="${tdS}">${escapeHtml(c.baths||"—")}</td><td style="${tdS}">${escapeHtml(c.distance||"—")}</td><td style="${tdS}">${escapeHtml(c.date||"—")}</td></tr>`;
       let soldComps = [], activeComps = [];
       try { soldComps = lead["Sold Comps"] ? JSON.parse(lead["Sold Comps"]) : []; } catch(e) {}
