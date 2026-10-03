@@ -397,7 +397,7 @@ const steps = [
       `;
 
       root.querySelector("#autofill-url-input").value = answers.sourceLink || answers._autofillUrl || "";
-      root.querySelector("#autofill-skip-btn").onclick = () => goTo(currentStep + 1);
+      root.querySelector("#autofill-skip-btn").onclick = () => goTo(nextIndex(stepIndex));
 
       root.querySelector("#autofill-run-btn").onclick = async () => {
         const urlVal = root.querySelector("#autofill-url-input").value.trim();
@@ -495,7 +495,7 @@ const steps = [
             <p class="hint" style="margin-top:10px;">Fields already filled — you can still edit them in the steps ahead.</p>
             <button class="btn primary" id="autofill-continue-btn" style="margin-top:10px;width:100%;">Continue →</button>
           </div>`;
-        previewEl.querySelector("#autofill-continue-btn").onclick = () => goTo(currentStep + 1);
+        previewEl.querySelector("#autofill-continue-btn").onclick = () => goTo(nextIndex(stepIndex));
       };
     },
     validate() { return true; }

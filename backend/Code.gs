@@ -1175,6 +1175,53 @@ function fetchListing(body) {
     if (ogTitle) result._ogTitle = ogTitle;
   }
 
+  // 3. Aggressive agent/phone/email extraction from raw HTML text
+  // Most listing sites render agent info via JS, but some embed it in data attrs or plain HTML.
+  if (!result.agentName) {
+    // Try common patterns: "listingAgent","agentName","agent_name","listing_agent" in JSON blobs
+    const agentNameM = html.match(/["'](?:listingAgent|agentName|agent_name|listing_agent|agentFullName|brokerName)["']\s*:\s*["']([^"']{2,60})["']/i);
+    if (agentNameM) result.agentName = agentNameM[1];
+  }
+  if (!result.agentPhone) {
+    const agentPhoneM = html.match(/["'](?:agentPhone|agent_phone|listingAgentPhone|brokerPhone|phoneNumber|phone)["']\s*:\s*["']([+\d\s()./-]{7,20})["']/i);
+    if (agentPhoneM) result.agentPhone = agentPhoneM[1].trim();
+    // Fallback: first US phone number pattern near "agent" or "broker" or "contact" in HTML
+    if (!result.agentPhone) {
+      const vicinity = html.match(/(?:agent|broker|contact|realtor|listed\s*by)[^<]{0,200}(\(?\d{3}\)?[\s.\-]\d{3}[\s.\-]\d{4})/i);
+      if (vicinity) result.agentPhone = vicinity[1];
+    }
+  }
+  if (!result.agentEmail) {
+    const agentEmailM = html.match(/["'](?:agentEmail|agent_email|listingAgentEmail|brokerEmail|email)["']\s*:\s*["']([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})["']/i);
+    if (agentEmailM) result.agentEmail = agentEmailM[1];
+    if (!result.agentEmail) {
+      const emailVicinityM = html.match(/(?:agent|broker|contact|realtor|listed\s*by)[^<]{0,300}([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/i);
+      if (emailVicinityM) result.agentEmail = emailVicinityM[1];
+    }
+  }
+  // 4. Try Zillow's __NEXT_DATA__ / window.__data JSON blob (large embedded JSON)
+  if (!result.agentName || !result.agentPhone) {
+    const nextDataM = html.match(/<script[^>]*id="__NEXT_DATA__"[^>]*>([\s\S]{1,300000}?)<\/script>/);
+    if (nextDataM) {
+      try {
+        const nd = JSON.parse(nextDataM[1]);
+        const ndStr = JSON.stringify(nd);
+        if (!result.agentName) {
+          const nm = ndStr.match(/"(?:agentName|displayName|name)"\s*:\s*"([^"]{2,60})"/);
+          if (nm) result.agentName = nm[1];
+        }
+        if (!result.agentPhone) {
+          const pm = ndStr.match(/"(?:phone|mobilePhone|phoneNumber|agentPhone)"\s*:\s*"([+\d\s().\/\-]{7,20})"/);
+          if (pm) result.agentPhone = pm[1].trim();
+        }
+        if (!result.agentEmail) {
+          const em = ndStr.match(/"(?:email|agentEmail)"\s*:\s*"([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})"/);
+          if (em) result.agentEmail = em[1];
+        }
+      } catch(e) {}
+    }
+  }
+
   if (Object.keys(result).length === 0) return { ok: false, error: "No structured listing data found on that page. Try uploading a screenshot instead." };
   return { ok: true, data: result };
 }
