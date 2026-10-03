@@ -421,9 +421,9 @@ const steps = [
         <div id="autofill-preview" style="margin-top:12px;display:none;"></div>
       `;
 
-      // Don't pre-populate from sourceLink — that's the final saved URL, not the autofill input.
-      // Only restore _autofillUrl if it was set during this same autofill session.
-      root.querySelector("#autofill-url-input").value = answers._autofillUrl || "";
+      // Never pre-populate from saved answers — always start blank so old listing data can't bleed in.
+      delete answers._autofillUrl;
+      root.querySelector("#autofill-url-input").value = "";
       root.querySelector("#autofill-skip-btn").onclick = () => goTo(nextIndex(stepIndex));
 
       root.querySelector("#autofill-run-btn").onclick = async () => {
@@ -4506,7 +4506,7 @@ async function submitLead(container) {
 // countyAssessedValue) whenever the relevant step renders or validates -- leaving them out of the
 // save/resume link keeps it shorter (maoBreakdown especially, a multi-paragraph blurb) without
 // losing anything, since they're never a source of truth themselves.
-const DERIVED_ANSWER_KEYS = ["asIsValue", "maoCash", "maoHardMoney10", "maoHardMoney20", "maoBreakdown"];
+const DERIVED_ANSWER_KEYS = ["asIsValue", "maoCash", "maoHardMoney10", "maoHardMoney20", "maoBreakdown", "_autofillUrl"];
 
 function buildShareUrl() {
   const trimmedAnswers = {};
