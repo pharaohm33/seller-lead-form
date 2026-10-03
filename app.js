@@ -1,6 +1,70 @@
 /* Seller Lead Intake — front end. Talks only to the Apps Script backend
    configured in config.js. No other server exists. */
 
+// ── AI RESPONSE PARSER ──
+// Parses the structured summary block from Google AI Mode comps responses.
+// Expects the ---COMPS SUMMARY--- block the prompt asks AI to output.
+function parseAICompsResponse(text, isLand) {
+  const parseDollar = s => {
+    if (!s) return 0;
+    const n = Number(String(s).replace(/[$,\s]/g, ""));
+    return isNaN(n) ? 0 : n;
+  };
+
+  // Extract the summary block
+  const blockMatch = text.match(/---COMPS SUMMARY---([\s\S]*?)---END SUMMARY---/i);
+  const block = blockMatch ? blockMatch[1] : text;
+
+  // Extract ARV range: "$175,500 to $194,000" or "$175,500–$194,000" or "ARV RANGE: $X to $Y"
+  let arvLow = 0, arvHigh = 0, arvEstimate = 0;
+  const rangeMatch = block.match(/ARV RANGE:\s*\$?([\d,]+)\s*(?:to|–|-)\s*\$?([\d,]+)/i)
+    || text.match(/(?:ARV|Estimated ARV|value)\s*(?:Range|range)?:\s*\$?([\d,]+)\s*(?:to|–|-)\s*\$?([\d,]+)/i)
+    || text.match(/\$?([\d,]+)\s*(?:to|–|-)\s*\$?([\d,]+)\s*(?:ARV|range)/i);
+  if (rangeMatch) {
+    arvLow = parseDollar(rangeMatch[1]);
+    arvHigh = parseDollar(rangeMatch[2]);
+  }
+  const estimateMatch = block.match(/ARV ESTIMATE:\s*\$?([\d,]+)/i)
+    || text.match(/(?:most likely|single best|best estimate|ARV estimate)[^$\d]*\$?([\d,]+)/i);
+  if (estimateMatch) arvEstimate = parseDollar(estimateMatch[1]);
+  if (!arvEstimate && arvLow && arvHigh) arvEstimate = Math.round((arvLow + arvHigh) / 2);
+
+  // Parse individual comps from the summary block
+  function parseCompLines(section) {
+    const comps = [];
+    const lines = section.split("\n").map(l => l.trim()).filter(Boolean);
+    for (const line of lines) {
+      if (/^(SOLD|ACTIVE|ARV)/i.test(line)) continue;
+      const parts = line.split("|").map(p => p.trim());
+      if (parts.length >= 2) {
+        const comp = { address: parts[0] };
+        if (isLand) {
+          comp.price = parseDollar(parts[1]) || 0;
+          comp.acres = parts[2] || "";
+          comp.pricePerUnit = parts[3] || "";
+          comp.distance = parts[4] || "";
+        } else {
+          comp.price = parseDollar(parts[1]) || 0;
+          comp.sqft = parts[2] || "";
+          comp.pricePerSqft = parts[3] || "";
+          comp.beds = parts[4] || "";
+          comp.baths = parts[5] || "";
+          comp.distance = parts[6] || "";
+        }
+        if (comp.address && comp.address.length > 3) comps.push(comp);
+      }
+    }
+    return comps;
+  }
+
+  const soldMatch = block.match(/SOLD COMPS:\s*([\s\S]*?)(?=ACTIVE COMPS:|ARV RANGE:|$)/i);
+  const activeMatch = block.match(/ACTIVE COMPS:\s*([\s\S]*?)(?=ARV RANGE:|$)/i);
+  const soldComps = soldMatch ? parseCompLines(soldMatch[1]) : [];
+  const activeComps = activeMatch ? parseCompLines(activeMatch[1]) : [];
+
+  return { arvLow, arvHigh, arvEstimate, soldComps, activeComps };
+}
+
 const US_STATES = ["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY","DC"];
 
 const COMMERCIAL_SUBTYPES = ["Multifamily","Office","Hotel/Motel","Mixed Use","Industrial","Retail","Hospitality","Agriculture","Mobile Home or RV Park","Self Storage","Single Family Portfolio","Other Commercial Portfolio"];
@@ -950,113 +1014,52 @@ const steps = [
           straight into pricing.</p>
         ` : ""}
 
-        ${isResidential ? (isSellerFinancing ? `
-          <p class="hint"><strong>Step 1 — get a baseline from Chase.</strong> Use
-          <a href="https://www.chase.com/personal/mortgage/calculators-resources/home-value-estimator" target="_blank" rel="noopener">Chase's Home Value Estimator</a>
-          for this address. If a value comes up: if <strong>no repairs are needed</strong>, that's your As-Is
-          Value too (enter the same number as ARV below). If <strong>repairs are needed</strong>, use that
-          Chase number as your <strong>ARV</strong> — As-Is Value will be computed below by subtracting your
-          repair estimate.</p>
-          <p class="hint"><strong>Step 2 — refine with Google AI if you have time.</strong> Tap
-          <strong>"Get Comps Research Prompt for Google AI"</strong> below — it's pre-filled with this
-          property's details, so all you have to do is copy it, paste it into Google AI, and see what comes
-          back. Then <strong>replace the ARV above</strong> with the more accurate number Google AI
-          calculates from real recent sales (or find one from scratch if Chase didn't have data):</p>
-        ` : `
-          <p class="hint"><strong>Step 1 — get a fast first offer from Chase.</strong> Use
-          <a href="https://www.chase.com/personal/mortgage/calculators-resources/home-value-estimator" target="_blank" rel="noopener">Chase's Home Value Estimator</a>
-          for this address. If a value comes up: if <strong>no repairs are needed</strong>, that's your As-Is
-          Value too (enter the same number as ARV below). If <strong>repairs are needed</strong>, use that
-          Chase number as your <strong>ARV</strong> — As-Is Value will be computed below by subtracting your
-          repair estimate. For your first offer to the seller, start at the <strong>lowest</strong> of the
-          calculated Max Allowable Offer figures below (not the Cash Buyer ceiling) — that gets a
-          conservative opening offer out fast, without needing full comps research yet.</p>
-          <p class="hint"><strong>Why Chase?</strong> It's only here to help you open with a lower offer, fast.
-          The real MAO comes from the comps in Step 2, because comps are what buyers look at when they price a
-          deal. Compare the Chase number against the As-Is Value and ARV that the Google AI comps give you — the
-          gap between them is your room to go up. Open low off Chase, then work toward the comps-based number if
-          the seller pushes back.</p>
-          <p class="hint"><strong>Step 2 — if the seller counters, all you have to do is press the
-          button below.</strong> Chase's number is enough for a fast first offer, but if the seller comes
-          back asking for more, tap <strong>"Get Comps Research Prompt for Google AI"</strong> below to
-          find out whether there's actually room to go higher — it's pre-filled with this property's
-          details, so all you have to do is copy it, paste it into Google AI, and see what comes back.
-          Then <strong>replace the ARV above</strong> with the more accurate number Google AI calculates
-          from real recent sales (or find one from scratch if Chase didn't have data):</p>
-        `) : isLand ? `
-          <p class="hint"><strong>Research this with Google AI.</strong> There's no bank estimator for land
-          like there is for homes, so Google AI Mode is your primary source for value and comps here:</p>
-        ` : ""}
         ${hasCompsWorkflow ? `
-          <ol class="hint" style="margin:0 0 10px 18px; padding:0;">
-            <li>Go to <strong>google.com</strong>, search anything (typing "ai" works fine), and click the
-            <strong>"AI Mode"</strong> tab near the top of the results.</li>
-            <li>Tap <strong>"Get Comps Research Prompt for Google AI"</strong> below, hit <strong>Copy</strong>,
-            and paste it into AI Mode.</li>
-            <li>Google AI will pull real recent comps and calculate ${isLand ? "a value range" : isCommercial ? "an ARV range from both a sales-comps and an income approach" : "an ARV range"}
-            for you — this is your CMA (Comparative Market Analysis).</li>
-            <li>Screenshot the <strong>full</strong> response (the comps list AND the calculations at the
-            bottom) and upload it below. If it doesn't fit in one screenshot, upload as many as you need —
-            we'd rather have the whole thing than a partial one.</li>
-            <li><strong>Review it before trusting it</strong> — read back through the comps and math and
-            make sure it actually looks right for this property. If anything seems off (a comp that's too
-            far away, in different condition than claimed, math that doesn't add up, etc.), write that in
-            Notes below so admin can see your reasoning.</li>
-          </ol>
-          ${isResidential ? `
-            <p class="hint"><strong>This deal doesn't add beds or baths.</strong> Comps should match
-            the subject's current bed/bath count — if the CMA leans on comps with more beds or baths than
-            this property has, that overstates the ARV for a change this deal won't actually make. The
-            comps prompt below already tells Google AI to match bed/bath count for this reason.</p>
-          ` : ""}
-          ${isCommercial ? `
-            <p class="hint"><strong>Comps must match the subject's asset type first.</strong> Never
-            compare a retail building to a multifamily building, or a small multifamily building to a
-            large one — match on asset type${isMultifamilySubtype ? (answers.matchByUnitsOnly ? ", matched by closest unit count since square footage was skipped" : " and unit count bracket") : ""}
-            before weighing distance or condition. Expect roughly <strong>0.5 to 1 mile</strong> in
-            urban/suburban areas, expanding to <strong>3 to 5 miles</strong> only in rural markets with
-            limited inventory — don't cross a major highway, river, or railroad line to find a comp if
-            one exists closer.</p>
-            <p class="hint">Comps sold within the last <strong>6 months</strong> are ideal, up to
-            <strong>12 months</strong> if this market or asset type doesn't have enough recent sales.
-            The prompt below asks Google AI for both a sales-comparison value (price per square foot or
-            acre) and an income-based value (using the comps' cap rates), and to reconcile the two if
-            they disagree.</p>
-          ` : ""}
-          ${isLand ? `
-            ${isOnMarket ? `
-              <p class="hint"><strong>City population must be 50,000+</strong> for an FSBO/on-market land
-              deal — same sourcing bar as Option 1 in the Outreach SOP. Skip it if the city falls short of that.</p>
-            ` : ""}
-            <p class="hint"><strong>For land, what a comp has in common matters more than how close it is.</strong>
-            A comp must match on <strong>zoning</strong> (never compare commercial-zoned to residential-zoned
-            land), <strong>topography/usability</strong> (a flat, buildable lot isn't comparable to a steep or
-            landlocked one), and <strong>access/utilities</strong> (paved road + power vs. off-grid/no access) —
-            these matter more than distance. Only once a comp matches on those should distance be weighed: expect
-            roughly <strong>1–5 miles</strong> in suburban areas and <strong>10–50+ miles</strong> in rural or
-            remote areas with few land sales. A comp farther away that matches on zoning/topography/access beats
-            a closer one that doesn't.</p>
-            <p class="hint"><strong>Recency:</strong> comps sold within the last <strong>6 months</strong> are
-            ideal. Up to <strong>12 months</strong> is fine in a normal market, and up to
-            <strong>24 months</strong> is standard in slow or rural markets with few sales. Any comp older than
-            6 months should have its price <strong>adjusted for how the market has moved</strong> since that
-            sale, not used as a raw historical number — Google AI will handle that math.</p>
-            <p class="hint">Only fall back to your own hand-picked comps if AI Mode can't find anything usable —
-            same zoning/topography/access rules apply, and try to match similar acreage and land type. Note what
-            you found in Notes below. Anchor on the <strong>lowest comp(s) that are also nearest</strong> to the
-            property — never average across every comp you found, and never cherry-pick the highest value in
-            the area, since that usually doesn't sell.</p>
-          ` : isCommercial ? "" : `
-            <p class="hint"><strong>Comps must be within a 1-mile radius of the property — no exceptions.</strong>
-            Comps farther out drastically reduce the chance this deal actually closes, so be very cautious about
-            using anything beyond 1 mile. Comps should also be no more than <strong>1 year old</strong>, and
-            ideally <strong>under 6 months old</strong> — the fresher the better.</p>
-            <p class="hint">Only fall back to your own hand-picked comps if AI Mode can't find anything usable —
-            same rules apply (within 1 mile, ideally under 6 months old, same beds, same baths, similar square
-            footage), and note what you found in Notes below. Anchor on the <strong>lowest comp(s) that are also
-            nearest</strong> to the property — never average across every comp you found, and never cherry-pick
-            the highest ARV in the area, since that usually doesn't sell.</p>
-          `}
+          <!-- How this works accordion -->
+          <details id="how-it-works-details" style="margin-bottom:16px;border:1px solid #ddd6fe;border-radius:8px;background:#faf5ff;">
+            <summary style="cursor:pointer;padding:11px 14px;font-weight:600;color:#5b21b6;font-size:13px;list-style:none;display:flex;align-items:center;gap:6px;" onclick="this.parentElement.querySelector('.how-it-works-arrow').textContent=this.parentElement.open?'▶':'▼'">
+              <span class="how-it-works-arrow">▶</span> How this works — tap to expand
+            </summary>
+            <div style="padding:0 14px 14px;">
+              ${isResidential ? (isSellerFinancing ? `
+                <p class="hint"><strong>Get a baseline from Chase (optional).</strong> Use
+                <a href="https://www.chase.com/personal/mortgage/calculators-resources/home-value-estimator" target="_blank" rel="noopener">Chase's Home Value Estimator</a>
+                for a quick reference — admin uses this to sanity-check numbers. If no repairs are needed, that's your As-Is Value too. The Google AI comps in Step 1 below are the real source of truth.</p>
+              ` : `
+                <p class="hint"><strong>Chase Bank value is for admin reference only — it's optional.</strong> Use
+                <a href="https://www.chase.com/personal/mortgage/calculators-resources/home-value-estimator" target="_blank" rel="noopener">Chase's Home Value Estimator</a>
+                if you want a quick ballpark. The real offer is built from the Google AI comps below — those reflect actual recent sales, which is what buyers pay attention to.</p>
+              `) : isLand ? `
+                <p class="hint"><strong>There's no bank estimator for land</strong> — Google AI Mode is your primary source for value and comps here.</p>
+              ` : ""}
+              <ol class="hint" style="margin:0 0 10px 18px; padding:0;">
+                <li>Go to <strong>google.com</strong>, search anything (typing "ai" works fine), and click the
+                <strong>"AI Mode"</strong> tab near the top of the results.</li>
+                <li>Press <strong>"Copy Comps Prompt"</strong> in Step 1 below, paste it into AI Mode.</li>
+                <li>Google AI will pull real recent comps (sold AND active for-sale listings) and calculate ${isLand ? "a value range" : isCommercial ? "an ARV range from both a sales-comps and an income approach" : "an ARV range"} — this is your CMA.</li>
+                <li>At the bottom of the AI response, press the <strong>Copy</strong> button — then paste it into Step 2 below. The form will auto-fill the ARV and comps for you.</li>
+                <li><strong>Review before trusting</strong> — if anything looks off (a comp too far away, wrong condition, math that doesn't add up), note it below so admin can see your reasoning.</li>
+              </ol>
+              ${isResidential ? `
+                <p class="hint"><strong>Beds/baths stay the same.</strong> The comps prompt already tells AI to match bed/bath count — no additions or conversions are planned for this deal.</p>
+              ` : ""}
+              ${isCommercial ? `
+                <p class="hint"><strong>Comps must match the asset type first</strong> — never compare retail to multifamily. Expect 0.5–1 mile in urban areas, up to 3–5 miles rural. Up to 12 months old.</p>
+              ` : ""}
+              ${isLand ? `
+                ${isOnMarket ? `<p class="hint"><strong>City population must be 50,000+</strong> for on-market land deals.</p>` : ""}
+                <p class="hint"><strong>For land, zoning match matters more than distance.</strong> A comp must match on zoning, topography, and access/utilities before distance is weighed. Expect 1–5 miles suburban, 10–50+ miles rural. Up to 24 months old in slow markets — AI will time-adjust prices automatically.</p>
+              ` : isCommercial ? "" : `
+                <p class="hint"><strong>Comps within 1 mile only — no exceptions.</strong> Under 1 year old, ideally under 6 months. Same beds, baths, and similar sqft.</p>
+              `}
+            </div>
+          </details>
+
+          <!-- STEP 1 -->
+          <div style="border-left:3px solid #7c3aed;padding:4px 0 4px 12px;margin-bottom:8px;">
+            <strong style="color:#7c3aed;font-size:14px;">Step 1 — Copy the research prompt</strong>
+            <p class="hint" style="margin:3px 0 0;">Tap below, hit <strong>Copy</strong>, go to google.com → AI Mode → paste it in.</p>
+          </div>
 
           ${isCommercial ? `
             <label class="field-label" style="margin-top:16px;">Current Occupancy <span class="req">*</span></label>
@@ -1109,15 +1112,31 @@ const steps = [
             <textarea id="noi-research-notes-input" placeholder="What did Google AI conclude about NOI/expenses for this property?"></textarea>
           ` : ""}
 
+          <!-- STEP 2 -->
+          <div style="border-left:3px solid #7c3aed;padding:4px 0 4px 12px;margin:16px 0 8px;">
+            <strong style="color:#7c3aed;font-size:14px;">Step 2 — Paste Google AI response</strong>
+            <p class="hint" style="margin:3px 0 0;">At the bottom of the AI response, press <strong>Copy</strong> — then paste the full response below. The form will auto-fill the ARV and comps table.</p>
+          </div>
+          <textarea id="ai-response-input" rows="6" placeholder="Paste the full Google AI response here..." style="width:100%;font-size:13px;font-family:inherit;border:1px solid #d1d5db;border-radius:6px;padding:10px;box-sizing:border-box;"></textarea>
+          <button type="button" class="btn primary" id="parse-ai-btn" style="margin-top:8px;">Parse &amp; Auto-Fill Results →</button>
+          <div id="ai-parse-results" style="margin-top:10px;" hidden></div>
+
+          <!-- CMA Screenshots -->
           <label class="field-label" style="margin-top:16px;">CMA Screenshots
-            <span class="small-muted">(optional, but strongly encouraged — upload one or more)</span></label>
+            <span class="small-muted">(optional — upload one or more screenshots of the AI response or listing)</span></label>
           <input type="file" id="cma-screenshots-input" accept="image/*" multiple>
           <div id="cma-screenshots-list" style="margin-top:8px;"></div>
+
+          <!-- STEP 3 header -->
+          <div style="border-left:3px solid #7c3aed;padding:4px 0 4px 12px;margin:20px 0 4px;">
+            <strong style="color:#7c3aed;font-size:14px;">Step 3 — Photos, rehab estimate &amp; remaining details</strong>
+            <p class="hint" style="margin:3px 0 0;">Paste the listing or photos link so Google AI can estimate repairs. Add multiple links or upload screenshots.</p>
+          </div>
         ` : ""}
 
         ${isResidential ? `
           <label class="field-label">Chase Bank Estimated Value
-            <span class="small-muted">(optional, but strongly encouraged — the raw number from Chase's Home Value Estimator. Keep it here even after you replace the ARV below with the Google AI number, so admin can compare the two)</span></label>
+            <span class="small-muted">(for admin reference only — optional. Paste the number from <a href="https://www.chase.com/personal/mortgage/calculators-resources/home-value-estimator" target="_blank" rel="noopener">Chase's Home Value Estimator</a> if you have it. Admin uses this to cross-check the AI comps, not to set the offer.)</span></label>
           <input type="number" id="chase-estimate-input" placeholder="$">
 
           ${isPreforeclosureAuction ? `
@@ -1275,9 +1294,10 @@ const steps = [
           ` : ""}
         ` : ""}
 
-        <label class="field-label">County Assessed Value <span class="small-muted">(optional, if known)</span></label>
+        <label class="field-label">County Assessed Value <span class="small-muted">(optional — powerful negotiation tool)</span></label>
         <input type="number" id="assessed-value-input" placeholder="$">
-        <p class="hint">Don't have this handy? ${googleAiHow}, then ask:
+        <p class="hint"><strong>Why this matters:</strong> The county's assessed value is an official government number the seller can't argue with. When it's lower than their asking price, it's a credible third-party anchor you can use to justify a lower offer — <em>"Even the county only values it at $X."</em>
+        <br>Don't have it? ${googleAiHow}, then ask:
         <br><span class="small-muted">"${assessedValuePrompt}"</span>
         <br><button type="button" class="btn secondary" id="assessed-value-prompt-copy-btn" style="margin-top:8px;">Copy Prompt</button>
         </p>
@@ -1738,7 +1758,17 @@ After listing the comps, calculate and show your work:
 1. Acreage Difference %: (Average Comp Acreage - Subject Acreage) / Subject Acreage x 100
 2. Estimated As-Is Value: rank the qualifying comps by distance from the subject, then anchor on the lowest (time-adjusted) Price per Acre among the nearest ones — do not dilute that with a straight average across every comp you found, since a farther or pricier comp overstates what this specific parcel is worth. State clearly which comp(s) you anchored on. Estimated As-Is Value = that lowest-and-nearest Price per Acre x Subject Acreage — give a final range, plus your single most likely estimate within that range, still favoring the low end unless you have a specific reason not to.
 
-If the value comes out lower than what you might initially expect, say so plainly — that's an important finding, not something to smooth over.`
+If the value comes out lower than what you might initially expect, say so plainly — that's an important finding, not something to smooth over.
+
+At the very end of your response, after all analysis, output a structured summary block in EXACTLY this format (no deviations — this is machine-read):
+---COMPS SUMMARY---
+SOLD COMPS:
+[For each sold comp: ADDRESS | PRICE | ACRES | PRICE/ACRE | DISTANCE]
+ACTIVE COMPS:
+[For each active/for-sale listing used: ADDRESS | PRICE | ACRES | PRICE/ACRE | DISTANCE]
+ARV RANGE: $[low] to $[high]
+ARV ESTIMATE: $[single best estimate]
+---END SUMMARY---`
 : isCommercial
 ? `Act as a professional commercial real estate underwriter. Explain your math simply and avoid real estate jargon — I have no real estate experience.
 
@@ -1802,7 +1832,17 @@ After listing the comps, calculate and show your work:
 1. Square Footage Difference %: (Average Comp SqFt - Subject SqFt) / Subject SqFt x 100
 2. Estimated ARV: rank the qualifying comps by distance from the subject, then anchor on the lowest Price per Square Foot among the nearest ones — do not dilute that with a straight average across every comp you found, since a farther or pricier comp overstates what this specific property will actually sell for. State clearly which comp(s) you anchored on. Estimated ARV = that lowest-and-nearest Price per Square Foot x Subject SqFt — give a final range, plus your single most likely estimate within that range, still favoring the low end unless you have a specific reason not to.
 
-If the ARV comes out lower than what a bank's automated home value estimate would show, say so plainly — that's an important finding, not something to smooth over.`;
+If the ARV comes out lower than what a bank's automated home value estimate would show, say so plainly — that's an important finding, not something to smooth over.
+
+At the very end of your response, after all analysis, output a structured summary block in EXACTLY this format (no deviations — this is machine-read):
+---COMPS SUMMARY---
+SOLD COMPS:
+[For each sold comp: ADDRESS | PRICE | SQFT | PRICE/SQFT | BEDS | BATHS | DISTANCE]
+ACTIVE COMPS:
+[For each active/for-sale listing used: ADDRESS | PRICE | SQFT | PRICE/SQFT | BEDS | BATHS | DISTANCE]
+ARV RANGE: $[low] to $[high]
+ARV ESTIMATE: $[single best estimate]
+---END SUMMARY---`;
 
         if (matchByUnitsOnly) {
           const cityState = `${answers.city || "[CITY]"}, ${answers.state || "[STATE]"}`;
@@ -1840,6 +1880,60 @@ If this suggests the property is worth meaningfully less than expected, say so p
           }
         };
         wireCopyPromptButton(root, "#unit-count-fallback-prompt-copy-btn", () => root.querySelector("#unit-count-fallback-prompt-text").value);
+
+        // Parse & auto-fill from Google AI response
+        const parseBtn = root.querySelector("#parse-ai-btn");
+        const aiResponseInput = root.querySelector("#ai-response-input");
+        const aiParseResults = root.querySelector("#ai-parse-results");
+        if (parseBtn && aiResponseInput) {
+          parseBtn.onclick = () => {
+            const text = aiResponseInput.value.trim();
+            if (!text) { alert("Paste the Google AI response first."); return; }
+            const parsed = parseAICompsResponse(text, isLand);
+            if (!parsed.arvLow && !parsed.arvHigh && !parsed.arvEstimate) {
+              aiParseResults.hidden = false;
+              aiParseResults.innerHTML = `<div class="banner warn">Couldn't find an ARV range in the response. Make sure you copied the full AI response including the summary block at the bottom, then try again.</div>`;
+              return;
+            }
+            // Auto-fill ARV with the low estimate (conservative starting offer)
+            const arvInput = root.querySelector("#arv-input");
+            if (arvInput && parsed.arvLow) {
+              arvInput.value = parsed.arvLow;
+              recomputeCashDeal();
+            }
+            // Build results display
+            const fmt = n => n ? "$" + Number(n).toLocaleString() : "—";
+            const compRow = (c, isLandComp) => isLandComp
+              ? `<tr><td>${c.address}</td><td>${fmt(c.price)}</td><td>${c.acres || "—"}</td><td>${c.pricePerUnit || "—"}</td><td>${c.distance || "—"}</td></tr>`
+              : `<tr><td>${c.address}</td><td>${fmt(c.price)}</td><td>${c.sqft || "—"}</td><td>${c.pricePerSqft || "—"}</td><td>${c.beds || "—"}</td><td>${c.baths || "—"}</td><td>${c.distance || "—"}</td></tr>`;
+            const colHeaders = isLand
+              ? "<tr><th>Address</th><th>Price</th><th>Acres</th><th>Price/Acre</th><th>Distance</th></tr>"
+              : "<tr><th>Address</th><th>Price</th><th>Sqft</th><th>$/Sqft</th><th>Beds</th><th>Baths</th><th>Distance</th></tr>";
+            const tableStyle = "width:100%;border-collapse:collapse;font-size:12px;margin-top:6px;";
+            const tdStyle = "border:1px solid #e5e7eb;padding:5px 7px;";
+            const soldRows = parsed.soldComps.map(c => compRow(c, isLand)).join("").replace(/<td>/g, `<td style="${tdStyle}">`).replace(/<th>/g, `<th style="${tdStyle}background:#f3f4f6;font-weight:600;">`);
+            const activeRows = parsed.activeComps.map(c => compRow(c, isLand)).join("").replace(/<td>/g, `<td style="${tdStyle}">`).replace(/<th>/g, `<th style="${tdStyle}background:#f3f4f6;font-weight:600;">`);
+            const styledHeaders = colHeaders.replace(/<th>/g, `<th style="${tdStyle}background:#f3f4f6;font-weight:600;">`);
+            aiParseResults.hidden = false;
+            aiParseResults.innerHTML = `
+              <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:14px;">
+                <strong style="color:#166534;font-size:14px;">✓ Results parsed — ARV auto-filled</strong>
+                <div style="margin-top:10px;display:flex;gap:16px;flex-wrap:wrap;">
+                  <div><span class="small-muted">ARV Range</span><br><strong>${fmt(parsed.arvLow)} – ${fmt(parsed.arvHigh)}</strong></div>
+                  <div><span class="small-muted">Best Estimate</span><br><strong>${fmt(parsed.arvEstimate)}</strong></div>
+                  <div><span class="small-muted">Starting Offer (low ARV)</span><br><strong style="color:#7c3aed;">${fmt(parsed.arvLow)}</strong></div>
+                </div>
+                ${parsed.soldComps.length ? `
+                  <div style="margin-top:12px;font-weight:600;font-size:12px;color:#374151;">SOLD COMPS (${parsed.soldComps.length})</div>
+                  <table style="${tableStyle}">${styledHeaders}${soldRows}</table>
+                ` : ""}
+                ${parsed.activeComps.length ? `
+                  <div style="margin-top:10px;font-weight:600;font-size:12px;color:#374151;">ACTIVE / FOR-SALE COMPS (${parsed.activeComps.length})</div>
+                  <table style="${tableStyle}">${styledHeaders}${activeRows}</table>
+                ` : ""}
+              </div>`;
+          };
+        }
 
         // Screenshots upload straight to Drive as soon as they're picked (see uploadCmaScreenshot
         // in the backend) -- only the resulting links get stored in `answers`, never the raw image
@@ -5375,6 +5469,10 @@ function openDetail(lead) {
           `<a href="${escapeHtml(url)}" target="_blank" rel="noopener">Screenshot ${i + 1}</a>`).join(" &middot; ")}
       </div>
     ` : ""}
+    <div style="margin-top:16px;padding-top:14px;border-top:1px solid #e5e7eb;">
+      <button class="btn primary" id="open-loi-btn" style="width:100%;font-size:14px;">🏠 Open in LOI Generator →</button>
+      <p style="font-size:11px;color:#6b7280;margin:6px 0 0;text-align:center;">Opens <strong>loi-generator</strong> pre-filled with this lead's data — ready to generate the LOI.</p>
+    </div>
     <div class="notes-list">
       <strong>Notes</strong>
       <div id="notes-container">
@@ -5389,6 +5487,31 @@ function openDetail(lead) {
   `;
 
   panel.querySelector("#close-detail-btn").onclick = () => overlay.hidden = true;
+  const loiBtn = panel.querySelector("#open-loi-btn");
+  if (loiBtn) {
+    loiBtn.onclick = () => {
+      const propTypeMap = {
+        "Residential Property (1-4 units)": "residential",
+        "Commercial Property": "commercial",
+        "Land": "land"
+      };
+      const params = new URLSearchParams();
+      const addr = [lead["Street Address"], lead["City"], lead["State"], lead["Zip"]].filter(Boolean).join(", ");
+      if (addr) params.set("address", addr);
+      if (lead["Units"]) params.set("units", lead["Units"]);
+      const pt = propTypeMap[lead["Asset Type"]];
+      if (pt) params.set("prop_type", pt);
+      if (lead["ARV"]) params.set("arv", String(lead["ARV"]).replace(/[^0-9.]/g, ""));
+      if (lead["As-Is Value"]) params.set("as_is_value", String(lead["As-Is Value"]).replace(/[^0-9.]/g, ""));
+      if (lead["MAO Cash"]) {
+        const mao = String(lead["MAO Cash"]).replace(/[^0-9.]/g, "");
+        params.set("purchase_price", mao);
+        params.set("cash_at_closing", mao);
+      }
+      if (lead["Rehab Estimate"]) params.set("rehab", String(lead["Rehab Estimate"]).replace(/[^0-9.]/g, ""));
+      window.open("https://pharaohm33.github.io/loi-generator?" + params.toString(), "_blank");
+    };
+  }
   panel.querySelector("#status-select").onchange = async (e) => {
     const res = await api("updateStatus", { token: sessionToken, leadId: lead["Lead ID"], status: e.target.value });
     if (res.ok) { lead["Status"] = e.target.value; renderCrmTable(); }
