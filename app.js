@@ -43,6 +43,7 @@ function parseAICompsResponse(text, isLand) {
           comp.acres = parts[2] || "";
           comp.pricePerUnit = parts[3] || "";
           comp.distance = parts[4] || "";
+          comp.date = parts[5] || "";
         } else {
           comp.price = parseDollar(parts[1]) || 0;
           comp.sqft = parts[2] || "";
@@ -50,6 +51,7 @@ function parseAICompsResponse(text, isLand) {
           comp.beds = parts[4] || "";
           comp.baths = parts[5] || "";
           comp.distance = parts[6] || "";
+          comp.date = parts[7] || "";
         }
         if (comp.address && comp.address.length > 3) comps.push(comp);
       }
@@ -2030,7 +2032,7 @@ If this is a non-disclosure state and you can't find actual sold prices, use act
 
 For each comp, list:
 - Full address
-- Sale price (or asking price, if using the non-disclosure fallback) and the date
+- Sale price (or asking price, if using the non-disclosure fallback), the exact date sold (or listed date for active comps), and for active for-sale listings also include how many days it has been on the market (days on market / DOM)
 - Zoning, topography, and access/utilities
 - Straight-line distance from the subject address, in miles
 - Total acreage (and square footage, if it's a small lot)
@@ -2045,9 +2047,9 @@ If the value comes out lower than what you might initially expect, say so plainl
 At the very end of your response, after all analysis, output a structured summary block in EXACTLY this format (no deviations — this is machine-read):
 ---COMPS SUMMARY---
 SOLD COMPS:
-[For each sold comp: ADDRESS | PRICE | ACRES | PRICE/ACRE | DISTANCE]
+[For each sold comp: ADDRESS | PRICE | ACRES | PRICE/ACRE | DISTANCE | SOLD DATE (e.g. Jan 2025)]
 ACTIVE COMPS:
-[For each active/for-sale listing used: ADDRESS | PRICE | ACRES | PRICE/ACRE | DISTANCE]
+[For each active/for-sale listing used: ADDRESS | PRICE | ACRES | PRICE/ACRE | DISTANCE | DAYS ON MARKET (e.g. 45 days)]
 ARV RANGE: $[low] to $[high]
 ARV ESTIMATE: $[single best estimate]
 ---END SUMMARY---`
@@ -2105,7 +2107,7 @@ If this is a non-disclosure state and you can't find actual sold prices, use act
 
 For each comp, list:
 - Full address
-- Exact sale price (or asking price, if using the non-disclosure fallback) and the date
+- Exact sale price (or asking price, if using the non-disclosure fallback), the exact date sold (or listed date for active comps), and for active for-sale listings also include how many days it has been on the market (days on market / DOM)
 - Estimated straight-line distance from the subject address, in miles
 - Bedrooms, bathrooms, and total square feet
 - Exact Price per Square Foot (price ÷ square feet)
@@ -2119,9 +2121,9 @@ If the ARV comes out lower than what a bank's automated home value estimate woul
 At the very end of your response, after all analysis, output a structured summary block in EXACTLY this format (no deviations — this is machine-read):
 ---COMPS SUMMARY---
 SOLD COMPS:
-[For each sold comp: ADDRESS | PRICE | SQFT | PRICE/SQFT | BEDS | BATHS | DISTANCE]
+[For each sold comp: ADDRESS | PRICE | SQFT | PRICE/SQFT | BEDS | BATHS | DISTANCE | SOLD DATE (e.g. Jan 2025)]
 ACTIVE COMPS:
-[For each active/for-sale listing used: ADDRESS | PRICE | SQFT | PRICE/SQFT | BEDS | BATHS | DISTANCE]
+[For each active/for-sale listing used: ADDRESS | PRICE | SQFT | PRICE/SQFT | BEDS | BATHS | DISTANCE | DAYS ON MARKET (e.g. 45 days)]
 ARV RANGE: $[low] to $[high]
 ARV ESTIMATE: $[single best estimate]
 ---END SUMMARY---`;
@@ -2190,11 +2192,11 @@ If this suggests the property is worth meaningfully less than expected, say so p
             // Build results display
             const fmt = n => n ? "$" + Number(n).toLocaleString() : "—";
             const compRow = (c, isLandComp) => isLandComp
-              ? `<tr><td>${c.address}</td><td>${fmt(c.price)}</td><td>${c.acres || "—"}</td><td>${c.pricePerUnit || "—"}</td><td>${c.distance || "—"}</td></tr>`
-              : `<tr><td>${c.address}</td><td>${fmt(c.price)}</td><td>${c.sqft || "—"}</td><td>${c.pricePerSqft || "—"}</td><td>${c.beds || "—"}</td><td>${c.baths || "—"}</td><td>${c.distance || "—"}</td></tr>`;
+              ? `<tr><td>${c.address}</td><td>${fmt(c.price)}</td><td>${c.acres || "—"}</td><td>${c.pricePerUnit || "—"}</td><td>${c.distance || "—"}</td><td>${c.date || "—"}</td></tr>`
+              : `<tr><td>${c.address}</td><td>${fmt(c.price)}</td><td>${c.sqft || "—"}</td><td>${c.pricePerSqft || "—"}</td><td>${c.beds || "—"}</td><td>${c.baths || "—"}</td><td>${c.distance || "—"}</td><td>${c.date || "—"}</td></tr>`;
             const colHeaders = isLand
-              ? "<tr><th>Address</th><th>Price</th><th>Acres</th><th>Price/Acre</th><th>Distance</th></tr>"
-              : "<tr><th>Address</th><th>Price</th><th>Sqft</th><th>$/Sqft</th><th>Beds</th><th>Baths</th><th>Distance</th></tr>";
+              ? "<tr><th>Address</th><th>Price</th><th>Acres</th><th>Price/Acre</th><th>Distance</th><th>Date / DOM</th></tr>"
+              : "<tr><th>Address</th><th>Price</th><th>Sqft</th><th>$/Sqft</th><th>Beds</th><th>Baths</th><th>Distance</th><th>Date / DOM</th></tr>";
             const tableStyle = "width:100%;border-collapse:collapse;font-size:12px;margin-top:6px;";
             const tdStyle = "border:1px solid #e5e7eb;padding:5px 7px;";
             const soldRows = parsed.soldComps.map(c => compRow(c, isLand)).join("").replace(/<td>/g, `<td style="${tdStyle}">`).replace(/<th>/g, `<th style="${tdStyle}background:#f3f4f6;font-weight:600;">`);
@@ -5766,12 +5768,12 @@ function openDetail(lead) {
       const tdS = "border:1px solid #e5e7eb;padding:5px 7px;font-size:12px;";
       const thS = tdS + "background:#f3f4f6;font-weight:600;";
       const colHeaders = isLandLead
-        ? `<tr><th style="${thS}">Address</th><th style="${thS}">Price</th><th style="${thS}">Acres</th><th style="${thS}">Price/Acre</th><th style="${thS}">Distance</th></tr>`
-        : `<tr><th style="${thS}">Address</th><th style="${thS}">Price</th><th style="${thS}">Sqft</th><th style="${thS}">$/Sqft</th><th style="${thS}">Beds</th><th style="${thS}">Baths</th><th style="${thS}">Distance</th></tr>`;
+        ? `<tr><th style="${thS}">Address</th><th style="${thS}">Price</th><th style="${thS}">Acres</th><th style="${thS}">Price/Acre</th><th style="${thS}">Distance</th><th style="${thS}">Date / DOM</th></tr>`
+        : `<tr><th style="${thS}">Address</th><th style="${thS}">Price</th><th style="${thS}">Sqft</th><th style="${thS}">$/Sqft</th><th style="${thS}">Beds</th><th style="${thS}">Baths</th><th style="${thS}">Distance</th><th style="${thS}">Date / DOM</th></tr>`;
       const fmtC = n => n ? "$" + Number(n).toLocaleString() : "—";
       const rowHtml = (c) => isLandLead
-        ? `<tr><td style="${tdS}">${escapeHtml(c.address||"")}</td><td style="${tdS}">${fmtC(c.price)}</td><td style="${tdS}">${escapeHtml(c.acres||"—")}</td><td style="${tdS}">${escapeHtml(c.pricePerUnit||"—")}</td><td style="${tdS}">${escapeHtml(c.distance||"—")}</td></tr>`
-        : `<tr><td style="${tdS}">${escapeHtml(c.address||"")}</td><td style="${tdS}">${fmtC(c.price)}</td><td style="${tdS}">${escapeHtml(c.sqft||"—")}</td><td style="${tdS}">${escapeHtml(c.pricePerSqft||"—")}</td><td style="${tdS}">${escapeHtml(c.beds||"—")}</td><td style="${tdS}">${escapeHtml(c.baths||"—")}</td><td style="${tdS}">${escapeHtml(c.distance||"—")}</td></tr>`;
+        ? `<tr><td style="${tdS}">${escapeHtml(c.address||"")}</td><td style="${tdS}">${fmtC(c.price)}</td><td style="${tdS}">${escapeHtml(c.acres||"—")}</td><td style="${tdS}">${escapeHtml(c.pricePerUnit||"—")}</td><td style="${tdS}">${escapeHtml(c.distance||"—")}</td><td style="${tdS}">${escapeHtml(c.date||"—")}</td></tr>`
+        : `<tr><td style="${tdS}">${escapeHtml(c.address||"")}</td><td style="${tdS}">${fmtC(c.price)}</td><td style="${tdS}">${escapeHtml(c.sqft||"—")}</td><td style="${tdS}">${escapeHtml(c.pricePerSqft||"—")}</td><td style="${tdS}">${escapeHtml(c.beds||"—")}</td><td style="${tdS}">${escapeHtml(c.baths||"—")}</td><td style="${tdS}">${escapeHtml(c.distance||"—")}</td><td style="${tdS}">${escapeHtml(c.date||"—")}</td></tr>`;
       let soldComps = [], activeComps = [];
       try { soldComps = lead["Sold Comps"] ? JSON.parse(lead["Sold Comps"]) : []; } catch(e) {}
       try { activeComps = lead["Active Comps"] ? JSON.parse(lead["Active Comps"]) : []; } catch(e) {}
