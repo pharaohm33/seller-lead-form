@@ -65,6 +65,67 @@ function parseAICompsResponse(text, isLand) {
   return { arvLow, arvHigh, arvEstimate, soldComps, activeComps };
 }
 
+// Parses free-form OCR text from listing screenshots to extract property fields.
+function parseListingText(text) {
+  const r = {};
+  const clean = text.replace(/\n+/g, " ").replace(/\s+/g, " ");
+
+  // Price: $XXX,XXX or $X.XM
+  const priceM = clean.match(/\$\s*([\d,]+(?:\.\d+)?)\s*[Mm]/);
+  const priceK = clean.match(/\$\s*([\d,]+(?:\.\d+)?)\s*[Kk]/);
+  const priceRaw = clean.match(/\$\s*([\d]{3,3}[,\d]*)/);
+  if (priceM) r.price = Math.round(parseFloat(priceM[1].replace(/,/g, "")) * 1_000_000);
+  else if (priceK) r.price = Math.round(parseFloat(priceK[1].replace(/,/g, "")) * 1_000);
+  else if (priceRaw) r.price = priceRaw[1].replace(/,/g, "");
+
+  // Beds/baths/sqft
+  const bedsM = clean.match(/(\d+(?:\.\d+)?)\s*(?:bed(?:room)?s?|bd)/i);
+  const bathsM = clean.match(/(\d+(?:\.\d+)?)\s*(?:bath(?:room)?s?|ba(?:\b))/i);
+  const sqftM = clean.match(/([\d,]+)\s*(?:sq\.?\s*ft|sqft|square\s*feet)/i);
+  const acreM = clean.match(/([\d.]+)\s*acres?/i);
+  if (bedsM) r.beds = bedsM[1];
+  if (bathsM) r.baths = bathsM[1];
+  if (sqftM) r.sqft = sqftM[1].replace(/,/g, "");
+  if (acreM) r.acreage = acreM[1];
+
+  // Year built
+  const yrM = clean.match(/(?:built|year\s*built|yr\.?\s*built)[:\s]+(\d{4})/i) || clean.match(/\b(19[2-9]\d|20[0-2]\d)\b/);
+  if (yrM) r.yearBuilt = yrM[1];
+
+  // Address: look for "123 Any St, City, ST 12345" pattern
+  const addrM = clean.match(/(\d+\s+[A-Za-z0-9 .#'-]+(?:St|Ave|Rd|Dr|Blvd|Ln|Way|Ct|Pl|Cir|Hwy|Pkwy|Trail|Terrace|Loop|Pass|Run|Path|Trl)[.,]?\s+[A-Za-z ]+,\s+([A-Z]{2})\s+(\d{5}))/i);
+  if (addrM) {
+    const parts = addrM[1].split(",").map(s => s.trim());
+    r.street = parts[0] || "";
+    if (parts[1]) {
+      const cityState = parts[1].trim().split(/\s+/);
+      const stIdx = cityState.findIndex(w => /^[A-Z]{2}$/.test(w));
+      if (stIdx > 0) { r.city = cityState.slice(0, stIdx).join(" "); r.state = cityState[stIdx]; }
+      else r.city = parts[1].trim();
+    }
+    if (parts[2]) r.zip = parts[2].match(/\d{5}/)?.[0] || "";
+  }
+
+  // Agent/listing agent name: "Listed by [Name]" or "Agent: [Name]"
+  const agentM = clean.match(/(?:listed\s*by|listing\s*agent|agent|realtor|broker)[:\s]+([A-Z][a-z]+(?: [A-Z][a-z]+)+)/i);
+  if (agentM) r.agentName = agentM[1];
+
+  // Phone number
+  const phoneM = clean.match(/(\(?\d{3}\)?[\s.\-]\d{3}[\s.\-]\d{4})/);
+  if (phoneM) r.agentPhone = phoneM[1];
+
+  // Email
+  const emailM = clean.match(/([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/);
+  if (emailM) r.agentEmail = emailM[1];
+
+  // Asset type inference
+  if (/\blands?\b|\bvacant\s*lot\b|\braw\s*land\b|\bacreage\b/i.test(clean)) r.assetType = "Land";
+  else if (/\bcommercial\b|\bmultifamily\b|\boffice\b|\bretail\b|\bindustrial\b/i.test(clean)) r.assetType = "Commercial Property";
+  else if (r.beds || /\bsingle.family\b|\bcondo\b|\btownhome\b|\btownhouse\b/i.test(clean)) r.assetType = "Residential Property (1-4 units)";
+
+  return r;
+}
+
 const US_STATES = ["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY","DC"];
 
 const COMMERCIAL_SUBTYPES = ["Multifamily","Office","Hotel/Motel","Mixed Use","Industrial","Retail","Hospitality","Agriculture","Mobile Home or RV Park","Self Storage","Single Family Portfolio","Other Commercial Portfolio"];
@@ -310,6 +371,134 @@ const steps = [
       toggleError(root, "#phone-error", answers.phone.length < 7); if (answers.phone.length < 7) ok = false;
       return ok;
     }
+  },
+  {
+    key: "listingAutofill",
+    progress: true,
+    render(root) {
+      root.innerHTML = `
+        <h2 class="step-title">Auto-Fill from Listing</h2>
+        <p class="step-sub">Paste a listing link or upload screenshot(s) and we'll fill out the form for you. This step is optional — hit Skip to enter everything manually.</p>
+
+        <label class="field-label">Listing URL <span class="small-muted">(Zillow, Realtor.com, Propwire, MLS, etc.)</span></label>
+        <input type="url" id="autofill-url-input" placeholder="https://www.zillow.com/homedetails/..." style="font-size:14px;">
+
+        <label class="field-label" style="margin-top:14px;">Or upload screenshot(s) of the listing</label>
+        <input type="file" id="autofill-screenshots" accept="image/*" multiple style="margin-top:4px;">
+        <p class="hint" style="margin-top:4px;">Upload one or more screenshots of the listing page. Works offline and is completely free — processed in your browser.</p>
+
+        <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;">
+          <button class="btn primary" id="autofill-run-btn" style="flex:1;">Auto-Fill →</button>
+          <button class="btn secondary" id="autofill-skip-btn" style="flex:1;">Skip / Enter Manually</button>
+        </div>
+
+        <div id="autofill-status" style="margin-top:12px;display:none;"></div>
+        <div id="autofill-preview" style="margin-top:12px;display:none;"></div>
+      `;
+
+      root.querySelector("#autofill-url-input").value = answers.sourceLink || answers._autofillUrl || "";
+      root.querySelector("#autofill-skip-btn").onclick = () => goTo(currentStep + 1);
+
+      root.querySelector("#autofill-run-btn").onclick = async () => {
+        const urlVal = root.querySelector("#autofill-url-input").value.trim();
+        const files = root.querySelector("#autofill-screenshots").files;
+        const statusEl = root.querySelector("#autofill-status");
+        const previewEl = root.querySelector("#autofill-preview");
+        statusEl.style.display = "block";
+        previewEl.style.display = "none";
+
+        if (!urlVal && (!files || files.length === 0)) {
+          statusEl.innerHTML = `<div class="banner warn">Paste a listing URL or upload at least one screenshot first.</div>`;
+          return;
+        }
+
+        let extracted = {};
+
+        if (urlVal) {
+          statusEl.innerHTML = `<div class="banner info">Fetching listing data…</div>`;
+          try {
+            const res = await api("fetchListing", { url: urlVal });
+            if (res.ok && res.data) {
+              extracted = { ...extracted, ...res.data };
+              answers._autofillUrl = urlVal;
+            } else {
+              statusEl.innerHTML = `<div class="banner warn">Couldn't read that page automatically (${res.error || "blocked or unsupported site"}). Try uploading a screenshot instead, or skip to enter manually.</div>`;
+            }
+          } catch(e) {
+            statusEl.innerHTML = `<div class="banner warn">Network error fetching listing. Try a screenshot or skip.</div>`;
+          }
+        }
+
+        if (files && files.length > 0) {
+          statusEl.innerHTML = `<div class="banner info">Running OCR on ${files.length} screenshot${files.length > 1 ? "s" : ""}… (this can take 10–20 seconds)</div>`;
+          try {
+            if (!window.Tesseract) {
+              await new Promise((resolve, reject) => {
+                const s = document.createElement("script");
+                s.src = "https://unpkg.com/tesseract.js@4/dist/tesseract.min.js";
+                s.onload = resolve; s.onerror = reject;
+                document.head.appendChild(s);
+              });
+            }
+            let fullText = "";
+            for (const file of files) {
+              const { data: { text } } = await Tesseract.recognize(file, "eng");
+              fullText += "\n" + text;
+            }
+            const ocr = parseListingText(fullText);
+            // Merge: prefer link data for address/price (more structured), OCR fills gaps
+            for (const [k, v] of Object.entries(ocr)) {
+              if (v && !extracted[k]) extracted[k] = v;
+            }
+          } catch(e) {
+            statusEl.innerHTML += `<div class="banner warn" style="margin-top:8px;">OCR failed: ${e.message}. Try a different screenshot or skip.</div>`;
+          }
+        }
+
+        if (Object.keys(extracted).length === 0) return;
+
+        // Apply to answers
+        if (extracted.street)   answers.street = extracted.street;
+        if (extracted.city)     answers.city = extracted.city;
+        if (extracted.state)    answers.state = extracted.state;
+        if (extracted.zip)      answers.zip = extracted.zip;
+        if (extracted.beds)     answers.beds = extracted.beds;
+        if (extracted.baths)    answers.baths = extracted.baths;
+        if (extracted.sqft)     answers.sqft = extracted.sqft;
+        if (extracted.acreage)  answers.acreage = extracted.acreage;
+        if (extracted.price)    answers.askingPrice = String(extracted.price).replace(/[^0-9.]/g, "");
+        if (extracted.yearBuilt) answers.yearBuilt = extracted.yearBuilt;
+        if (extracted.agentName)  answers.sellerContactName = extracted.agentName;
+        if (extracted.agentPhone) answers.sellerContactPhone = extracted.agentPhone;
+        if (extracted.agentEmail) answers.sellerContactEmail = extracted.agentEmail;
+        if (urlVal) answers.sourceLink = urlVal;
+        if (extracted.assetType) answers.assetType = extracted.assetType;
+
+        // Build preview card
+        const rows = [
+          ["Address", [extracted.street, extracted.city, extracted.state, extracted.zip].filter(Boolean).join(", ")],
+          ["Asking Price", extracted.price ? "$" + Number(String(extracted.price).replace(/[^0-9.]/g, "")).toLocaleString() : ""],
+          ["Beds / Baths / Sqft", [extracted.beds && extracted.beds + " bd", extracted.baths && extracted.baths + " ba", extracted.sqft && Number(extracted.sqft).toLocaleString() + " sqft"].filter(Boolean).join("  ·  ")],
+          ["Acreage", extracted.acreage || ""],
+          ["Year Built", extracted.yearBuilt || ""],
+          ["Listing Agent", [extracted.agentName, extracted.agentPhone, extracted.agentEmail].filter(Boolean).join("  ·  ")],
+        ].filter(([, v]) => v);
+
+        statusEl.style.display = "none";
+        previewEl.style.display = "block";
+        previewEl.innerHTML = `
+          <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:14px;">
+            <strong style="color:#166534;">✓ ${rows.length} field${rows.length !== 1 ? "s" : ""} auto-filled — review below, then Continue</strong>
+            <dl style="margin:10px 0 0;display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:13px;">
+              ${rows.map(([k,v]) => `<dt style="color:#6b7280;white-space:nowrap;">${k}</dt><dd style="margin:0;">${escapeHtml(v)}</dd>`).join("")}
+            </dl>
+            <p class="hint" style="margin-top:10px;">Fields already filled — you can still edit them in the steps ahead.</p>
+            <button class="btn primary" id="autofill-continue-btn" style="margin-top:10px;width:100%;">Continue →</button>
+          </div>`;
+        previewEl.querySelector("#autofill-continue-btn").onclick = () => goTo(currentStep + 1);
+      };
+    },
+    validate() { return true; }
   },
   {
     key: "sellerContact",

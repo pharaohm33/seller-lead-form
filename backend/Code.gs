@@ -151,6 +151,8 @@ function doPost(e) {
         return jsonOut(editPublicNote(body));
       case 'deletePublicNote':
         return jsonOut(deletePublicNote(body));
+      case 'fetchListing':
+        return jsonOut(fetchListing(body));
       default:
         return jsonOut({ ok: false, error: 'Unknown action.' });
     }
@@ -1083,4 +1085,96 @@ function clearSheetBody(sheet) {
   if (lastRow > 1) {
     sheet.deleteRows(2, lastRow - 1);
   }
+}
+
+function fetchListing(body) {
+  const url = (body.url || "").trim();
+  if (!url.startsWith("http")) return { ok: false, error: "Invalid URL." };
+
+  let html;
+  try {
+    const resp = UrlFetchApp.fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5"
+      },
+      muteHttpExceptions: true,
+      followRedirects: true
+    });
+    if (resp.getResponseCode() >= 400) return { ok: false, error: "Site returned error " + resp.getResponseCode() + ". Try a screenshot instead." };
+    html = resp.getContentText();
+  } catch(e) {
+    return { ok: false, error: "Could not reach that URL: " + e.message };
+  }
+
+  const result = {};
+
+  // 1. Try JSON-LD schema.org blocks
+  const jsonLdRe = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  let m;
+  while ((m = jsonLdRe.exec(html)) !== null) {
+    try {
+      const obj = JSON.parse(m[1]);
+      const items = Array.isArray(obj) ? obj : [obj];
+      for (const item of items) {
+        const t = (item["@type"] || "").toLowerCase();
+        if (!t.match(/residence|house|property|realestate|apartment|condo|land|lot/)) continue;
+        const addr = item.address || {};
+        if (addr.streetAddress) result.street = addr.streetAddress;
+        if (addr.addressLocality) result.city = addr.addressLocality;
+        if (addr.addressRegion) result.state = addr.addressRegion;
+        if (addr.postalCode) result.zip = String(addr.postalCode).slice(0, 5);
+        if (item.numberOfRooms) result.beds = String(item.numberOfRooms);
+        if (item.numberOfBathroomsTotal) result.baths = String(item.numberOfBathroomsTotal);
+        const fs = item.floorSize;
+        if (fs) result.sqft = String(fs.value || fs).replace(/[^0-9]/g, "");
+        if (item.lotSize) result.acreage = String(item.lotSize.value || item.lotSize).replace(/[^0-9.]/g, "");
+        if (item.yearBuilt) result.yearBuilt = String(item.yearBuilt);
+        const offers = item.offers || {};
+        if (offers.price) result.price = String(offers.price).replace(/[^0-9.]/g, "");
+        // Agent info
+        const agent = item.agent || item.seller || {};
+        if (agent.name) result.agentName = agent.name;
+        const agentContact = agent.contactPoint || {};
+        if (agentContact.telephone) result.agentPhone = agentContact.telephone;
+        if (agentContact.email) result.agentEmail = agentContact.email;
+        break;
+      }
+    } catch(e) {}
+  }
+
+  // 2. Fallback: Open Graph + meta description
+  if (!result.street) {
+    const ogTitle = (html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i) || [])[1] || "";
+    const metaDesc = (html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i) || [])[1] || "";
+    const combined = ogTitle + " " + metaDesc;
+    // Try to pull price from meta
+    const priceM = combined.match(/\$([\d,]+)/);
+    if (priceM && !result.price) result.price = priceM[1].replace(/,/g, "");
+    // Beds/baths
+    const bedsM = combined.match(/(\d+)\s*(?:bed|bd)/i);
+    const bathsM = combined.match(/(\d+(?:\.\d)?)\s*(?:bath|ba)\b/i);
+    const sqftM = combined.match(/([\d,]+)\s*(?:sq\.?\s*ft|sqft)/i);
+    if (bedsM && !result.beds) result.beds = bedsM[1];
+    if (bathsM && !result.baths) result.baths = bathsM[1];
+    if (sqftM && !result.sqft) result.sqft = sqftM[1].replace(/,/g, "");
+    // Try to parse address-ish text from title (e.g. "123 Main St, Phoenix, AZ 85001")
+    const addrM = combined.match(/(\d+\s+[A-Za-z0-9 .#'-]+(St|Ave|Rd|Dr|Blvd|Ln|Way|Ct|Pl|Cir|Hwy|Pkwy)[.,]?\s+[A-Za-z ]+,\s*([A-Z]{2})\s+(\d{5}))/i);
+    if (addrM) {
+      const parts = addrM[1].split(",").map(function(s) { return s.trim(); });
+      result.street = parts[0];
+      if (parts[1]) {
+        const words = parts[1].trim().split(/\s+/);
+        const si = words.findIndex(function(w) { return /^[A-Z]{2}$/.test(w); });
+        if (si > 0) { result.city = words.slice(0, si).join(" "); result.state = words[si]; }
+        else result.city = parts[1].trim();
+      }
+      if (parts[2]) result.zip = (parts[2].match(/\d{5}/) || [])[0] || "";
+    }
+    if (ogTitle) result._ogTitle = ogTitle;
+  }
+
+  if (Object.keys(result).length === 0) return { ok: false, error: "No structured listing data found on that page. Try uploading a screenshot instead." };
+  return { ok: true, data: result };
 }
