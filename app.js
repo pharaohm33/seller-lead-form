@@ -102,33 +102,48 @@ function parseListingText(text) {
   else if (yrValueFirst) r.yearBuilt = yrValueFirst[1];
   else if (yrFallback) r.yearBuilt = yrFallback[1];
 
-  // Address: "123 Main St, Dallas, TX 75232" — also handles Dr/Ln/Blvd etc.
-  const addrM = clean.match(/(\d+\s+[A-Za-z0-9 .#'-]+(?:St|Ave|Rd|Dr|Blvd|Ln|Way|Ct|Pl|Cir|Hwy|Pkwy|Trail|Terrace|Loop|Pass|Run|Path|Trl)[.,]?\s+[A-Za-z ]+,\s+([A-Z]{2})\s+(\d{5}))/i);
+  // Address parsing — handles:
+  //   "123 Main St, Dallas, TX 75232"  (abbreviation)
+  //   "7410 North Zanjero Blvd, Glendale, Arizona 85305"  (full state name)
+  //   "7410 North Zanjero Blvd, Glendale, AZ 85305, Glendale, AZ 85305"  (Crexi duplicate)
+  const US_STATE_NAMES = /Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connecticut|Delaware|Florida|Georgia|Hawaii|Idaho|Illinois|Indiana|Iowa|Kansas|Kentucky|Louisiana|Maine|Maryland|Massachusetts|Michigan|Minnesota|Mississippi|Missouri|Montana|Nebraska|Nevada|New Hampshire|New Jersey|New Mexico|New York|North Carolina|North Dakota|Ohio|Oklahoma|Oregon|Pennsylvania|Rhode Island|South Carolina|South Dakota|Tennessee|Texas|Utah|Vermont|Virginia|Washington|West Virginia|Wisconsin|Wyoming/i;
+  const US_STATE_ABBR_MAP = {alabama:"AL",alaska:"AK",arizona:"AZ",arkansas:"AR",california:"CA",colorado:"CO",connecticut:"CT",delaware:"DE",florida:"FL",georgia:"GA",hawaii:"HI",idaho:"ID",illinois:"IL",indiana:"IN",iowa:"IA",kansas:"KS",kentucky:"KY",louisiana:"LA",maine:"ME",maryland:"MD",massachusetts:"MA",michigan:"MI",minnesota:"MN",mississippi:"MS",missouri:"MO",montana:"MT",nebraska:"NE",nevada:"NV","new hampshire":"NH","new jersey":"NJ","new mexico":"NM","new york":"NY","north carolina":"NC","north dakota":"ND",ohio:"OH",oklahoma:"OK",oregon:"OR",pennsylvania:"PA","rhode island":"RI","south carolina":"SC","south dakota":"SD",tennessee:"TN",texas:"TX",utah:"UT",vermont:"VT",virginia:"VA",washington:"WA","west virginia":"WV",wisconsin:"WI",wyoming:"WY"};
+  const addrM = clean.match(/(\d+\s+[A-Za-z0-9 .#'-]+(?:St|Ave|Rd|Dr|Blvd|Boulevard|Ln|Way|Ct|Pl|Cir|Hwy|Pkwy|Trail|Terrace|Loop|Pass|Run|Path|Trl)[.,]?\s+[A-Za-z ]+,\s+(?:[A-Z]{2}|[A-Za-z ]+)\s+(\d{5}))/i);
   if (addrM) {
     const parts = addrM[1].split(",").map(s => s.trim());
     r.street = parts[0] || "";
     if (parts[1]) {
-      const cityState = parts[1].trim().split(/\s+/);
-      const stIdx = cityState.findIndex(w => /^[A-Z]{2}$/.test(w));
-      if (stIdx > 0) { r.city = cityState.slice(0, stIdx).join(" "); r.state = cityState[stIdx]; }
-      else r.city = parts[1].trim();
+      const seg = parts[1].trim();
+      const abbrM = seg.match(/^(.*?)\s+([A-Z]{2})$/);
+      if (abbrM) { r.city = abbrM[1].trim(); r.state = abbrM[2]; }
+      else {
+        const fullM = seg.match(new RegExp("^(.*?)\\s+(" + US_STATE_NAMES.source + ")$", "i"));
+        if (fullM) { r.city = fullM[1].trim(); r.state = US_STATE_ABBR_MAP[fullM[2].toLowerCase()] || fullM[2]; }
+        else r.city = seg;
+      }
     }
     if (parts[2]) r.zip = (parts[2].match(/\d{5}/) || [])[0] || "";
   }
 
-  // Agent name: "Listed by Chaz Cameli" or "Listing Agent: ..."
-  const agentM = clean.match(/(?:listed\s*by|listing\s*agent)[:\s•]+([A-Z][a-z]+(?: [A-Z][a-z]+)+)/i);
-  if (agentM) r.agentName = agentM[1];
+  // Agent name: "Listed by Chaz Cameli" / "Listing Agent: ..." / "Listing Contacts\nTim Dulany" (Crexi)
+  const agentListedBy = clean.match(/(?:listed\s*by|listing\s*agent)[:\s•]+([A-Z][a-z]+(?: [A-Z][a-z]+)+)/i);
+  const agentContacts = clean.match(/[Ll]isting\s+[Cc]ontacts\s+([A-Z][a-z]+(?: [A-Z][a-z]+)+)/);
+  if (agentListedBy) r.agentName = agentListedBy[1];
+  else if (agentContacts) r.agentName = agentContacts[1];
 
-  // Phone: "Contact: 714-580-6346" or plain phone number near agent context
-  const contactPhoneM = clean.match(/[Cc]ontact[:\s]+(\(?\d{3}\)?[\s.\-]\d{3}[\s.\-]\d{4})/);
-  const plainPhoneM   = clean.match(/(\(?\d{3}\)?[\s.\-]\d{3}[\s.\-]\d{4})/);
+  // Phone: "Contact: 714-580-6346" preferred; then "Brokerage Phone 6023304468" (Crexi); then first plain phone
+  const contactPhoneM  = clean.match(/[Cc]ontact[:\s]+(\(?\d{3}\)?[\s.\-]\d{3}[\s.\-]\d{4})/);
+  const brokerPhoneM   = clean.match(/[Bb]rokerage\s+[Pp]hone\s+(\d{10})/);
+  const plainPhoneM    = clean.match(/(\(?\d{3}\)?[\s.\-]\d{3}[\s.\-]\d{4})/);
   if (contactPhoneM) r.agentPhone = contactPhoneM[1];
+  else if (brokerPhoneM) { const d = brokerPhoneM[1]; r.agentPhone = `(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}`; }
   else if (plainPhoneM) r.agentPhone = plainPhoneM[1];
 
-  // Email
-  const emailM = clean.match(/([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/);
-  if (emailM) r.agentEmail = emailM[1];
+  // Email — skip known listing platform domains
+  const BLOCKED_EMAIL_DOMAINS = /^(?:redfin|zillow|loopnet|crexi|realtor|trulia|homes|movoto|homesnap)\.com$/i;
+  const emailAll = [...clean.matchAll(/([a-zA-Z0-9._%+\-]+@([a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}))/g)];
+  const realEmail = emailAll.find(m => !BLOCKED_EMAIL_DOMAINS.test(m[2]));
+  if (realEmail) r.agentEmail = realEmail[1];
 
   // Asset type — check explicit property type label first, then infer
   const ptM = clean.match(/(?:[Pp]roperty\s+[Tt]ype|[Hh]ome\s+[Tt]ype)[:\s•]+([A-Za-z\s\-]+?)(?:\s{2,}|\.|,|$)/);
@@ -400,15 +415,12 @@ const steps = [
     render(root) {
       root.innerHTML = `
         <h2 class="step-title">Auto-Fill from Listing</h2>
-        <p class="step-sub">Give us the listing and we'll fill out the form. All three options below work — use whichever is easiest. Hit Skip to enter everything manually.</p>
+        <p class="step-sub">Give us the listing and we'll pre-fill the form. Use either option below, or hit Skip to enter everything manually.</p>
 
-        <label class="field-label">Option 1 — Listing URL <span class="small-muted">(Zillow, Redfin, Realtor.com, Propwire, MLS, etc.)</span></label>
-        <input type="url" id="autofill-url-input" placeholder="https://www.redfin.com/..." style="font-size:14px;">
+        <label class="field-label">Option 1 — Paste page text <span class="small-muted">(Ctrl+A → Ctrl+C on the listing page, paste here — works on Redfin, Crexi, Zillow, LoopNet, any site)</span></label>
+        <textarea id="autofill-page-text" rows="5" placeholder="Go to the listing page, select all text (Ctrl+A), copy (Ctrl+C), then paste here. Captures address, beds, baths, sqft, price, agent name &amp; phone." style="font-size:13px;width:100%;box-sizing:border-box;resize:vertical;"></textarea>
 
-        <label class="field-label" style="margin-top:16px;">Option 2 — Paste page text <span class="small-muted">(most reliable for Redfin — Ctrl+A → Ctrl+C on the listing page, paste here)</span></label>
-        <textarea id="autofill-page-text" rows="4" placeholder="Select all text on the Redfin/Zillow page (Ctrl+A), copy it (Ctrl+C), then paste it here. Works on any listing site and captures beds, baths, sqft, agent, price — everything visible on the page." style="font-size:13px;width:100%;box-sizing:border-box;resize:vertical;"></textarea>
-
-        <label class="field-label" style="margin-top:16px;">Option 3 — Upload screenshot(s)</label>
+        <label class="field-label" style="margin-top:16px;">Option 2 — Upload screenshot(s)</label>
         <input type="file" id="autofill-screenshots" accept="image/*" multiple style="margin-top:4px;">
         <p class="hint" style="margin-top:4px;">Processed free in your browser via OCR.</p>
 
@@ -426,11 +438,9 @@ const steps = [
       ["street","city","state","zip","beds","baths","sqft","acreage","askingPrice","yearBuilt",
        "sellerContactName","sellerContactPhone","sellerContactEmail","sourceLink","assetType","units",
        "_autofillUrl"].forEach(k => { delete answers[k]; });
-      root.querySelector("#autofill-url-input").value = "";
       root.querySelector("#autofill-skip-btn").onclick = () => goTo(nextIndex(stepIndex));
 
       root.querySelector("#autofill-run-btn").onclick = async () => {
-        const urlVal = root.querySelector("#autofill-url-input").value.trim();
         const pasteText = root.querySelector("#autofill-page-text").value.trim();
         const files = root.querySelector("#autofill-screenshots").files;
         const statusEl = root.querySelector("#autofill-status");
@@ -438,39 +448,17 @@ const steps = [
         statusEl.style.display = "block";
         previewEl.style.display = "none";
 
-        if (!urlVal && !pasteText && (!files || files.length === 0)) {
-          statusEl.innerHTML = `<div class="banner warn">Paste a listing URL, paste the page text, or upload a screenshot first.</div>`;
+        if (!pasteText && (!files || files.length === 0)) {
+          statusEl.innerHTML = `<div class="banner warn">Paste the listing page text or upload a screenshot first.</div>`;
           return;
         }
 
         let extracted = {};
 
-        // Option 2: paste text — most reliable, runs first so URL can fill gaps
         if (pasteText) {
           statusEl.innerHTML = `<div class="banner info">Parsing pasted text…</div>`;
           const fromText = parseListingText(pasteText);
           for (const [k, v] of Object.entries(fromText)) { if (v) extracted[k] = v; }
-        }
-
-        if (urlVal) {
-          const isRedfin = /redfin\.com/i.test(urlVal);
-          if (isRedfin && !pasteText) {
-            statusEl.innerHTML = `<div class="banner warn"><strong>Redfin tip:</strong> Redfin renders beds, baths, and sqft via JavaScript so the URL alone won't get those. For best results use <strong>Option 2</strong> — Ctrl+A → Ctrl+C on the Redfin page, paste the text above. The URL will still fill in the address.</div>`;
-          } else {
-            statusEl.innerHTML = `<div class="banner info">Fetching listing data…</div>`;
-          }
-          try {
-            const res = await api("fetchListing", { url: urlVal });
-            if (res.ok && res.data) {
-              // URL data fills gaps not already found in pasted text
-              for (const [k, v] of Object.entries(res.data)) { if (v && !extracted[k]) extracted[k] = v; }
-              answers._autofillUrl = urlVal;
-            } else if (!pasteText) {
-              statusEl.innerHTML = `<div class="banner warn">Couldn't read that page automatically (${res.error || "blocked or unsupported site"}). Use <strong>Option 2</strong>: Ctrl+A → Ctrl+C on the listing page and paste the text above.</div>`;
-            }
-          } catch(e) {
-            if (!pasteText) statusEl.innerHTML = `<div class="banner warn">Network error fetching listing. Use Option 2: paste the page text above.</div>`;
-          }
         }
 
         if (files && files.length > 0) {
@@ -490,12 +478,11 @@ const steps = [
               fullText += "\n" + text;
             }
             const ocr = parseListingText(fullText);
-            // Merge: prefer link data for address/price (more structured), OCR fills gaps
             for (const [k, v] of Object.entries(ocr)) {
               if (v && !extracted[k]) extracted[k] = v;
             }
           } catch(e) {
-            statusEl.innerHTML += `<div class="banner warn" style="margin-top:8px;">OCR failed: ${e.message}. Try a different screenshot or skip.</div>`;
+            statusEl.innerHTML += `<div class="banner warn" style="margin-top:8px;">OCR failed: ${e.message}. Try a different screenshot or use the paste option.</div>`;
           }
         }
 
@@ -515,11 +502,8 @@ const steps = [
         if (extracted.agentName)  answers.sellerContactName = extracted.agentName;
         if (extracted.agentPhone) answers.sellerContactPhone = extracted.agentPhone;
         if (extracted.agentEmail) answers.sellerContactEmail = extracted.agentEmail;
-        if (urlVal) answers.sourceLink = urlVal;
         if (extracted.assetType) answers.assetType = extracted.assetType;
-        // Single-family and land are always 1 unit — auto-set so the address step passes validation
         if (extracted.assetType === "Residential Property (1-4 units)") answers.units = "1";
-        if (extracted.assetType === "Land") answers.units = "1";
         if (extracted.assetType === "Land") answers.units = "1";
 
         // Build preview card
