@@ -461,7 +461,7 @@ const steps = [
       // session's ?resume= URL must never survive to the address/contact/assetType steps.
       ["street","city","state","zip","beds","baths","sqft","acreage","askingPrice","yearBuilt",
        "sellerContactName","sellerContactPhone","sellerContactEmail","sourceLink","assetType","units",
-       "_autofillUrl"].forEach(k => { delete answers[k]; });
+       "priceSought","priceReasoning","_autofillUrl"].forEach(k => { delete answers[k]; });
       root.querySelector("#autofill-skip-btn").onclick = () => goTo(nextIndex(stepIndex));
 
       root.querySelector("#autofill-run-btn").onclick = async () => {
@@ -521,7 +521,12 @@ const steps = [
         if (extracted.baths)     answers.baths = extracted.baths;
         if (extracted.sqft)      answers.sqft = extracted.sqft;
         if (extracted.acreage)   answers.acreage = extracted.acreage;
-        if (extracted.price)     answers.askingPrice = String(extracted.price).replace(/[^0-9.]/g, "");
+        if (extracted.price) {
+          const priceStr = String(extracted.price).replace(/[^0-9.]/g, "");
+          answers.askingPrice = priceStr;
+          answers.priceSought = priceStr;
+          answers.priceReasoning = "For sale listing";
+        }
         if (extracted.yearBuilt) answers.yearBuilt = extracted.yearBuilt;
         if (extracted.agentName)  answers.sellerContactName = extracted.agentName;
         if (extracted.agentPhone) answers.sellerContactPhone = extracted.agentPhone;
@@ -533,7 +538,7 @@ const steps = [
         // Build preview card
         const rows = [
           ["Address", [extracted.street, extracted.city, extracted.state, extracted.zip].filter(Boolean).join(", ")],
-          ["Asking Price", extracted.price ? "$" + Number(String(extracted.price).replace(/[^0-9.]/g, "")).toLocaleString() : ""],
+          ["Asking Price", extracted.price ? "$" + Number(String(extracted.price).replace(/[^0-9.]/g, "")).toLocaleString() + "  ·  For sale listing" : ""],
           ["Beds / Baths / Sqft", [extracted.beds && extracted.beds + " bd", extracted.baths && extracted.baths + " ba", extracted.sqft && Number(extracted.sqft).toLocaleString() + " sqft"].filter(Boolean).join("  ·  ")],
           ["Acreage", extracted.acreage || ""],
           ["Year Built", extracted.yearBuilt || ""],
