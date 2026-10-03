@@ -162,10 +162,11 @@ function parseListingText(text) {
   else if (brokerPhoneM) { const d = brokerPhoneM[1]; r.agentPhone = `(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}`; }
   else if (plainPhoneM) r.agentPhone = plainPhoneM[1];
 
-  // Email — skip known listing platform domains
-  const BLOCKED_EMAIL_DOMAINS = /^(?:redfin|zillow|loopnet|crexi|realtor|trulia|homes|movoto|homesnap)\.com$/i;
+  // Email — skip listing platform domains, placeholder domains, and generic/no-reply prefixes
+  const BLOCKED_EMAIL_DOMAINS = /^(?:redfin|zillow|loopnet|crexi|realtor|trulia|homes|movoto|homesnap|listhub|example|test|sample|fake|placeholder|domain|email|mailinator|guerrillamail|tempmail|throwam|yopmail)\.(?:com|org|net)$/i;
+  const BLOCKED_EMAIL_PREFIXES = /^(?:noreply|no-reply|donotreply|do-not-reply|notifications?|support|info|contact|help|admin|hello|team|sales|marketing|bots?|mailer|unsubscribe|feedback|service|enquir|legal|privacy|press|media|example|user|username|youremail|yourname|name|email)\b/i;
   const emailAll = [...clean.matchAll(/([a-zA-Z0-9._%+\-]+@([a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}))/g)];
-  const realEmail = emailAll.find(m => !BLOCKED_EMAIL_DOMAINS.test(m[2]));
+  const realEmail = emailAll.find(m => !BLOCKED_EMAIL_DOMAINS.test(m[2]) && !BLOCKED_EMAIL_PREFIXES.test(m[1].split("@")[0]));
   if (realEmail) r.agentEmail = realEmail[1];
 
   // Asset type — check explicit property type label first, then infer
