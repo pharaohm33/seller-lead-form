@@ -4131,6 +4131,7 @@ If this suggests the property is worth meaningfully less than expected, say so p
         <dl class="review-grid">
           ${rows.map(([k,v]) => `<div><dt>${k}</dt><dd>${escapeHtml(String(v ?? "—"))}</dd></div>`).join("")}
         </dl>
+        ${buildCompsHtml()}
         <div class="error-text show" id="submit-error" style="display:none;"></div>
       `;
     },
@@ -4200,8 +4201,6 @@ function buildAnswerRows() {
       ["County Assessed Value", answers.countyAssessedValue || "—"],
       ["CMA Screenshots", (answers.cmaScreenshotUrls || []).join("\n") || "—"],
       [answers.assetType === "Land" ? "As-Is Value Range (AI Comps)" : "ARV Range (AI Comps)", answers.arvRange || "—"],
-      ["Sold Comps (count)", answers.soldCompsJson ? JSON.parse(answers.soldCompsJson).length + " comps" : "—"],
-      ["Active Comps (count)", answers.activeCompsJson ? JSON.parse(answers.activeCompsJson).length + " comps" : "—"],
       ["Bottom Dollar Price", answers.bottomDollarPrice || "—"],
       ["Notes (Why Sell / Good Lead)", answers.cashDealNotes || "—"]
     );
@@ -4349,6 +4348,40 @@ function buildAnswerRows() {
     ["Listing Source Link", answers.sourceLink || "—"]
   );
   return rows;
+}
+
+function buildCompsHtml() {
+  if (!answers.soldCompsJson && !answers.activeCompsJson) return "";
+  const isLand = answers.assetType === "Land";
+  const isBusiness = answers.assetType === "Business";
+  const tdS = "border:1px solid #e5e7eb;padding:5px 7px;font-size:12px;";
+  const thS = tdS + "background:#f3f4f6;font-weight:600;";
+  const colHeaders = isLand
+    ? `<tr><th style="${thS}">Address</th><th style="${thS}">Price</th><th style="${thS}">Acres</th><th style="${thS}">Price/Acre</th><th style="${thS}">Distance</th><th style="${thS}">Date / DOM</th></tr>`
+    : isBusiness
+    ? `<tr><th style="${thS}">Business Type</th><th style="${thS}">Sale Price</th><th style="${thS}">Revenue</th><th style="${thS}">EBITDA/SDE</th><th style="${thS}">Multiple</th><th style="${thS}">Location</th><th style="${thS}">Date</th></tr>`
+    : `<tr><th style="${thS}">Address</th><th style="${thS}">Price</th><th style="${thS}">Sqft</th><th style="${thS}">$/Sqft</th><th style="${thS}">Beds</th><th style="${thS}">Baths</th><th style="${thS}">Distance</th><th style="${thS}">Date / DOM</th></tr>`;
+  const fmtC = n => n ? "$" + Number(n).toLocaleString() : "—";
+  const rowHtml = c => isLand
+    ? `<tr><td style="${tdS}">${escapeHtml(c.address||"")}</td><td style="${tdS}">${fmtC(c.price)}</td><td style="${tdS}">${escapeHtml(c.acres||"—")}</td><td style="${tdS}">${escapeHtml(c.pricePerUnit||"—")}</td><td style="${tdS}">${escapeHtml(c.distance||"—")}</td><td style="${tdS}">${escapeHtml(c.date||"—")}</td></tr>`
+    : isBusiness
+    ? `<tr><td style="${tdS}">${escapeHtml(c.address||"")}</td><td style="${tdS}">${fmtC(c.price)}</td><td style="${tdS}">${escapeHtml(c.revenue||"—")}</td><td style="${tdS}">${escapeHtml(c.earnings||"—")}</td><td style="${tdS}">${escapeHtml(c.multiple||"—")}</td><td style="${tdS}">${escapeHtml(c.location||"—")}</td><td style="${tdS}">${escapeHtml(c.date||"—")}</td></tr>`
+    : `<tr><td style="${tdS}">${escapeHtml(c.address||"")}</td><td style="${tdS}">${fmtC(c.price)}</td><td style="${tdS}">${escapeHtml(c.sqft||"—")}</td><td style="${tdS}">${escapeHtml(c.pricePerSqft||"—")}</td><td style="${tdS}">${escapeHtml(c.beds||"—")}</td><td style="${tdS}">${escapeHtml(c.baths||"—")}</td><td style="${tdS}">${escapeHtml(c.distance||"—")}</td><td style="${tdS}">${escapeHtml(c.date||"—")}</td></tr>`;
+  let soldComps = [], activeComps = [];
+  try { soldComps = answers.soldCompsJson ? JSON.parse(answers.soldCompsJson) : []; } catch(e) {}
+  try { activeComps = answers.activeCompsJson ? JSON.parse(answers.activeCompsJson) : []; } catch(e) {}
+  const rangeLabel = isLand ? "As-Is Value Range" : isBusiness ? "Value Range" : "ARV Range";
+  return `<div class="banner info" style="margin-top:16px;text-align:left;">
+    <strong>AI Comps${answers.arvRange ? " — " + rangeLabel + ": " + escapeHtml(answers.arvRange) : ""}</strong>
+    ${soldComps.length ? `
+      <div style="margin-top:10px;font-weight:600;font-size:12px;color:#374151;">${isBusiness ? "BUSINESS COMPS" : "SOLD COMPS"} (${soldComps.length})</div>
+      <div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;margin-top:4px;">${colHeaders}${soldComps.map(rowHtml).join("")}</table></div>
+    ` : ""}
+    ${activeComps.length ? `
+      <div style="margin-top:10px;font-weight:600;font-size:12px;color:#374151;">ACTIVE / FOR-SALE COMPS (${activeComps.length})</div>
+      <div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;margin-top:4px;">${colHeaders}${activeComps.map(rowHtml).join("")}</table></div>
+    ` : ""}
+  </div>`;
 }
 
 // Shared by every "Copy Prompt" button (county assessed value, taxes, insurance, etc.) so each new
@@ -4842,6 +4875,7 @@ async function submitLead(container) {
       <dl class="review-grid" style="text-align:left;">
         ${rows.map(([k,v]) => `<div><dt>${k}</dt><dd>${escapeHtml(String(v ?? "—"))}</dd></div>`).join("")}
       </dl>
+      ${buildCompsHtml()}
       <div class="nav-row" style="justify-content:center; gap:12px;">
         <button class="btn secondary" id="check-status-from-success-btn">Check Status On My Existing Leads (Non-Admin)</button>
         <button class="btn primary" id="submit-another-btn">Submit Another Lead</button>
