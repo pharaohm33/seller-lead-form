@@ -5598,6 +5598,11 @@ function openOutreachSop() {
     auction) has the higher probability of getting accepted and closing fast — prioritize it first
     each day, then fill remaining volume with Option 1 and Option 3 (land).</p>
 
+    <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:14px 16px;margin:14px 0;font-size:13px;line-height:1.6;">
+      <strong style="font-size:14px;color:#166534;">📈 Volume of outreach to close your next deal faster</strong>
+      <p style="margin:8px 0 0;">Send text offers to <strong>at least 15 properties per day</strong> — ideally <strong>30 if possible</strong>. At that pace, the math works heavily in your favor: most sellers won't respond, some will counter, and a handful will be ready to move. Hitting 15–30 outreach texts daily gives you an <strong>extremely high probability of having a deal under contract within a few weeks</strong>. Below that, the funnel gets too narrow and deals take much longer to materialize. Treat the daily number as a non-negotiable, not a goal.</p>
+    </div>
+
     <div class="banner info"><strong>Batch workflow, all tracks:</strong> send your day's outreach
     texts to your <em>entire</em> list first, before opening the wizard for any single property —
     don't fill in property details until one actually responds. Fill in your own info at the very
