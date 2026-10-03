@@ -1524,14 +1524,6 @@ const steps = [
             ${["Yes", "No"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
           </div>
 
-          <label class="field-label" style="margin-top:16px;">Would the seller accept <strong>~5% down at closing</strong>, with the remaining balance paid at their <strong>full asking price</strong> — as long as it appraises at that value at closing — once the land is developed and sold or refinanced, plus <strong>interest on the deferred balance</strong> in the meantime?</label>
-          <div class="choice-group" id="land-willing-wait-group">
-            ${["Yes", "No"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
-          </div>
-          <p class="hint">If both are <strong>Yes</strong>, this qualifies for a <strong>100% of As-Is
-          Value</strong> deferred offer (full asking price, with ~5% down at closing + the rest paid once
-          developed/sold or refinanced, plus interest) instead of the normal on-market/off-market percentage
-          offer below — see the Make Your Offer banner once you've entered As-Is Value.</p>
         ` : ""}
 
         ${isCommercial ? `
@@ -1854,7 +1846,7 @@ const steps = [
           const wholesaleFee = feeInput ? (Number(feeInput.value) || formulaFee) : formulaFee;
 
           const maxOfferBanner = root.querySelector("#max-offer-banner");
-          const landDeferredFullValue = isLand && answers.landFreeAndClear === "Yes" && answers.landWillingToWaitForDev === "Yes";
+          const landDeferredFullValue = false;
           const maoSuite = computeMaoSuite(arv, rehab, answers.assetType, wholesaleFee, answers.marketStatus, landDeferredFullValue);
           if (!maoSuite) {
             maxOfferBanner.hidden = true;
@@ -1975,8 +1967,7 @@ const steps = [
 
       if (isLand) {
         bindChoiceGroup(root, "#land-free-clear-group", "landFreeAndClear");
-        bindChoiceGroup(root, "#land-willing-wait-group", "landWillingToWaitForDev");
-        root.querySelectorAll("#land-free-clear-group .choice-btn, #land-willing-wait-group .choice-btn").forEach(btn => {
+        root.querySelectorAll("#land-free-clear-group .choice-btn").forEach(btn => {
           const rebindClick = btn.onclick;
           btn.onclick = () => { rebindClick(); recomputeCashDeal(); };
         });
@@ -2466,7 +2457,7 @@ If this suggests the property is worth meaningfully less than expected, say so p
       answers.wholesaleFee = isSellerFinancing
         ? formulaFee
         : (root.querySelector("#wholesale-fee-input").value || formulaFee);
-      const landDeferredFullValue = isLand && answers.landFreeAndClear === "Yes" && answers.landWillingToWaitForDev === "Yes";
+      const landDeferredFullValue = false;
       const maoSuite = computeMaoSuite(arvNum, Number(answers.rehabEstimate) || 0, answers.assetType, answers.wholesaleFee, answers.marketStatus, landDeferredFullValue);
       if (maoSuite) {
         answers.maoCash = Math.round(maoSuite.maoCash);
