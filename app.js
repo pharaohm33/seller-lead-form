@@ -2046,7 +2046,7 @@ For each comp, list:
 
 After listing the comps, calculate and show your work:
 1. Acreage Difference %: (Average Comp Acreage - Subject Acreage) / Subject Acreage x 100
-2. Estimated As-Is Value: rank the qualifying comps by distance from the subject, then anchor on the lowest (time-adjusted) Price per Acre among the nearest ones — do not dilute that with a straight average across every comp you found, since a farther or pricier comp overstates what this specific parcel is worth. State clearly which comp(s) you anchored on. Estimated As-Is Value = that lowest-and-nearest Price per Acre x Subject Acreage — give a final range, plus your single most likely estimate within that range, still favoring the low end unless you have a specific reason not to.
+2. Estimated As-Is Value: rank the qualifying comps by recency first, then by distance from the subject — anchor on the lowest (time-adjusted) Price per Acre among the most recent and closest ones. Do not dilute that with a straight average across every comp you found, since a farther or older comp overstates what this specific parcel is worth today. State clearly which comp(s) you anchored on. Estimated As-Is Value = that lowest-and-nearest Price per Acre x Subject Acreage — give a final range, plus your single most likely estimate within that range, still favoring the low end unless you have a specific reason not to.
 
 If the value comes out lower than what you might initially expect, say so plainly — that's an important finding, not something to smooth over.
 
@@ -2089,7 +2089,7 @@ For each comp, list:
 
 After listing the comps, calculate BOTH approaches below and reconcile them if they meaningfully disagree:
 
-1. Sales Comparison Approach: rank the qualifying comps by distance from the subject, then anchor on the lowest ${matchByUnitsOnly ? "Price Per Unit" : "Price per Square Foot (or Acre)"} among the nearest ones — do not dilute that with a straight average across every comp you found, since a farther or pricier comp overstates what this specific property is worth. State clearly which comp(s) you anchored on. ${matchByUnitsOnly
+1. Sales Comparison Approach: rank the qualifying comps by recency first, then by distance from the subject — anchor on the lowest ${matchByUnitsOnly ? "Price Per Unit" : "Price per Square Foot (or Acre)"} among the most recent and closest ones. Do not dilute that with a straight average across every comp you found, since a farther or older comp overstates what this specific property is worth today. State clearly which comp(s) you anchored on. ${matchByUnitsOnly
   ? `Estimated Value = that lowest-and-nearest Price Per Unit x Subject Unit Count (${answers.units || "[UNIT COUNT]"})`
   : `Estimated Value = that lowest-and-nearest Price per Square Foot (or Acre) x Subject Size`} — give a final range, plus your single most likely estimate within that range, still favoring the low end unless you have a specific reason not to.
 2. Income Approach: ${liveNOI
@@ -2120,7 +2120,7 @@ For each comp, list:
 
 After listing the comps, calculate and show your work:
 1. Square Footage Difference %: (Average Comp SqFt - Subject SqFt) / Subject SqFt x 100
-2. Estimated ARV: rank the qualifying comps by distance from the subject, then anchor on the lowest Price per Square Foot among the nearest ones — do not dilute that with a straight average across every comp you found, since a farther or pricier comp overstates what this specific property will actually sell for. State clearly which comp(s) you anchored on. Estimated ARV = that lowest-and-nearest Price per Square Foot x Subject SqFt — give a final range, plus your single most likely estimate within that range, still favoring the low end unless you have a specific reason not to.
+2. Estimated ARV: rank the qualifying comps by recency first, then by distance from the subject — anchor on the lowest Price per Square Foot among the most recent and closest ones. Do not dilute that with a straight average across every comp you found, since a farther or older comp overstates what this specific property will actually sell for today. State clearly which comp(s) you anchored on. Estimated ARV = that lowest-and-nearest Price per Square Foot x Subject SqFt — give a final range, plus your single most likely estimate within that range, still favoring the low end unless you have a specific reason not to.
 
 If the ARV comes out lower than what a bank's automated home value estimate would show, say so plainly — that's an important finding, not something to smooth over.
 
@@ -2148,7 +2148,7 @@ What is the average sold cap rate for multifamily properties in ${cityState} (or
 Give me:
 1. The market cap rate range you're using and where it comes from.
 2. The implied property value at both ends of that range (NOI divided by cap rate), as a range, not one number -- plus your single most likely estimate, favoring the higher end of the cap rate range (the more conservative, lower-value read) unless the data clearly supports a lower cap rate.
-3. If you're aware of any specific recent multifamily sales nearby, mention them for context, and if you find genuinely comparable ones, anchor toward whichever is both lowest-priced and nearest rather than a straight average -- but don't force a comp if you can't find a genuinely comparable one, a bad comp is worse than no comp.
+3. If you're aware of any specific recent multifamily sales nearby, mention them for context, and if you find genuinely comparable ones, anchor toward whichever is the most recent and nearest (and lowest-priced among those) rather than a straight average -- but don't force a comp if you can't find a genuinely comparable one, a bad comp is worse than no comp.
 4. ${liveNOI
   ? `If this NOI implies unusually low operating expenses for a property like this in this market (a suspiciously high margin), flag that clearly as a possible red flag -- seller-reported NOI is often optimistic and may be missing real costs like insurance, maintenance, or property management -- and state what a more realistic NOI would likely be instead.`
   : `A flag if operating expenses (taxes and insurance especially) in this specific market tend to run higher or lower than a typical 35 to 45% expense ratio, and your single most likely NOI estimate, not just a range.`}
