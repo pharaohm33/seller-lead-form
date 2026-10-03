@@ -421,8 +421,11 @@ const steps = [
         <div id="autofill-preview" style="margin-top:12px;display:none;"></div>
       `;
 
-      // Never pre-populate from saved answers — always start blank so old listing data can't bleed in.
-      delete answers._autofillUrl;
+      // Wipe all listing-sourced fields the moment this step renders — old data from a previous
+      // session's ?resume= URL must never survive to the address/contact/assetType steps.
+      ["street","city","state","zip","beds","baths","sqft","acreage","askingPrice","yearBuilt",
+       "sellerContactName","sellerContactPhone","sellerContactEmail","sourceLink","assetType","units",
+       "_autofillUrl"].forEach(k => { delete answers[k]; });
       root.querySelector("#autofill-url-input").value = "";
       root.querySelector("#autofill-skip-btn").onclick = () => goTo(nextIndex(stepIndex));
 
@@ -439,10 +442,6 @@ const steps = [
           statusEl.innerHTML = `<div class="banner warn">Paste a listing URL, paste the page text, or upload a screenshot first.</div>`;
           return;
         }
-
-        // Wipe stale listing data immediately so a failed/partial fetch never leaves old info behind
-        ["street","city","state","zip","beds","baths","sqft","acreage","askingPrice","yearBuilt",
-         "sellerContactName","sellerContactPhone","sellerContactEmail","sourceLink","assetType","units"].forEach(k => { delete answers[k]; });
 
         let extracted = {};
 
