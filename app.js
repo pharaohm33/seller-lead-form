@@ -187,6 +187,25 @@ function parseListingText(text) {
   return r;
 }
 
+function parseRehabText(text) {
+  const clean = text.replace(/\n+/g, " ").replace(/\s+/g, " ");
+  function parseMoney(str) {
+    const m = str.match(/\$?\s*([\d,]+(?:\.\d+)?)\s*([KkMm]?)/);
+    if (!m) return null;
+    const n = parseFloat(m[1].replace(/,/g, ""));
+    if (/[Mm]/.test(m[2])) return Math.round(n * 1_000_000);
+    if (/[Kk]/.test(m[2])) return Math.round(n * 1_000);
+    return Math.round(n);
+  }
+  // Range: "$X to/and/–/-/— $Y"
+  const rangeM = clean.match(/(\$[\d,]+(?:\.\d+)?\s*[KkMm]?)\s*(?:to|and|–|-|—)\s*(\$[\d,]+(?:\.\d+)?\s*[KkMm]?)/i);
+  if (rangeM) return { low: parseMoney(rangeM[1]), high: parseMoney(rangeM[2]) };
+  // Single value
+  const singleM = clean.match(/\$\s*([\d,]+(?:\.\d+)?)\s*[KkMm]?/);
+  if (singleM) { const v = parseMoney(singleM[0]); return { low: v, high: v }; }
+  return {};
+}
+
 const US_STATES = ["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY","DC"];
 
 const COMMERCIAL_SUBTYPES = ["Multifamily","Office","Hotel/Motel","Mixed Use","Industrial","Retail","Hospitality","Agriculture","Mobile Home or RV Park","Self Storage","Single Family Portfolio","Other Commercial Portfolio"];
@@ -461,7 +480,8 @@ const steps = [
       // session's ?resume= URL must never survive to the address/contact/assetType steps.
       ["street","city","state","zip","beds","baths","sqft","acreage","askingPrice","yearBuilt",
        "sellerContactName","sellerContactPhone","sellerContactEmail","sourceLink","assetType","units",
-       "priceSought","priceReasoning","_autofillUrl"].forEach(k => { delete answers[k]; });
+       "priceSought","priceReasoning","arv","rehabEstimate","rehabEstimateLow","rehabEstimateHigh",
+       "rehabAiText","_autofillUrl"].forEach(k => { delete answers[k]; });
       root.querySelector("#autofill-skip-btn").onclick = () => goTo(nextIndex(stepIndex));
 
       root.querySelector("#autofill-run-btn").onclick = async () => {
@@ -560,6 +580,110 @@ const steps = [
       };
     },
     validate() { return true; }
+  },
+  {
+    key: "rehabEstimate",
+    progress: true,
+    skip() { return answers.assetType === "Land"; },
+    render(root) {
+      const addressLine = [answers.street, answers.city, answers.state, answers.zip].filter(Boolean).join(", ");
+      const arv = answers.askingPrice || "";
+      const arvFmt = arv ? `$${Number(arv).toLocaleString()}` : "";
+      const arvPart = arv ? ` to reach an ARV of ${arvFmt}` : "";
+      const isResidential = answers.assetType === "Residential Property (1-4 units)";
+      const bedBathPart = (isResidential && answers.beds && answers.baths)
+        ? ` It's currently ${answers.beds} bed / ${answers.baths} bath -- estimate repair costs for that existing layout (however light or heavy the work actually is), with no bedroom or bathroom additions or conversions planned.`
+        : "";
+      const zillowSlug = addressLine.replace(/[^a-zA-Z0-9]+/g, "-");
+      const listingUrl = answers.sourceLink || `https://www.zillow.com/homes/${zillowSlug}_rb/`;
+      const repairPrompt = `how much fix and flip investor repair is needed at ${addressLine}${arvPart}?${bedBathPart} ${listingUrl}`;
+
+      root.innerHTML = `
+        <h2 class="step-title">Rehab Estimate</h2>
+        <p class="step-sub">Open <strong>Google AI Mode</strong> — go to google.com, search anything, then click the <strong>AI Mode</strong> tab near the top (next to All, Images, News). Copy the prompt below and include the listing link so it can see the property's condition — a repair estimate without photos is just a guess.</p>
+        <div style="display:flex;gap:8px;align-items:flex-start;margin-top:12px;">
+          <textarea id="rehab-prompt-box" readonly rows="3" style="flex:1;font-size:13px;background:#f8fafc;border:1px solid #cbd5e1;border-radius:6px;padding:10px;resize:vertical;">${repairPrompt}</textarea>
+          <button class="btn secondary" id="copy-prompt-btn" style="white-space:nowrap;flex-shrink:0;margin-top:2px;">Copy Prompt</button>
+        </div>
+
+        <label class="field-label" style="margin-top:16px;">Paste Google AI's full response here <span class="small-muted">(the form will extract the repair estimate for you)</span></label>
+        <textarea id="rehab-ai-text" rows="5" placeholder="Paste the full AI response here…"></textarea>
+        <button class="btn secondary" id="rehab-parse-btn" style="margin-top:8px;">Extract Estimate from Response</button>
+        <div id="rehab-parse-status" style="margin-top:6px;font-size:13px;display:none;"></div>
+
+        <div style="display:flex;gap:12px;margin-top:16px;flex-wrap:wrap;">
+          <div style="flex:1;min-width:120px;">
+            <label class="field-label">Repair — low <span class="req">*</span></label>
+            <input type="number" id="rehab-low-input" placeholder="$">
+          </div>
+          <div style="flex:1;min-width:120px;">
+            <label class="field-label">Repair — high <span class="req">*</span></label>
+            <input type="number" id="rehab-high-input" placeholder="$">
+          </div>
+        </div>
+        <div class="error-text" id="rehab-error">Enter repair estimate low and high (enter 0 in both if no repairs needed).</div>
+
+        ${arv ? `<div id="as-is-display" style="margin-top:14px;display:none;background:#f0fdf4;border:1px solid #86efac;border-radius:6px;padding:12px;font-size:14px;"><strong>As-Is Value:</strong> <span id="as-is-num" style="font-size:16px;font-weight:600;"></span> <span style="color:#6b7280;font-size:13px;">(ARV ${arvFmt} minus midpoint repair)</span></div>` : ""}
+      `;
+
+      root.querySelector("#rehab-ai-text").value = answers.rehabAiText || "";
+      root.querySelector("#rehab-low-input").value = answers.rehabEstimateLow || "";
+      root.querySelector("#rehab-high-input").value = answers.rehabEstimateHigh || "";
+
+      const updateAsIs = () => {
+        if (!arv) return;
+        const low = Number(root.querySelector("#rehab-low-input").value) || 0;
+        const high = Number(root.querySelector("#rehab-high-input").value) || 0;
+        const mid = (low && high) ? (low + high) / 2 : (low || high);
+        const asIsDisplay = root.querySelector("#as-is-display");
+        root.querySelector("#as-is-num").textContent = "$" + Math.max(Number(arv) - mid, 0).toLocaleString();
+        asIsDisplay.style.display = (low || high || root.querySelector("#rehab-low-input").value === "0") ? "block" : "none";
+      };
+
+      root.querySelector("#copy-prompt-btn").onclick = () => {
+        navigator.clipboard.writeText(repairPrompt).then(() => {
+          const btn = root.querySelector("#copy-prompt-btn");
+          btn.textContent = "Copied!";
+          setTimeout(() => { btn.textContent = "Copy Prompt"; }, 2000);
+        });
+      };
+
+      root.querySelector("#rehab-parse-btn").onclick = () => {
+        const text = root.querySelector("#rehab-ai-text").value;
+        const parsed = parseRehabText(text);
+        const statusEl = root.querySelector("#rehab-parse-status");
+        statusEl.style.display = "block";
+        if (parsed.low != null) {
+          root.querySelector("#rehab-low-input").value = parsed.low;
+          root.querySelector("#rehab-high-input").value = parsed.high != null ? parsed.high : parsed.low;
+          statusEl.innerHTML = `<span style="color:#166534;">✓ Extracted: low $${Number(parsed.low).toLocaleString()} / high $${Number(parsed.high != null ? parsed.high : parsed.low).toLocaleString()}</span>`;
+          updateAsIs();
+        } else {
+          statusEl.innerHTML = `<span style="color:#b45309;">Couldn't find a dollar amount — enter the estimate manually below.</span>`;
+        }
+      };
+
+      root.querySelector("#rehab-low-input").addEventListener("input", updateAsIs);
+      root.querySelector("#rehab-high-input").addEventListener("input", updateAsIs);
+      if (answers.rehabEstimateLow || answers.rehabEstimateHigh) updateAsIs();
+    },
+    validate(root) {
+      const low = root.querySelector("#rehab-low-input").value.trim();
+      const high = root.querySelector("#rehab-high-input").value.trim();
+      const ok = low !== "" && high !== "";
+      toggleError(root, "#rehab-error", !ok);
+      if (!ok) return false;
+      answers.rehabAiText = root.querySelector("#rehab-ai-text").value.trim();
+      answers.rehabEstimateLow = low;
+      answers.rehabEstimateHigh = high;
+      const rLow = Number(low) || 0, rHigh = Number(high) || 0;
+      answers.rehabEstimate = String(rLow && rHigh ? (rLow + rHigh) / 2 : (rLow || rHigh || ""));
+      if (answers.askingPrice) {
+        answers.arv = answers.askingPrice;
+        answers.asIsValue = Math.max(Number(answers.askingPrice) - (Number(answers.rehabEstimate) || 0), 0);
+      }
+      return true;
+    }
   },
   {
     key: "sellerContact",
@@ -3863,6 +3987,7 @@ function buildAnswerRows() {
       ["Rehab Estimate — Low", answers.rehabEstimateLow || "—"],
       ["Rehab Estimate — High", answers.rehabEstimateHigh || "—"],
       ["Rehab Estimate (average)", answers.rehabEstimate || "—"],
+      ["Rehab AI Response", answers.rehabAiText || "—"],
       ["County Assessed Value", answers.countyAssessedValue || "—"],
       ["CMA Screenshots", (answers.cmaScreenshotUrls || []).join("\n") || "—"],
       ["Bottom Dollar Price", answers.bottomDollarPrice || "—"],
@@ -4428,7 +4553,7 @@ async function submitLead(container) {
         landFreeAndClear: answers.landFreeAndClear || "", landWillingToWaitForDev: answers.landWillingToWaitForDev || "",
         dealType: answers.dealType, dealCategory: answers.dealCategory,
         arv: answers.arv, askingPrice: answers.askingPrice, chaseEstimate: answers.chaseEstimate, asIsValue: answers.asIsValue, picturesLink: answers.picturesLink, rehabEstimate: answers.rehabEstimate,
-        rehabEstimateLow: answers.rehabEstimateLow, rehabEstimateHigh: answers.rehabEstimateHigh,
+        rehabEstimateLow: answers.rehabEstimateLow, rehabEstimateHigh: answers.rehabEstimateHigh, rehabAiText: answers.rehabAiText || "",
         countyAssessedValue: answers.countyAssessedValue,
         cmaScreenshotUrls: (answers.cmaScreenshotUrls || []).join("\n"),
         arvRange: answers.arvRange || "",
