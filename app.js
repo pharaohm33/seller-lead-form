@@ -421,7 +421,9 @@ const steps = [
         <div id="autofill-preview" style="margin-top:12px;display:none;"></div>
       `;
 
-      root.querySelector("#autofill-url-input").value = answers.sourceLink || answers._autofillUrl || "";
+      // Don't pre-populate from sourceLink — that's the final saved URL, not the autofill input.
+      // Only restore _autofillUrl if it was set during this same autofill session.
+      root.querySelector("#autofill-url-input").value = answers._autofillUrl || "";
       root.querySelector("#autofill-skip-btn").onclick = () => goTo(nextIndex(stepIndex));
 
       root.querySelector("#autofill-run-btn").onclick = async () => {
@@ -448,7 +450,12 @@ const steps = [
         }
 
         if (urlVal) {
-          statusEl.innerHTML = `<div class="banner info">Fetching listing data…</div>`;
+          const isRedfin = /redfin\.com/i.test(urlVal);
+          if (isRedfin && !pasteText) {
+            statusEl.innerHTML = `<div class="banner warn"><strong>Redfin tip:</strong> Redfin renders beds, baths, and sqft via JavaScript so the URL alone won't get those. For best results use <strong>Option 2</strong> — Ctrl+A → Ctrl+C on the Redfin page, paste the text above. The URL will still fill in the address.</div>`;
+          } else {
+            statusEl.innerHTML = `<div class="banner info">Fetching listing data…</div>`;
+          }
           try {
             const res = await api("fetchListing", { url: urlVal });
             if (res.ok && res.data) {
@@ -456,10 +463,10 @@ const steps = [
               for (const [k, v] of Object.entries(res.data)) { if (v && !extracted[k]) extracted[k] = v; }
               answers._autofillUrl = urlVal;
             } else if (!pasteText) {
-              statusEl.innerHTML = `<div class="banner warn">Couldn't read that page automatically (${res.error || "blocked or unsupported site"}). Try Option 2: Ctrl+A → Ctrl+C on the listing page and paste the text above, or upload a screenshot.</div>`;
+              statusEl.innerHTML = `<div class="banner warn">Couldn't read that page automatically (${res.error || "blocked or unsupported site"}). Use <strong>Option 2</strong>: Ctrl+A → Ctrl+C on the listing page and paste the text above.</div>`;
             }
           } catch(e) {
-            if (!pasteText) statusEl.innerHTML = `<div class="banner warn">Network error fetching listing. Try pasting the page text or a screenshot.</div>`;
+            if (!pasteText) statusEl.innerHTML = `<div class="banner warn">Network error fetching listing. Use Option 2: paste the page text above.</div>`;
           }
         }
 
