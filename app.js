@@ -409,7 +409,7 @@ const steps = [
         <h2 class="step-title">Asset Type</h2>
         <label class="field-label">Type <span class="req">*</span></label>
         <div class="choice-group" id="top-type-group">
-          ${["Commercial Property","Business","Residential Property (1-4 units)","Land"]
+          ${["Residential Property (1-4 units)","Commercial Property","Land","Business"]
             .map(t => `<button type="button" class="choice-btn" data-value="${t}">${t}</button>`).join("")}
         </div>
         <div class="error-text" id="top-type-error">Please select an asset type.</div>
@@ -4902,8 +4902,8 @@ function openMaoCalculator() {
     <select id="mao-calc-asset-type">
       <option value="Residential Property (1-4 units)">Residential Property (1-4 units)</option>
       <option value="Commercial Property">Commercial Property</option>
-      <option value="Business">Business</option>
       <option value="Land">Land</option>
+      <option value="Business">Business</option>
     </select>
 
     <div id="mao-calc-land-fields" hidden>
@@ -5057,11 +5057,16 @@ function openOutreachSop() {
     US — <strong>single-family only, up to 4 units, no condos or apartments.</strong>
     <br><strong>5+ unit multifamily:</strong> Crexi or LoopNet instead — FSBO sites aren't where commercial
     listings live.</p>
+    <p class="hint"><strong>Also pull 180+ day listings on Redfin (1–4 units):</strong> filter Redfin listings to
+    those <strong>above 180 days old</strong> (time on Redfin / days on market) — same single-family, up to 4
+    units rules as above. A listing that's sat 6+ months hasn't sold at its asking price, so those sellers are
+    often more open to a discounted offer. These are usually agent-listed, so the listing shows the agent
+    rather than the owner — skip trace the owner for a phone number the same way as Option 2, Step 2.</p>
     <p class="hint">City population <strong>50,000+</strong>. We can go up to <strong>$90M</strong> on
     commercial deals, but for simplicity, stick to deals <strong>under $20M</strong>.</p>
 
     <h3 style="margin-top:22px;">2. Screen before you text</h3>
-    <p class="hint"><strong>1–4 units:</strong> run the address through <a href="https://propwire.com/" target="_blank" rel="noopener">PropWire</a> and estimate the seller's
+    <p class="hint"><strong>1–4 units</strong> (FSBO and 180+ day Redfin listings alike): run the address through <a href="https://propwire.com/" target="_blank" rel="noopener">PropWire</a> and estimate the seller's
     loan balance against the property's value. PropWire's equity/debt data only shows reliably for 1–4
     unit properties.</p>
     <div class="banner warn">
@@ -5228,6 +5233,10 @@ function openOutreachSop() {
     <h3 style="margin-top:22px;">3a. FSBO / On-Market Land (Recommended — simplest, start here)</h3>
     <p class="hint">Source the same way as Option 1: Zillow/Redfin FSBO listings and MLS, land parcels only.
     <strong>City population must be 50,000+</strong> — same bar as Option 1, skip anything smaller.</p>
+    <p class="hint"><strong>Also pull 180+ day land listings on Redfin:</strong> filter Redfin land listings to
+    those <strong>above 180 days old</strong> (time on Redfin / days on market). Land that's sat 6+ months
+    without selling is where sellers are most likely to take a discounted cash offer. These are usually
+    agent-listed, so skip trace the owner for a phone number the same way as Option 2, Step 2.</p>
     <p class="hint">Run the address through the wizard's land comps prompt (Google AI, matched on zoning/
     topography/access per the wizard's own comping criteria) for a current As-Is Value — never a house's
     ARV, land has no post-repair value. Off of that As-Is Value:</p>
@@ -5236,6 +5245,12 @@ function openOutreachSop() {
     computes them for you). <strong>If the seller won't accept anywhere at or below the 60% ceiling, this
     deal needs to come off-market</strong> before we can offer more — let them know we can revisit at a
     better number once the listing comes down, then work it as Option 3b instead.</div>
+    <p class="hint"><strong>Check equity on <a href="https://propwire.com/" target="_blank" rel="noopener">PropWire</a>
+    before you text</strong> (FSBO and 180+ day listings alike): look up the parcel for the owner's existing
+    debt or liens against the land's value. <strong>No debt (free and clear)</strong> is the best case — it's
+    also the first requirement for 3c below. <strong>Debt at or above the 60% ceiling:</strong> our offer can't
+    cover the payoff, so skip it and move to the next listing. <strong>No data on the parcel?</strong> Ask the
+    seller directly about any mortgage or liens rather than skipping it.</p>
     <p class="hint">Once the seller is interested at a number in range, submit the lead through the site,
     <strong>then separately contact admin directly</strong> so they can move on it fast — don't rely on
     admin noticing the new submission on its own.</p>
