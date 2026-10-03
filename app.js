@@ -65,34 +65,44 @@ function parseAICompsResponse(text, isLand) {
   return { arvLow, arvHigh, arvEstimate, soldComps, activeComps };
 }
 
-// Parses free-form OCR text from listing screenshots to extract property fields.
+// Parses free-form text from a listing page (pasted, OCR'd, or scraped) to extract property fields.
 function parseListingText(text) {
   const r = {};
   const clean = text.replace(/\n+/g, " ").replace(/\s+/g, " ");
 
-  // Price: $XXX,XXX or $X.XM
+  // Price: prefer the listing/asking price — look for "For sale $X" or plain "$X" (not Est. or Sold)
+  // Avoid "Est. $X/mo" and "Last sold price" patterns by anchoring on "For sale" or standalone price
+  const forSaleM = clean.match(/[Ff]or\s+sale\s+\$\s*([\d,]+)/);
   const priceM = clean.match(/\$\s*([\d,]+(?:\.\d+)?)\s*[Mm]/);
   const priceK = clean.match(/\$\s*([\d,]+(?:\.\d+)?)\s*[Kk]/);
-  const priceRaw = clean.match(/\$\s*([\d]{3,3}[,\d]*)/);
-  if (priceM) r.price = Math.round(parseFloat(priceM[1].replace(/,/g, "")) * 1_000_000);
+  const priceRaw = clean.match(/\$\s*([\d]{3,}[,\d]*)/);
+  if (forSaleM) r.price = forSaleM[1].replace(/,/g, "");
+  else if (priceM) r.price = Math.round(parseFloat(priceM[1].replace(/,/g, "")) * 1_000_000);
   else if (priceK) r.price = Math.round(parseFloat(priceK[1].replace(/,/g, "")) * 1_000);
   else if (priceRaw) r.price = priceRaw[1].replace(/,/g, "");
 
-  // Beds/baths/sqft
-  const bedsM = clean.match(/(\d+(?:\.\d+)?)\s*(?:bed(?:room)?s?|bd)/i);
-  const bathsM = clean.match(/(\d+(?:\.\d+)?)\s*(?:bath(?:room)?s?|ba(?:\b))/i);
-  const sqftM = clean.match(/([\d,]+)\s*(?:sq\.?\s*ft|sqft|square\s*feet)/i);
-  const acreM = clean.match(/([\d.]+)\s*acres?/i);
+  // Beds/baths/sqft — match Redfin "4 bd • 1 ba • 1,284 sq ft" and normal prose
+  // Use the FIRST occurrence to get subject property stats, not nearby comps
+  const bedsM = clean.match(/\b(\d+)\s*(?:bd|bed(?:room)?s?)\b/i);
+  const bathsM = clean.match(/\b(\d+(?:\.\d)?)\s*(?:ba(?:\b)|bath(?:room)?s?)\b/i);
+  // sqft: "1,284 sq ft" or "1284 sqft" or "1,284 Finished Sq. Ft."
+  const sqftM = clean.match(/\b([\d,]+)\s*(?:sq\.?\s*ft\.?|sqft|square\s*feet)\b/i)
+             || clean.match(/(?:[Ff]inished\s+Sq\.?\s*Ft\.?|Total\s+Sq\.?\s*Ft\.?)[:\s]+([\d,]+)/i);
+  const acreM = clean.match(/\b([\d.]+)\s*acres?\b/i);
   if (bedsM) r.beds = bedsM[1];
   if (bathsM) r.baths = bathsM[1];
-  if (sqftM) r.sqft = sqftM[1].replace(/,/g, "");
+  if (sqftM) r.sqft = (sqftM[1] || sqftM[2] || "").replace(/,/g, "");
   if (acreM) r.acreage = acreM[1];
 
-  // Year built
-  const yrM = clean.match(/(?:built|year\s*built|yr\.?\s*built)[:\s]+(\d{4})/i) || clean.match(/\b(19[2-9]\d|20[0-2]\d)\b/);
-  if (yrM) r.yearBuilt = yrM[1];
+  // Year built — handle both "Year Built 1956" and "1956 Year Built" (Redfin style)
+  const yrLabelFirst = clean.match(/(?:year\s*built|yr\.?\s*built|built\s*in)[:\s]+(\d{4})/i);
+  const yrValueFirst = clean.match(/\b(\d{4})\s+(?:year\s*built|yr\.?\s*built)/i);
+  const yrFallback  = clean.match(/\b(19[2-9]\d|20[0-2]\d)\b/);
+  if (yrLabelFirst) r.yearBuilt = yrLabelFirst[1];
+  else if (yrValueFirst) r.yearBuilt = yrValueFirst[1];
+  else if (yrFallback) r.yearBuilt = yrFallback[1];
 
-  // Address: look for "123 Any St, City, ST 12345" pattern
+  // Address: "123 Main St, Dallas, TX 75232" — also handles Dr/Ln/Blvd etc.
   const addrM = clean.match(/(\d+\s+[A-Za-z0-9 .#'-]+(?:St|Ave|Rd|Dr|Blvd|Ln|Way|Ct|Pl|Cir|Hwy|Pkwy|Trail|Terrace|Loop|Pass|Run|Path|Trl)[.,]?\s+[A-Za-z ]+,\s+([A-Z]{2})\s+(\d{5}))/i);
   if (addrM) {
     const parts = addrM[1].split(",").map(s => s.trim());
@@ -103,25 +113,37 @@ function parseListingText(text) {
       if (stIdx > 0) { r.city = cityState.slice(0, stIdx).join(" "); r.state = cityState[stIdx]; }
       else r.city = parts[1].trim();
     }
-    if (parts[2]) r.zip = parts[2].match(/\d{5}/)?.[0] || "";
+    if (parts[2]) r.zip = (parts[2].match(/\d{5}/) || [])[0] || "";
   }
 
-  // Agent/listing agent name: "Listed by [Name]" or "Agent: [Name]"
-  const agentM = clean.match(/(?:listed\s*by|listing\s*agent|agent|realtor|broker)[:\s]+([A-Z][a-z]+(?: [A-Z][a-z]+)+)/i);
+  // Agent name: "Listed by Chaz Cameli" or "Listing Agent: ..."
+  const agentM = clean.match(/(?:listed\s*by|listing\s*agent)[:\s•]+([A-Z][a-z]+(?: [A-Z][a-z]+)+)/i);
   if (agentM) r.agentName = agentM[1];
 
-  // Phone number
-  const phoneM = clean.match(/(\(?\d{3}\)?[\s.\-]\d{3}[\s.\-]\d{4})/);
-  if (phoneM) r.agentPhone = phoneM[1];
+  // Phone: "Contact: 714-580-6346" or plain phone number near agent context
+  const contactPhoneM = clean.match(/[Cc]ontact[:\s]+(\(?\d{3}\)?[\s.\-]\d{3}[\s.\-]\d{4})/);
+  const plainPhoneM   = clean.match(/(\(?\d{3}\)?[\s.\-]\d{3}[\s.\-]\d{4})/);
+  if (contactPhoneM) r.agentPhone = contactPhoneM[1];
+  else if (plainPhoneM) r.agentPhone = plainPhoneM[1];
 
   // Email
   const emailM = clean.match(/([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/);
   if (emailM) r.agentEmail = emailM[1];
 
-  // Asset type inference
-  if (/\blands?\b|\bvacant\s*lot\b|\braw\s*land\b|\bacreage\b/i.test(clean)) r.assetType = "Land";
-  else if (/\bcommercial\b|\bmultifamily\b|\boffice\b|\bretail\b|\bindustrial\b/i.test(clean)) r.assetType = "Commercial Property";
-  else if (r.beds || /\bsingle.family\b|\bcondo\b|\btownhome\b|\btownhouse\b/i.test(clean)) r.assetType = "Residential Property (1-4 units)";
+  // Asset type — check explicit property type label first, then infer
+  const ptM = clean.match(/(?:[Pp]roperty\s+[Tt]ype|[Hh]ome\s+[Tt]ype)[:\s•]+([A-Za-z\s\-]+?)(?:\s{2,}|\.|,|$)/);
+  if (ptM) {
+    const pt = ptM[1].toLowerCase().trim();
+    if (/land|lot|vacant|acreage|raw/.test(pt)) r.assetType = "Land";
+    else if (/multi.family|multifamily|apartment|commercial|retail|office|industrial/.test(pt)) r.assetType = "Commercial Property";
+    else r.assetType = "Residential Property (1-4 units)";
+  } else if (/\blands?\b|\bvacant\s*lot\b|\braw\s*land\b|\bacreage\b/i.test(clean)) {
+    r.assetType = "Land";
+  } else if (/\bcommercial\b|\bmultifamily\b|\boffice\b|\bretail\b|\bindustrial\b/i.test(clean)) {
+    r.assetType = "Commercial Property";
+  } else if (r.beds || /\bsingle.family\b|\bcondo\b|\btownhome\b|\btownhouse\b/i.test(clean)) {
+    r.assetType = "Residential Property (1-4 units)";
+  }
 
   return r;
 }
@@ -378,14 +400,17 @@ const steps = [
     render(root) {
       root.innerHTML = `
         <h2 class="step-title">Auto-Fill from Listing</h2>
-        <p class="step-sub">Paste a listing link or upload screenshot(s) and we'll fill out the form for you. This step is optional — hit Skip to enter everything manually.</p>
+        <p class="step-sub">Give us the listing and we'll fill out the form. All three options below work — use whichever is easiest. Hit Skip to enter everything manually.</p>
 
-        <label class="field-label">Listing URL <span class="small-muted">(Zillow, Realtor.com, Propwire, MLS, etc.)</span></label>
-        <input type="url" id="autofill-url-input" placeholder="https://www.zillow.com/homedetails/..." style="font-size:14px;">
+        <label class="field-label">Option 1 — Listing URL <span class="small-muted">(Zillow, Redfin, Realtor.com, Propwire, MLS, etc.)</span></label>
+        <input type="url" id="autofill-url-input" placeholder="https://www.redfin.com/..." style="font-size:14px;">
 
-        <label class="field-label" style="margin-top:14px;">Or upload screenshot(s) of the listing</label>
+        <label class="field-label" style="margin-top:16px;">Option 2 — Paste page text <span class="small-muted">(most reliable for Redfin — Ctrl+A → Ctrl+C on the listing page, paste here)</span></label>
+        <textarea id="autofill-page-text" rows="4" placeholder="Select all text on the Redfin/Zillow page (Ctrl+A), copy it (Ctrl+C), then paste it here. Works on any listing site and captures beds, baths, sqft, agent, price — everything visible on the page." style="font-size:13px;width:100%;box-sizing:border-box;resize:vertical;"></textarea>
+
+        <label class="field-label" style="margin-top:16px;">Option 3 — Upload screenshot(s)</label>
         <input type="file" id="autofill-screenshots" accept="image/*" multiple style="margin-top:4px;">
-        <p class="hint" style="margin-top:4px;">Upload one or more screenshots of the listing page. Works offline and is completely free — processed in your browser.</p>
+        <p class="hint" style="margin-top:4px;">Processed free in your browser via OCR.</p>
 
         <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;">
           <button class="btn primary" id="autofill-run-btn" style="flex:1;">Auto-Fill →</button>
@@ -401,31 +426,40 @@ const steps = [
 
       root.querySelector("#autofill-run-btn").onclick = async () => {
         const urlVal = root.querySelector("#autofill-url-input").value.trim();
+        const pasteText = root.querySelector("#autofill-page-text").value.trim();
         const files = root.querySelector("#autofill-screenshots").files;
         const statusEl = root.querySelector("#autofill-status");
         const previewEl = root.querySelector("#autofill-preview");
         statusEl.style.display = "block";
         previewEl.style.display = "none";
 
-        if (!urlVal && (!files || files.length === 0)) {
-          statusEl.innerHTML = `<div class="banner warn">Paste a listing URL or upload at least one screenshot first.</div>`;
+        if (!urlVal && !pasteText && (!files || files.length === 0)) {
+          statusEl.innerHTML = `<div class="banner warn">Paste a listing URL, paste the page text, or upload a screenshot first.</div>`;
           return;
         }
 
         let extracted = {};
+
+        // Option 2: paste text — most reliable, runs first so URL can fill gaps
+        if (pasteText) {
+          statusEl.innerHTML = `<div class="banner info">Parsing pasted text…</div>`;
+          const fromText = parseListingText(pasteText);
+          for (const [k, v] of Object.entries(fromText)) { if (v) extracted[k] = v; }
+        }
 
         if (urlVal) {
           statusEl.innerHTML = `<div class="banner info">Fetching listing data…</div>`;
           try {
             const res = await api("fetchListing", { url: urlVal });
             if (res.ok && res.data) {
-              extracted = { ...extracted, ...res.data };
+              // URL data fills gaps not already found in pasted text
+              for (const [k, v] of Object.entries(res.data)) { if (v && !extracted[k]) extracted[k] = v; }
               answers._autofillUrl = urlVal;
-            } else {
-              statusEl.innerHTML = `<div class="banner warn">Couldn't read that page automatically (${res.error || "blocked or unsupported site"}). Try uploading a screenshot instead, or skip to enter manually.</div>`;
+            } else if (!pasteText) {
+              statusEl.innerHTML = `<div class="banner warn">Couldn't read that page automatically (${res.error || "blocked or unsupported site"}). Try Option 2: Ctrl+A → Ctrl+C on the listing page and paste the text above, or upload a screenshot.</div>`;
             }
           } catch(e) {
-            statusEl.innerHTML = `<div class="banner warn">Network error fetching listing. Try a screenshot or skip.</div>`;
+            if (!pasteText) statusEl.innerHTML = `<div class="banner warn">Network error fetching listing. Try pasting the page text or a screenshot.</div>`;
           }
         }
 
