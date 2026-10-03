@@ -498,16 +498,20 @@ const steps = [
 
         if (Object.keys(extracted).length === 0) return;
 
-        // Apply to answers
-        if (extracted.street)   answers.street = extracted.street;
-        if (extracted.city)     answers.city = extracted.city;
-        if (extracted.state)    answers.state = extracted.state;
-        if (extracted.zip)      answers.zip = extracted.zip;
-        if (extracted.beds)     answers.beds = extracted.beds;
-        if (extracted.baths)    answers.baths = extracted.baths;
-        if (extracted.sqft)     answers.sqft = extracted.sqft;
-        if (extracted.acreage)  answers.acreage = extracted.acreage;
-        if (extracted.price)    answers.askingPrice = String(extracted.price).replace(/[^0-9.]/g, "");
+        // Wipe all autofill-able fields first so no stale data from a previous listing bleeds through
+        ["street","city","state","zip","beds","baths","sqft","acreage","askingPrice","yearBuilt",
+         "sellerContactName","sellerContactPhone","sellerContactEmail","sourceLink","assetType","units"].forEach(k => { delete answers[k]; });
+
+        // Apply freshly extracted data
+        if (extracted.street)    answers.street = extracted.street;
+        if (extracted.city)      answers.city = extracted.city;
+        if (extracted.state)     answers.state = extracted.state;
+        if (extracted.zip)       answers.zip = extracted.zip;
+        if (extracted.beds)      answers.beds = extracted.beds;
+        if (extracted.baths)     answers.baths = extracted.baths;
+        if (extracted.sqft)      answers.sqft = extracted.sqft;
+        if (extracted.acreage)   answers.acreage = extracted.acreage;
+        if (extracted.price)     answers.askingPrice = String(extracted.price).replace(/[^0-9.]/g, "");
         if (extracted.yearBuilt) answers.yearBuilt = extracted.yearBuilt;
         if (extracted.agentName)  answers.sellerContactName = extracted.agentName;
         if (extracted.agentPhone) answers.sellerContactPhone = extracted.agentPhone;
@@ -515,9 +519,8 @@ const steps = [
         if (urlVal) answers.sourceLink = urlVal;
         if (extracted.assetType) answers.assetType = extracted.assetType;
         // Single-family and land are always 1 unit — auto-set so the address step passes validation
-        if (extracted.assetType === "Residential Property (1-4 units)" && !extracted.units) {
-          answers.units = answers.units || "1";
-        }
+        if (extracted.assetType === "Residential Property (1-4 units)") answers.units = "1";
+        if (extracted.assetType === "Land") answers.units = "1";
         if (extracted.assetType === "Land") answers.units = "1";
 
         // Build preview card
