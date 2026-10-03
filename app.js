@@ -171,6 +171,10 @@ function parseListingText(text) {
   const realEmail = emailAll.find(m => !BLOCKED_EMAIL_DOMAINS.test(m[2]) && !BLOCKED_EMAIL_PREFIXES.test(m[1].split("@")[0]));
   if (realEmail) r.agentEmail = realEmail[1];
 
+  // APN / Parcel ID — "APN 00000460627000000" / "Parcel ID: 123-456-789" / "Parcel # 12.34.56"
+  const apnM = clean.match(/(?:APN|Assessor['']?s?\s+Parcel\s+(?:Number|No\.?)|Parcel\s+(?:ID|Number|No\.?|#))[:\s#]+([A-Za-z0-9][A-Za-z0-9\-. ]{1,40}?)(?=\s{2,}|[,;]|$)/i);
+  if (apnM) r.parcelIds = apnM[1].trim();
+
   // Asset type — check explicit property type label first, then infer
   const ptM = clean.match(/(?:[Pp]roperty\s+[Tt]ype|[Hh]ome\s+[Tt]ype)[:\s•]+([A-Za-z\s\-]+?)(?:\s{2,}|\.|,|$)/);
   if (ptM) {
@@ -483,7 +487,7 @@ const steps = [
       ["street","city","state","zip","beds","baths","sqft","acreage","askingPrice","yearBuilt",
        "sellerContactName","sellerContactPhone","sellerContactEmail","sourceLink","assetType","units",
        "priceSought","priceReasoning","arv","rehabEstimate","rehabEstimateLow","rehabEstimateHigh",
-       "rehabAiText","_autofillUrl"].forEach(k => { delete answers[k]; });
+       "rehabAiText","parcelIds","_autofillUrl"].forEach(k => { delete answers[k]; });
       root.querySelector("#autofill-skip-btn").onclick = () => goTo(nextIndex(stepIndex));
 
       root.querySelector("#autofill-run-btn").onclick = async () => {
@@ -553,6 +557,7 @@ const steps = [
         if (extracted.agentName)  answers.sellerContactName = extracted.agentName;
         if (extracted.agentPhone) answers.sellerContactPhone = extracted.agentPhone;
         if (extracted.agentEmail) answers.sellerContactEmail = extracted.agentEmail;
+        if (extracted.parcelIds)  answers.parcelIds = extracted.parcelIds;
         if (extracted.assetType) answers.assetType = extracted.assetType;
         if (extracted.assetType === "Residential Property (1-4 units)") answers.units = "1";
         if (extracted.assetType === "Land") answers.units = "1";
