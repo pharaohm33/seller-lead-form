@@ -1206,6 +1206,7 @@ function fetchListing(body) {
   const siteDomainM = url.match(/^https?:\/\/(?:www\.)?([a-z0-9\-]+\.[a-z]{2,})/i);
   const siteDomain = siteDomainM ? siteDomainM[1].toLowerCase() : "";
   const GENERIC_EMAIL_PREFIXES = /^(?:noreply|no-reply|notifications?|support|info|contact|help|admin|hello|team|sales|marketing|bots?|mailer|donotreply|do-not-reply|unsubscribe|feedback|service|enquir|legal|privacy|press|media)\b/i;
+  const LISTING_PLATFORM_DOMAINS = {"redfin.com":1,"zillow.com":1,"loopnet.com":1,"crexi.com":1,"realtor.com":1,"trulia.com":1,"homes.com":1,"movoto.com":1,"homesnap.com":1,"listhub.com":1};
   function isRealAgentEmail(email) {
     if (!email) return false;
     const parts = email.split("@");
@@ -1213,6 +1214,7 @@ function fetchListing(body) {
     const domain = (parts[1] || "").toLowerCase();
     if (GENERIC_EMAIL_PREFIXES.test(prefix)) return false;
     if (siteDomain && domain === siteDomain) return false;
+    if (LISTING_PLATFORM_DOMAINS[domain]) return false;
     return true;
   }
 
