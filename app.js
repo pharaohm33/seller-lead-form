@@ -2024,7 +2024,7 @@ Find recent comparable land sales (comps) and an estimated As-Is Value (current 
 - Address: ${addressLine || "[SUBJECT ADDRESS]"}
 - Details: ${detailsPart}
 
-For land, what a comp has in common matters more than how close it is. Search live for 3 to 5 properties that meet ALL of these rules, in this order of importance:
+For land, what a comp has in common matters more than how close it is. Search live for up to 3 properties that meet ALL of these rules, prioritizing the most recent and closest qualifying matches first, in this order of importance:
 1. Identical or equivalent zoning to the subject property — never treat a commercially-zoned parcel as comparable to a residentially-zoned one, even if they're next to each other.
 2. Comparable topography and usability — a flat, buildable lot is not comparable to a steep, unusable, or landlocked one without a clear value adjustment. Note each comp's topography and any notable features (wooded, cleared, waterfront, floodplain, etc.).
 3. Comparable access and utilities — road access (paved vs. dirt vs. none) and utility hookups (electric, water, septic/sewer) should be similar, or clearly flagged as different along with how that affects value.
@@ -2069,7 +2069,7 @@ Find recent comparable SOLD properties and an estimated market value (ARV) for t
 - Current occupancy: ${occupancyPart}` : ""}${liveNOI ? `
 - Current reported annual NOI: $${Number(liveNOI).toLocaleString()}` : ""}
 
-Search live for 3 to 5 comparable SOLD properties that meet ALL of these rules:
+Search live for up to 3 comparable SOLD properties that meet ALL of these rules, prioritizing the most recent and closest qualifying matches first:
 1. Same asset type as the subject (${answers.assetSubtype || "[ASSET TYPE]"}) — never comp a different commercial property type against this one, and never comp a single-family home, duplex, triplex, or fourplex against this multifamily property${isMultifamilySubtype ? (matchByUnitsOnly
   ? `. This property's square footage isn't reliably known, so ignore square footage and unit-count brackets entirely -- instead, rank candidate comps by how close their unit count is to this property's ${answers.units || "[UNIT COUNT]"} units, and use the closest matches available even if none are an exact match. Also try to match similar unit mix (studios, 1BR, 2BR, etc.) where you can find that detail`
   : `. For multifamily specifically, also match unit count within the same bracket (2 to 4, 5 to 9, 10 to 19, or 20+ units) and similar unit mix (studios, 1BR, 2BR, etc.) where you can find that detail`) : ""}.
@@ -2103,7 +2103,7 @@ Find recent comparable sales (comps) and an estimated After Repair Value (ARV) f
 - Address: ${addressLine || "[SUBJECT ADDRESS]"}
 - Details: ${detailsPart}
 
-Search live for 3 to 5 properties that meet ALL of these rules:
+Search live for up to 3 properties that meet ALL of these rules, prioritizing the most recent and closest qualifying matches first:
 1. Sold within the last 12 months — strongly prefer comps sold within the last 6 months if there are enough to choose from. Comps older than 12 months don't count, no exceptions.
 2. Within a MAXIMUM of 1-mile STRAIGHT-LINE distance from the subject address (as the crow flies, not driving distance) — this is a hard limit, not a target, closer is always better. State your estimated straight-line distance for each one explicitly, and flag it clearly if you had to go close to the 1-mile edge because nothing closer was available.
 3. In excellent, fully remodeled, or brand-new condition — skip anything described as a fixer-upper, needing TLC, sold as-is, or a renovation/investment project.
