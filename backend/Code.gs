@@ -1175,48 +1175,70 @@ function fetchListing(body) {
     if (ogTitle) result._ogTitle = ogTitle;
   }
 
-  // 3. Aggressive agent/phone/email extraction from raw HTML text
-  // Most listing sites render agent info via JS, but some embed it in data attrs or plain HTML.
+  // Extract site domain to filter out the site's own emails (support@redfin.com, etc.)
+  const siteDomainM = url.match(/^https?:\/\/(?:www\.)?([a-z0-9\-]+\.[a-z]{2,})/i);
+  const siteDomain = siteDomainM ? siteDomainM[1].toLowerCase() : "";
+  const GENERIC_EMAIL_PREFIXES = /^(?:noreply|no-reply|notifications?|support|info|contact|help|admin|hello|team|sales|marketing|bots?|mailer|donotreply|do-not-reply|unsubscribe|feedback|service|enquir|legal|privacy|press|media)\b/i;
+  function isRealAgentEmail(email) {
+    if (!email) return false;
+    const parts = email.split("@");
+    const prefix = parts[0] || "";
+    const domain = (parts[1] || "").toLowerCase();
+    if (GENERIC_EMAIL_PREFIXES.test(prefix)) return false;
+    if (siteDomain && domain === siteDomain) return false;
+    return true;
+  }
+
+  // 3. "Listed by" visible text pattern (works on Redfin, many MLS sites)
   if (!result.agentName) {
-    // Try common patterns: "listingAgent","agentName","agent_name","listing_agent" in JSON blobs
-    const agentNameM = html.match(/["'](?:listingAgent|agentName|agent_name|listing_agent|agentFullName|brokerName)["']\s*:\s*["']([^"']{2,60})["']/i);
+    const listedByM = html.match(/[Ll]isted\s+by[:\s]+<[^>]+>([^<]{2,60})<\/|[Ll]isted\s+by[:\s"']+([A-Z][a-z]+(?: [A-Z][a-z]+)+)/);
+    if (listedByM) result.agentName = (listedByM[1] || listedByM[2]).trim();
+  }
+
+  // 4. JSON key patterns for agent name/phone/email in any embedded JSON blobs
+  if (!result.agentName) {
+    const agentNameM = html.match(/["'](?:listingAgentName|listing_agent_name|agentName|agent_name|agentFullName|brokerName|listingAgent)["']\s*:\s*["']([^"']{2,60})["']/i);
     if (agentNameM) result.agentName = agentNameM[1];
   }
   if (!result.agentPhone) {
-    const agentPhoneM = html.match(/["'](?:agentPhone|agent_phone|listingAgentPhone|brokerPhone|phoneNumber|phone)["']\s*:\s*["']([+\d\s()./-]{7,20})["']/i);
+    const agentPhoneM = html.match(/["'](?:agentPhone|agent_phone|listingAgentPhone|listingAgentMobilePhone|brokerPhone|mobilePhone)["']\s*:\s*["']([+\d\s()./-]{7,20})["']/i);
     if (agentPhoneM) result.agentPhone = agentPhoneM[1].trim();
-    // Fallback: first US phone number pattern near "agent" or "broker" or "contact" in HTML
     if (!result.agentPhone) {
-      const vicinity = html.match(/(?:agent|broker|contact|realtor|listed\s*by)[^<]{0,200}(\(?\d{3}\)?[\s.\-]\d{3}[\s.\-]\d{4})/i);
+      // Phone near "listed by" / "agent" / "broker" text — avoids site-wide numbers
+      const vicinity = html.match(/(?:[Ll]isted\s+by|listing\s+agent|contact\s+agent)[^<]{0,300}(\(?\d{3}\)?[\s.\-]\d{3}[\s.\-]\d{4})/);
       if (vicinity) result.agentPhone = vicinity[1];
     }
   }
   if (!result.agentEmail) {
-    const agentEmailM = html.match(/["'](?:agentEmail|agent_email|listingAgentEmail|brokerEmail|email)["']\s*:\s*["']([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})["']/i);
-    if (agentEmailM) result.agentEmail = agentEmailM[1];
+    // JSON key first
+    const agentEmailM = html.match(/["'](?:agentEmail|agent_email|listingAgentEmail|brokerEmail)["']\s*:\s*["']([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})["']/i);
+    const candidate1 = agentEmailM ? agentEmailM[1] : null;
+    if (candidate1 && isRealAgentEmail(candidate1)) result.agentEmail = candidate1;
     if (!result.agentEmail) {
-      const emailVicinityM = html.match(/(?:agent|broker|contact|realtor|listed\s*by)[^<]{0,300}([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/i);
-      if (emailVicinityM) result.agentEmail = emailVicinityM[1];
+      // Email near "listed by" / "agent" text
+      const emailVicinityM = html.match(/(?:[Ll]isted\s+by|listing\s+agent|contact\s+agent)[^<]{0,400}([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/);
+      const candidate2 = emailVicinityM ? emailVicinityM[1] : null;
+      if (candidate2 && isRealAgentEmail(candidate2)) result.agentEmail = candidate2;
     }
   }
-  // 4. Try Zillow's __NEXT_DATA__ / window.__data JSON blob (large embedded JSON)
+
+  // 5. Zillow __NEXT_DATA__ JSON blob
   if (!result.agentName || !result.agentPhone) {
     const nextDataM = html.match(/<script[^>]*id="__NEXT_DATA__"[^>]*>([\s\S]{1,300000}?)<\/script>/);
     if (nextDataM) {
       try {
-        const nd = JSON.parse(nextDataM[1]);
-        const ndStr = JSON.stringify(nd);
+        const ndStr = JSON.stringify(JSON.parse(nextDataM[1]));
         if (!result.agentName) {
-          const nm = ndStr.match(/"(?:agentName|displayName|name)"\s*:\s*"([^"]{2,60})"/);
+          const nm = ndStr.match(/"(?:listingAgentName|agentName|displayName)"\s*:\s*"([^"]{2,60})"/);
           if (nm) result.agentName = nm[1];
         }
         if (!result.agentPhone) {
-          const pm = ndStr.match(/"(?:phone|mobilePhone|phoneNumber|agentPhone)"\s*:\s*"([+\d\s().\/\-]{7,20})"/);
+          const pm = ndStr.match(/"(?:agentPhone|mobilePhone|listingAgentPhone)"\s*:\s*"([+\d\s().\/\-]{7,20})"/);
           if (pm) result.agentPhone = pm[1].trim();
         }
         if (!result.agentEmail) {
-          const em = ndStr.match(/"(?:email|agentEmail)"\s*:\s*"([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})"/);
-          if (em) result.agentEmail = em[1];
+          const em = ndStr.match(/"(?:agentEmail|listingAgentEmail)"\s*:\s*"([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})"/);
+          if (em && isRealAgentEmail(em[1])) result.agentEmail = em[1];
         }
       } catch(e) {}
     }
