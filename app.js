@@ -1486,7 +1486,7 @@ const steps = [
           <!-- STEP 2 -->
           <div style="border-left:3px solid #7c3aed;padding:4px 0 4px 12px;margin:16px 0 8px;">
             <strong style="color:#7c3aed;font-size:14px;">Step 2 — Paste Google AI response</strong>
-            <p class="hint" style="margin:3px 0 0;">At the bottom of the AI response, press <strong>Copy</strong> — then paste the full response below. The form will auto-fill the ARV and comps table.</p>
+            <p class="hint" style="margin:3px 0 0;">At the bottom of the AI response, press <strong>Copy</strong> — then paste the full response below. The form will auto-fill the ${isBusiness ? "business value" : isLand ? "As-Is Value" : "ARV"} and comps table.</p>
           </div>
           <textarea id="ai-response-input" rows="6" placeholder="Paste the full Google AI response here..." style="width:100%;font-size:13px;font-family:inherit;border:1px solid #d1d5db;border-radius:6px;padding:10px;box-sizing:border-box;"></textarea>
           <button type="button" class="btn primary" id="parse-ai-btn" style="margin-top:8px;">Parse &amp; Auto-Fill Results →</button>
@@ -1508,8 +1508,8 @@ const steps = [
           ${!isBusiness ? `
             <!-- STEP 3 header -->
             <div style="border-left:3px solid #7c3aed;padding:4px 0 4px 12px;margin:20px 0 4px;">
-              <strong style="color:#7c3aed;font-size:14px;">Step 3 — Listing/photos link, rehab estimate &amp; remaining details</strong>
-              <p class="hint" style="margin:3px 0 0;">Enter the listing or photos link first — it feeds directly into the repair estimate prompt below.</p>
+              <strong style="color:#7c3aed;font-size:14px;">Step 3 — ${isLand ? "Listing link &amp; remaining details" : "Listing/photos link, rehab estimate &amp; remaining details"}</strong>
+              <p class="hint" style="margin:3px 0 0;">${isLand ? "Paste the listing link below if available — optional for land parcels." : "Enter the listing or photos link first — it feeds directly into the repair estimate prompt below."}</p>
             </div>
             <label class="field-label">Pictures / Listing Link <span class="small-muted">(paste the for-sale listing URL or photos link — this is what Google AI uses to see the property's condition)</span></label>
             <input type="text" id="pictures-link-input" placeholder="https://...">
@@ -1523,14 +1523,14 @@ const steps = [
             ${["Yes", "No"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
           </div>
 
-          <label class="field-label" style="margin-top:16px;">Would the seller be open to getting a small down payment now — likely <strong>5% down (+ realtor commission)</strong> — and get paid the rest after the property is developed and sold or refinanced, to receive their full asking price?</label>
+          <label class="field-label" style="margin-top:16px;">Would the seller accept <strong>~5% down at closing</strong>, with the remaining balance paid at their <strong>full asking price</strong> — as long as it appraises at that value at closing — once the land is developed and sold or refinanced, plus <strong>interest on the deferred balance</strong> in the meantime?</label>
           <div class="choice-group" id="land-willing-wait-group">
             ${["Yes", "No"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
           </div>
           <p class="hint">If both are <strong>Yes</strong>, this qualifies for a <strong>100% of As-Is
           Value</strong> deferred offer (full asking price, with ~5% down at closing + the rest paid once
-          developed/sold or refinanced) instead of the normal on-market/off-market percentage offer below —
-          see the Make Your Offer banner once you've entered As-Is Value.</p>
+          developed/sold or refinanced, plus interest) instead of the normal on-market/off-market percentage
+          offer below — see the Make Your Offer banner once you've entered As-Is Value.</p>
         ` : ""}
 
         ${isCommercial ? `
@@ -2349,11 +2349,11 @@ If this suggests the property is worth meaningfully less than expected, say so p
             aiParseResults.hidden = false;
             aiParseResults.innerHTML = `
               <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:14px;">
-                <strong style="color:#166534;font-size:14px;">✓ Results parsed — ${isBusiness ? "Business Value" : "ARV"} auto-filled</strong>
+                <strong style="color:#166534;font-size:14px;">✓ Results parsed — ${isBusiness ? "Business Value" : isLand ? "As-Is Value" : "ARV"} auto-filled</strong>
                 <div style="margin-top:10px;display:flex;gap:16px;flex-wrap:wrap;">
-                  <div><span class="small-muted">${isBusiness ? "Value Range" : "ARV Range"}</span><br><strong>${fmt(parsed.arvLow)} – ${fmt(parsed.arvHigh)}</strong></div>
+                  <div><span class="small-muted">${isBusiness ? "Value Range" : isLand ? "As-Is Value Range" : "ARV Range"}</span><br><strong>${fmt(parsed.arvLow)} – ${fmt(parsed.arvHigh)}</strong></div>
                   <div><span class="small-muted">Best Estimate</span><br><strong>${fmt(parsed.arvEstimate)}</strong></div>
-                  <div><span class="small-muted">${isBusiness ? "Starting Offer (low value)" : "Starting Offer (low ARV)"}</span><br><strong style="color:#7c3aed;">${fmt(parsed.arvLow)}</strong></div>
+                  <div><span class="small-muted">${isBusiness ? "Starting Offer (low value)" : isLand ? "Opening Offer (low value)" : "Starting Offer (low ARV)"}</span><br><strong style="color:#7c3aed;">${fmt(parsed.arvLow)}</strong></div>
                 </div>
                 ${parsed.soldComps.length ? `
                   <div style="margin-top:12px;font-weight:600;font-size:12px;color:#374151;">${isBusiness ? "BUSINESS COMPS" : "SOLD COMPS"} (${parsed.soldComps.length})</div>
@@ -2627,6 +2627,36 @@ If this suggests the property is worth meaningfully less than expected, say so p
     // up why the next question (letting a buyer place a new senior loan) is even being asked.
     skip() { return answers.dealType === "Cash Deal" && answers.role !== "Seller"; },
     render(root) {
+      const isLand = answers.assetType === "Land";
+      if (isLand) {
+        const landScript = "If the land appraises for your asking price, would you be open to getting about 5% down at closing, with the rest paid at your full asking price once the land is developed and sold or refinanced — plus interest on the balance in the meantime?";
+        root.innerHTML = `
+          <h2 class="step-title">Deferred Payout — Optional for Land</h2>
+          <p class="step-sub">This is optional — the lead moves forward as a standard cash deal either way.
+          A <strong>Yes</strong> opens up the 100%-of-value deferred offer (Option 3c in the Acquisition SOP).</p>
+          <p class="hint">Ask them (text it or read it over the phone):
+          <br><span class="small-muted">"${landScript}"</span>
+          <br><button type="button" class="btn secondary" id="structure-script-copy-btn" style="margin-top:8px;">Copy Text</button>
+          </p>
+          <div class="choice-group" id="structure-group">
+            ${["Yes","No","Skip"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
+          </div>
+          <div class="banner info" id="structure-block-banner" ${answers.paymentStructureWilling === "No" ? "" : "hidden"} style="margin-top:10px;">
+            No problem — this lead moves forward as a standard cash offer at the normal on/off-market percentage instead.
+          </div>
+        `;
+        wireCopyPromptButton(root, "#structure-script-copy-btn", () => landScript);
+        root.querySelectorAll("#structure-group .choice-btn").forEach(btn => {
+          if (btn.dataset.value === answers.paymentStructureWilling) btn.classList.add("selected");
+          btn.onclick = () => {
+            root.querySelectorAll("#structure-group .choice-btn").forEach(b => b.classList.remove("selected"));
+            btn.classList.add("selected");
+            answers.paymentStructureWilling = btn.dataset.value;
+            root.querySelector("#structure-block-banner").hidden = btn.dataset.value !== "No";
+          };
+        });
+        return;
+      }
       const structureScript = "Would you be open to a structure where the buyer pays some money down up "
         + "front, makes monthly payments after that, and pays off the remaining balance within an agreed "
         + "amount of time?";
@@ -2661,6 +2691,7 @@ If this suggests the property is worth meaningfully less than expected, say so p
       });
     },
     validate(root) {
+      if (answers.assetType === "Land") return true; // non-blocking for land
       const ok = !!answers.paymentStructureWilling;
       toggleError(root, "#structure-error", !ok);
       return ok && answers.paymentStructureWilling === "Yes";
@@ -2674,23 +2705,31 @@ If this suggests the property is worth meaningfully less than expected, say so p
     // pick that option (admin decides the actual structure, not the seller's initial guess).
     skip() { return answers.dealType === "Cash Deal" && answers.role !== "Seller"; },
     render(root) {
-      const seniorLoanScript = "Would you be open to us bringing in outside financing that would sit in "
-        + "first position on the property, with your seller financing behind it in second position?";
+      const isLand = answers.assetType === "Land";
+      const seniorLoanScript = isLand
+        ? "The buyer would take out a 1st position construction loan on the land at closing — that loan is what funds your 5% down payment. Would you be OK with that?"
+        : "Would you be open to us bringing in outside financing that would sit in first position on the property, with your seller financing behind it in second position?";
+      const title = isLand ? "Construction Loan (1st Position)" : "New Senior Financing";
+      const sub = isLand
+        ? `For the deferred payout structure to work, the buyer takes out a 1st position construction loan
+          on the land at closing — that's what funds the 5% down payment to you. ${isLand ? "This is optional — if Yes isn't possible, this lead moves forward as a standard cash deal instead." : "We need a yes or a no here to accept the lead."}`
+        : `Would the seller be willing to let a buyer place a new senior (1st position)
+          mortgage on the property? We need a yes or a no here to accept the lead.`;
       root.innerHTML = `
-        <h2 class="step-title">New Senior Financing</h2>
-        <p class="step-sub">Would the seller be willing to let a buyer place a new senior (1st position)
-        mortgage on the property? We need a yes or a no here to accept the lead.</p>
+        <h2 class="step-title">${title}</h2>
+        <p class="step-sub">${sub}</p>
         <p class="hint">Ask them (text it or read it over the phone):
         <br><span class="small-muted">"${seniorLoanScript}"</span>
         <br><button type="button" class="btn secondary" id="senior-script-copy-btn" style="margin-top:8px;">Copy Text</button>
         </p>
         <div class="choice-group" id="senior-group">
-          ${["Yes","No"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
+          ${(isLand ? ["Yes","No","Skip"] : ["Yes","No"]).map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
         </div>
-        <div class="error-text" id="senior-error">Please choose Yes or No.</div>
-        <div class="banner danger" id="senior-block-banner" ${answers.seniorLoanWilling === "No" ? "" : "hidden"}>
-          We currently do not accept leads where the seller isn't willing to allow a buyer to take out a new
-          senior (1st position) mortgage on the property.
+        ${isLand ? "" : `<div class="error-text" id="senior-error">Please choose Yes or No.</div>`}
+        <div class="${isLand ? "banner info" : "banner danger"}" id="senior-block-banner" ${answers.seniorLoanWilling === "No" ? "" : "hidden"}>
+          ${isLand
+            ? "No problem — this lead moves forward as a standard cash offer instead."
+            : "We currently do not accept leads where the seller isn't willing to allow a buyer to take out a new senior (1st position) mortgage on the property."}
         </div>
       `;
       wireCopyPromptButton(root, "#senior-script-copy-btn", () => seniorLoanScript);
@@ -2701,11 +2740,12 @@ If this suggests the property is worth meaningfully less than expected, say so p
           btn.classList.add("selected");
           answers.seniorLoanWilling = btn.dataset.value;
           root.querySelector("#senior-block-banner").hidden = btn.dataset.value !== "No";
-          toggleError(root, "#senior-error", false);
+          if (!isLand) toggleError(root, "#senior-error", false);
         };
       });
     },
     validate(root) {
+      if (answers.assetType === "Land") return true; // non-blocking for land
       const ok = !!answers.seniorLoanWilling;
       toggleError(root, "#senior-error", !ok);
       return ok && answers.seniorLoanWilling === "Yes";
