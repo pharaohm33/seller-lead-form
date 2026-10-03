@@ -473,6 +473,11 @@ const steps = [
         if (extracted.agentEmail) answers.sellerContactEmail = extracted.agentEmail;
         if (urlVal) answers.sourceLink = urlVal;
         if (extracted.assetType) answers.assetType = extracted.assetType;
+        // Single-family and land are always 1 unit — auto-set so the address step passes validation
+        if (extracted.assetType === "Residential Property (1-4 units)" && !extracted.units) {
+          answers.units = answers.units || "1";
+        }
+        if (extracted.assetType === "Land") answers.units = "1";
 
         // Build preview card
         const rows = [

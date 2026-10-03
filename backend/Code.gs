@@ -1125,9 +1125,9 @@ function fetchListing(body) {
         if (addr.addressLocality) result.city = addr.addressLocality;
         if (addr.addressRegion) result.state = addr.addressRegion;
         if (addr.postalCode) result.zip = String(addr.postalCode).slice(0, 5);
-        if (item.numberOfRooms) result.beds = String(item.numberOfRooms);
-        if (item.numberOfBathroomsTotal) result.baths = String(item.numberOfBathroomsTotal);
-        const fs = item.floorSize;
+        if (item.numberOfRooms || item.numberOfBedrooms) result.beds = String(item.numberOfBedrooms || item.numberOfRooms);
+        if (item.numberOfBathroomsTotal || item.numberOfBathrooms) result.baths = String(item.numberOfBathroomsTotal || item.numberOfBathrooms);
+        const fs = item.floorSize || item.livingArea || item.floorArea;
         if (fs) result.sqft = String(fs.value || fs).replace(/[^0-9]/g, "");
         if (item.lotSize) result.acreage = String(item.lotSize.value || item.lotSize).replace(/[^0-9.]/g, "");
         if (item.yearBuilt) result.yearBuilt = String(item.yearBuilt);
@@ -1227,12 +1227,24 @@ function fetchListing(body) {
     const agentNameM = html.match(/["'](?:listingAgentName|listing_agent_name|agentName|agent_name|agentFullName|brokerName|listingAgent)["']\s*:\s*["']([^"']{2,60})["']/i);
     if (agentNameM) result.agentName = agentNameM[1];
   }
+  // Sqft from common non-schema JSON keys (Redfin uses sqFt, others use squareFeet etc.)
+  if (!result.sqft) {
+    const sqftM = html.match(/["'](?:sqFt|sqft|squareFeet|square_feet|livingAreaSqFt|livingAreaValue|floorArea|sqFtValue|finishedSqFt|totalSqFt)["']\s*:\s*(\d+)/i);
+    if (sqftM) result.sqft = sqftM[1];
+  }
   if (!result.agentPhone) {
+    // Specific agent phone JSON keys
     const agentPhoneM = html.match(/["'](?:agentPhone|agent_phone|listingAgentPhone|listingAgentMobilePhone|brokerPhone|mobilePhone)["']\s*:\s*["']([+\d\s()./-]{7,20})["']/i);
     if (agentPhoneM) result.agentPhone = agentPhoneM[1].trim();
+    if (!result.agentPhone && result.agentName) {
+      // Search for a phone number within 600 chars of the agent name in the HTML
+      const nameEsc = result.agentName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const nameVicinity = html.match(new RegExp(nameEsc + "[\\s\\S]{0,600}?(\\(?\\d{3}\\)?[\\s.\\-]\\d{3}[\\s.\\-]\\d{4})"));
+      if (nameVicinity) result.agentPhone = nameVicinity[1];
+    }
     if (!result.agentPhone) {
-      // Phone near "listed by" / "agent" / "broker" text — avoids site-wide numbers
-      const vicinity = html.match(/(?:[Ll]isted\s+by|listing\s+agent|contact\s+agent)[^<]{0,300}(\(?\d{3}\)?[\s.\-]\d{3}[\s.\-]\d{4})/);
+      // Phone near "Listed by" / "listing agent" text
+      const vicinity = html.match(/(?:[Ll]isted\s+by|[Ll]isting\s+[Aa]gent|[Cc]ontact\s+[Aa]gent)[^<]{0,400}(\(?\d{3}\)?[\s.\-]\d{3}[\s.\-]\d{4})/);
       if (vicinity) result.agentPhone = vicinity[1];
     }
   }
