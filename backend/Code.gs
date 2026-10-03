@@ -1175,6 +1175,33 @@ function fetchListing(body) {
     if (ogTitle) result._ogTitle = ogTitle;
   }
 
+  // 3a. Property type → assetType mapping
+  // Pull property type from JSON-LD @type, schema propertyType field, or raw HTML text patterns.
+  if (!result.assetType) {
+    // JSON key patterns (Redfin, Realtor.com, Zillow embed these)
+    const ptM = html.match(/["'](?:propertyType|property_type|homeType|home_type|dwellingType|listing_type|listingType)["']\s*:\s*["']([^"']{2,60})["']/i);
+    const rawPt = ptM ? ptM[1] : "";
+    // Also look for visible text like "Single-family\nProperty Type" or "Property Type: Condo"
+    const visibleM = html.match(/(?:property\s*type|home\s*type)[:\s"'<>\/]{1,20}(single.family|multi.family|condo|condominium|townhome|townhouse|co-op|land|lot|vacant\s*land|commercial|multifamily|apartment|mobile\s*home|manufactured)/i);
+    const typeSrc = rawPt || (visibleM ? visibleM[1] : "");
+    if (typeSrc) {
+      const t = typeSrc.toLowerCase();
+      if (/land|lot|vacant|acreage|raw/i.test(t)) result.assetType = "Land";
+      else if (/multi.family|multifamily|apartment|commercial|retail|office|industrial/i.test(t)) result.assetType = "Commercial Property";
+      else result.assetType = "Residential Property (1-4 units)";
+    }
+    // Also check @type in JSON-LD already parsed above
+    if (!result.assetType) {
+      const ldTypeM = html.match(/"@type"\s*:\s*"([^"]{3,60})"/i);
+      if (ldTypeM) {
+        const t = ldTypeM[1].toLowerCase();
+        if (/land|lot|vacant/i.test(t)) result.assetType = "Land";
+        else if (/multi|apartment|commercial|condo.*complex/i.test(t)) result.assetType = "Commercial Property";
+        else if (/residence|house|home|condo|townhouse|singlefamily|single.family/i.test(t)) result.assetType = "Residential Property (1-4 units)";
+      }
+    }
+  }
+
   // Extract site domain to filter out the site's own emails (support@redfin.com, etc.)
   const siteDomainM = url.match(/^https?:\/\/(?:www\.)?([a-z0-9\-]+\.[a-z]{2,})/i);
   const siteDomain = siteDomainM ? siteDomainM[1].toLowerCase() : "";
