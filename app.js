@@ -1397,6 +1397,13 @@ const steps = [
           <input type="file" id="cma-screenshots-input" accept="image/*" multiple>
           <div id="cma-screenshots-list" style="margin-top:8px;"></div>
 
+          <label class="field-label" style="margin-top:16px;">${isLand ? "As-Is Value" : "ARV"}
+            <span class="small-muted">${isLand ? "(current market value — land offers are based on this directly, not a post-repair value)" : "(After Repair Value)"}</span>${isResidential ? "" : ` <span class="req">*</span>`}</label>
+          <input type="number" id="arv-input" placeholder="$">
+          <div class="error-text" id="arv-error">Required.</div>
+          <p class="hint">The AI prompt anchors on the <strong>lowest comp(s) nearest to the property</strong> — enter that number here, not a blended or high-end figure.</p>
+          ${isResidential && !isPreforeclosureAuction ? `<div class="banner danger" id="arv-vs-asking-banner" hidden style="margin-top:12px;"></div>` : ""}
+
           <!-- STEP 3 header -->
           <div style="border-left:3px solid #7c3aed;padding:4px 0 4px 12px;margin:20px 0 4px;">
             <strong style="color:#7c3aed;font-size:14px;">Step 3 — Listing/photos link, rehab estimate &amp; remaining details</strong>
@@ -1405,21 +1412,6 @@ const steps = [
           <label class="field-label">Pictures / Listing Link <span class="small-muted">(paste the for-sale listing URL or photos link — this is what Google AI uses to see the property's condition)</span></label>
           <input type="text" id="pictures-link-input" placeholder="https://...">
         ` : ""}
-
-        <label class="field-label">${isLand ? "As-Is Value" : "ARV"}
-          <span class="small-muted">${isLand ? "(current market value — land offers are based on this directly, not a post-repair value)" : "(After Repair Value)"}</span>${isResidential ? "" : ` <span class="req">*</span>`}</label>
-        <input type="number" id="arv-input" placeholder="$">
-        <div class="error-text" id="arv-error">Required.</div>
-        ${hasCompsWorkflow ? `
-          <p class="hint">The prompt below already tells Google AI to anchor its estimate on the
-          <strong>lowest comp(s) nearest to the property</strong>, rather than a straight average across
-          every comp it finds — enter that number here, not a blended or high-end figure.</p>
-        ` : ""}
-        ${!hasCompsWorkflow ? `
-          <p class="hint">${googleAiHow}, copy a listing link if you have one (or just use the address), then ask:
-          <br><span class="small-muted">"${arvPrompt}"</span></p>
-        ` : ""}
-        ${isResidential && !isPreforeclosureAuction ? `<div class="banner danger" id="arv-vs-asking-banner" hidden style="margin-top:12px;"></div>` : ""}
 
         ${isLand ? `
           <label class="field-label" style="margin-top:16px;">Is the land free and clear
@@ -1596,9 +1588,11 @@ const steps = [
         `}
 
         ${isOnMarket ? `
-          <p class="hint" style="margin-top:16px;"><em>Pricing guidance: for best results, aim for around 70% of
-          the price posted online for an accepted offer. Only use our highest MAO as a last resort, and round
-          down to the nearest $5,000. The tighter the deal, the less likely it is to sell.</em></p>
+          <div style="background:#fef9c3;border:1px solid #fde047;border-radius:6px;padding:12px 14px;margin-top:16px;font-size:13px;line-height:1.5;">
+            <strong>Pricing guidance:</strong> for best results, aim for around 70% of the price posted online for an accepted offer. Only use our highest MAO as a last resort, and round down to the nearest $5,000. The tighter the deal, the less likely it is to sell.
+            <br><br>
+            <strong>Assignment fee:</strong> push for AT LEAST <strong>$10,000</strong> — at that level, if a buyer asks for a price reduction we still have room to work with. The absolute worst-case floor is <strong>$5,000</strong>, but at $5K there is zero cushion: any buyer price-reduction request means we can't sell and have to find a new deal.
+          </div>
         ` : ""}
 
         <div class="banner warn" id="max-offer-banner" hidden style="margin-top:16px;"></div>
