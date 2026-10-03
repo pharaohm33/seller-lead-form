@@ -3523,35 +3523,83 @@ If this suggests the property is worth meaningfully less than expected, say so p
         const maoCandidates = [answers.maoCash, answers.maoHardMoney10].map(Number).filter(n => n > 0);
         const cashOfferAmt = maoCandidates.length ? Math.round(Math.min(...maoCandidates)) : 0;
         const highestMao = maoCandidates.length ? Math.round(Math.max(...maoCandidates)) : 0;
+        const askingAmt = Number(answers.priceSought) || Number(answers.askingPrice) || 0;
+        const downAmt5Pct = askingAmt > 0 ? Math.round(askingAmt * 0.05) : 0;
         const fmt = n => "$" + n.toLocaleString(undefined, { maximumFractionDigits: 0 });
-        const offerText = cashOfferAmt > 0 ? `Hi ${sellerName}, saw ${addressLine} is for sale. Would you be open to ${fmt(cashOfferAmt)} cash for it?` : "";
         const pushbackText = highestMao > 0 ? `The price reflects buying as-is, all cash, with no financing contingencies. We can close quickly. Would ${fmt(highestMao)} work?` : "";
+        // Cash clause: opening offer
+        const cashClause = cashOfferAmt > 0 ? `${fmt(cashOfferAmt)} cash for it, all cash with no financing contingencies` : "";
+        // Land seller finance: 5% down at closing, balance at full asking once developed, contingent on appraisal, plus interest
+        const financeClause = askingAmt > 0
+          ? `${downAmt5Pct > 0 ? fmt(downAmt5Pct) + " down at closing" : "a small down payment at closing"}, with the balance paid at your full asking price once the land is developed${askingAmt > 0 ? " — as long as it appraises at " + fmt(askingAmt) + " at closing" : ""} — plus interest on the deferred balance in the meantime`
+          : "";
+
         root.innerHTML = `
-          <h2 class="step-title">Make Your Cash Offer</h2>
-          <p class="step-sub">Land is always a cash deal — no seller financing option. Start at the opening offer and negotiate up to the ceiling if needed, but never go above it.</p>
+          <h2 class="step-title">Make Your Offers</h2>
+          <p class="step-sub">Lead with both options in one text — only drop one if the seller has already said no to it.</p>
           ${highestMao > 0 ? `
             <div class="banner warn" style="margin-bottom:16px;">
-              <strong>Opening Offer:</strong> ${fmt(cashOfferAmt)}&nbsp;&nbsp;|&nbsp;&nbsp;<strong>Ceiling:</strong> ${fmt(highestMao)}
-              <br><span class="small-muted">Start at the opening offer. If they push back, you can negotiate up to the ceiling — but never go above it.</span>
+              <strong>Cash Opening Offer:</strong> ${fmt(cashOfferAmt)}&nbsp;&nbsp;|&nbsp;&nbsp;<strong>Cash Ceiling:</strong> ${fmt(highestMao)}
+              <br><span class="small-muted">Start at the opening offer for cash. If they push back, negotiate up to the ceiling — never above it.</span>
             </div>
-            <div class="banner info" style="margin-top:12px;">
-              <strong>Text this to make your offer:</strong><br>
-              <span class="small-muted">${escapeHtml(offerText)}</span>
-              <br><button type="button" class="btn secondary" id="land-offer-copy-btn" style="margin-top:8px;">Copy Text</button>
-            </div>
-            <div class="banner info" style="margin-top:10px;">
-              <strong>If they push back on price:</strong><br>
-              <span class="small-muted">${escapeHtml(pushbackText)}</span>
-              <br><button type="button" class="btn secondary" id="land-pushback-copy-btn" style="margin-top:8px;">Copy Text</button>
-            </div>
-          ` : `
-            <div class="banner warn" style="margin-bottom:16px;">No offer amount yet — go back to Cash Deal Details and enter an As-Is Value so the offer can be calculated.</div>
-          `}
+          ` : ""}
+          <label class="field-label" style="display:flex; align-items:center; gap:8px; font-weight:normal;">
+            <input type="checkbox" id="land-cash-declined-chk" ${answers.sellerDeclinedCash ? "checked" : ""}>
+            Seller already said no to a cash offer
+          </label>
+          <label class="field-label" style="display:flex; align-items:center; gap:8px; font-weight:normal; margin-top:6px;">
+            <input type="checkbox" id="land-sf-declined-chk" ${answers.landSellerDeclinedDeferred ? "checked" : ""}>
+            Seller already said no to the deferred payout option
+          </label>
+          <div id="land-script-wrap" style="margin-top:14px;"></div>
         `;
-        if (cashOfferAmt > 0) {
-          wireCopyPromptButton(root, "#land-offer-copy-btn", () => offerText);
-          wireCopyPromptButton(root, "#land-pushback-copy-btn", () => pushbackText);
-        }
+
+        const scriptWrap = root.querySelector("#land-script-wrap");
+        const renderLandScript = () => {
+          const cashDeclined = !!answers.sellerDeclinedCash;
+          const sfDeclined = !!answers.landSellerDeclinedDeferred;
+          let script = "";
+          if (!cashDeclined && !sfDeclined && cashClause && financeClause) {
+            script = `Hi ${sellerName}, saw ${addressLine} is for sale. Would you be open to ${cashClause}? As another option, we could also do ${financeClause}. Let me know which works better for you.`;
+          } else if (!cashDeclined && cashClause) {
+            script = `Hi ${sellerName}, saw ${addressLine} is for sale. Would you be open to ${cashClause}?`;
+          } else if (!sfDeclined && financeClause) {
+            script = `Hi ${sellerName}, saw ${addressLine} is for sale. Would you be open to ${financeClause}?`;
+          }
+          scriptWrap.innerHTML = `
+            ${script ? `
+              <div class="banner info">
+                <strong>Text this:</strong>
+                <br><span class="small-muted">${escapeHtml(script)}</span>
+                <br><button type="button" class="btn secondary" id="land-offer-copy-btn" style="margin-top:8px;">Copy Text</button>
+              </div>
+            ` : (cashDeclined && sfDeclined) ? `
+              <p class="hint">Both options are marked declined — nothing left to send. Uncheck one above if that's not right.</p>
+            ` : `
+              <div class="banner warn">No offer amount yet — go back to Cash Deal Details and enter an As-Is Value so the offer can be calculated.</div>
+            `}
+            ${!cashDeclined && pushbackText ? `
+              <div class="banner info" style="margin-top:10px;">
+                <strong>If they push back on cash price:</strong><br>
+                <span class="small-muted">${escapeHtml(pushbackText)}</span>
+                <br><button type="button" class="btn secondary" id="land-pushback-copy-btn" style="margin-top:8px;">Copy Text</button>
+              </div>
+            ` : ""}
+            ${!sfDeclined && financeClause ? `
+              <label class="field-label" style="margin-top:16px;">Is the seller open to the deferred payout structure? <span class="small-muted">(optional)</span></label>
+              <div class="choice-group" id="land-sf-accept-group">
+                ${["Yes", "No", "Negotiating"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
+              </div>
+            ` : ""}
+          `;
+          if (script) wireCopyPromptButton(scriptWrap, "#land-offer-copy-btn", () => script);
+          if (!cashDeclined && pushbackText) wireCopyPromptButton(scriptWrap, "#land-pushback-copy-btn", () => pushbackText);
+          if (!sfDeclined && financeClause) bindChoiceGroup(scriptWrap, "#land-sf-accept-group", "landSellerFinancingAccepted");
+        };
+
+        root.querySelector("#land-cash-declined-chk").onchange = (e) => { answers.sellerDeclinedCash = e.target.checked; renderLandScript(); };
+        root.querySelector("#land-sf-declined-chk").onchange = (e) => { answers.landSellerDeclinedDeferred = e.target.checked; renderLandScript(); };
+        renderLandScript();
         return;
       }
       const addressLine = `${answers.street || ""}, ${answers.city || ""}, ${answers.state || ""} ${answers.zip || ""}`.trim();
@@ -4205,6 +4253,17 @@ function buildAnswerRows() {
           ["Seller Financing Negotiation Notes", answers.sellerFinancingNegotiationNotes || "—"]
         );
       }
+      if (answers.assetType === "Land") {
+        const maoCandidates = [answers.maoCash, answers.maoHardMoney10].map(Number).filter(n => n > 0);
+        if (maoCandidates.length) {
+          rows.push(["Highest Max Allowable Offer (Land)", "$" + Math.round(Math.max(...maoCandidates)).toLocaleString()]);
+        }
+        rows.push(
+          ["Seller Declined Cash Offer", answers.sellerDeclinedCash ? "Yes" : "No"],
+          ["Seller Declined Deferred Payout", answers.landSellerDeclinedDeferred ? "Yes" : "No"],
+          ["Seller Open to Deferred Payout", answers.landSellerFinancingAccepted || "—"]
+        );
+      }
     }
   }
   if (answers.dealCategory === "Upcoming Auction/Preforeclosure Property") {
@@ -4738,6 +4797,8 @@ async function submitLead(container) {
         sellerDeclinedCash: answers.sellerDeclinedCash ? "Yes" : "",
         sellerDeclinedSellerFinancing: answers.sellerDeclinedSellerFinancing ? "Yes" : "",
         sellerFinancingAccepted: answers.sellerFinancingAccepted, sellerFinancingNegotiationNotes: answers.sellerFinancingNegotiationNotes,
+        landSellerDeclinedDeferred: answers.landSellerDeclinedDeferred ? "Yes" : "",
+        landSellerFinancingAccepted: answers.landSellerFinancingAccepted || "",
         propertyRentReady: answers.propertyRentReady,
         buyerIntendsToSell: answers.buyerIntendsToSell ? "Yes" : "",
         occupiedStatus: answers.residentialOccupied, monthlyRentEstimate: answers.rentcastMonthlyRent,
