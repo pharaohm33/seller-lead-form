@@ -1518,10 +1518,6 @@ const steps = [
               and enter a real rehab amount from the AI prompt results below.
             </div>
           `}
-          <label class="field-label">Rehab Estimate — Low <span class="small-muted">(optional, if known)</span></label>
-          <input type="number" id="rehab-low-input" placeholder="$">
-          <label class="field-label">Rehab Estimate — High</label>
-          <input type="number" id="rehab-high-input" placeholder="$">
           <p class="hint">To estimate this, ${googleAiHow}. It's important to also give it the for-sale listing
           link or a link to pictures of the property so it can actually see the property's condition — a repair
           estimate without pictures is just a guess.${isResidential ? ` <strong>No bedroom or bathroom
@@ -1534,6 +1530,10 @@ const steps = [
           <textarea id="rehab-ai-text-input" rows="4" placeholder="Paste the full AI response here…" style="width:100%;box-sizing:border-box;font-size:13px;border:1px solid #d1d5db;border-radius:6px;padding:10px;"></textarea>
           <button type="button" class="btn secondary" id="rehab-ai-parse-btn" style="margin-top:8px;">Extract Estimate from Response</button>
           <div id="rehab-ai-parse-status" style="margin-top:6px;font-size:13px;display:none;"></div>
+          <label class="field-label" style="margin-top:14px;">Rehab Estimate — Low <span class="small-muted">(auto-filled above, or enter manually)</span></label>
+          <input type="number" id="rehab-low-input" placeholder="$">
+          <label class="field-label">Rehab Estimate — High</label>
+          <input type="number" id="rehab-high-input" placeholder="$">
           <div class="banner info" id="rehab-average-banner" hidden></div>
 
           ${hasCompsWorkflow ? `<div class="banner info" id="as-is-value-banner" hidden></div>` : ""}
