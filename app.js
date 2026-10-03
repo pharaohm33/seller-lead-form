@@ -175,19 +175,21 @@ function parseListingText(text) {
   const apnM = clean.match(/(?:APN|Assessor['']?s?\s+Parcel\s+(?:Number|No\.?)|Parcel\s+(?:ID|Number|No\.?|#))[:\s#]+([A-Za-z0-9][A-Za-z0-9\-. ]{1,40}?)(?=\s{2,}|[,;]|$)/i);
   if (apnM) r.parcelIds = apnM[1].trim();
 
-  // Asset type — check explicit property type label first, then infer
+  // Asset type — check Property Type / Home Type first, then Redfin's "Style" field (used for
+  // zoning/type on land listings, e.g. "Style Lots/Land"), then fall back to keyword inference
   const ptM = clean.match(/(?:[Pp]roperty\s+[Tt]ype|[Hh]ome\s+[Tt]ype)[:\s•]+([A-Za-z\s\-]+?)(?:\s{2,}|\.|,|$)/);
-  if (ptM) {
-    const pt = ptM[1].toLowerCase().trim();
-    if (/land|lot|vacant|acreage|raw/.test(pt)) r.assetType = "Land";
-    else if (/multi.family|multifamily|apartment|commercial|retail|office|industrial|hospitality|hotel|mixed.use/.test(pt)) r.assetType = "Commercial Property";
-    else r.assetType = "Residential Property (1-4 units)";
-  } else if (/\blands?\b|\bvacant\s*lot\b|\braw\s*land\b|\bacreage\b/i.test(clean)) {
-    r.assetType = "Land";
-  } else if (/\bcommercial\b|\bmultifamily\b|\boffice\b|\bretail\b|\bindustrial\b/i.test(clean)) {
-    r.assetType = "Commercial Property";
-  } else if (r.beds || /\bsingle.family\b|\bcondo\b|\btownhome\b|\btownhouse\b/i.test(clean)) {
-    r.assetType = "Residential Property (1-4 units)";
+  const styleM = clean.match(/\b[Ss]tyle[:\s•]+([A-Za-z][A-Za-z\s\/\-]{1,40}?)(?:\s{2,}|\.|,|$)/);
+  const typeCandidate = ptM ? ptM[1] : (styleM ? styleM[1] : "");
+  if (typeCandidate) {
+    const tc = typeCandidate.toLowerCase().trim();
+    if (/land|lot|vacant|acreage|raw/.test(tc)) r.assetType = "Land";
+    else if (/multi.family|multifamily|apartment|commercial|retail|office|industrial|hospitality|hotel|mixed.use/.test(tc)) r.assetType = "Commercial Property";
+    else if (ptM) r.assetType = "Residential Property (1-4 units)"; // only default to residential if explicit Property Type label was found
+  }
+  if (!r.assetType) {
+    if (/\blands?\b|\bvacant\s*lot\b|\braw\s*land\b|\bacreage\b/i.test(clean)) r.assetType = "Land";
+    else if (/\bcommercial\b|\bmultifamily\b|\boffice\b|\bretail\b|\bindustrial\b/i.test(clean)) r.assetType = "Commercial Property";
+    else if (r.beds || /\bsingle.family\b|\bcondo\b|\btownhome\b|\btownhouse\b/i.test(clean)) r.assetType = "Residential Property (1-4 units)";
   }
 
   return r;
