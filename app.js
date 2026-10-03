@@ -2819,7 +2819,7 @@ If this suggests the property is worth meaningfully less than expected, say so p
     // Commercial NOI (plus occupancy) is now collected earlier in cashDealDetails -- for every
     // dealType, not just Seller Financing -- so Commercial no longer needs its own pass through
     // this step; it would just be asking the same question twice.
-    skip() { return (answers.dealType === "Cash Deal" && answers.role !== "Seller") || answers.assetType === "Commercial Property"; },
+    skip() { return (answers.dealType === "Cash Deal" && answers.role !== "Seller") || answers.assetType === "Commercial Property" || answers.assetType === "Land"; },
     render(root) {
       const disclaimer = `
         <div class="banner warn">
