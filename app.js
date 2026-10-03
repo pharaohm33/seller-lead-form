@@ -1429,13 +1429,13 @@ const steps = [
             ${["Yes", "No"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
           </div>
 
-          <label class="field-label" style="margin-top:16px;">Would the seller be willing to wait to get
-            paid until the land is developed and sold, instead of getting paid at closing?</label>
+          <label class="field-label" style="margin-top:16px;">Would the seller be open to getting a small down payment now — likely <strong>5% down (+ realtor commission)</strong> — and get paid the rest after the property is developed and sold or refinanced, to receive their full asking price?</label>
           <div class="choice-group" id="land-willing-wait-group">
             ${["Yes", "No"].map(v => `<button type="button" class="choice-btn" data-value="${v}">${v}</button>`).join("")}
           </div>
           <p class="hint">If both are <strong>Yes</strong>, this qualifies for a <strong>100% of As-Is
-          Value</strong> deferred offer instead of the normal on-market/off-market percentage offer below —
+          Value</strong> deferred offer (full asking price, with ~5% down at closing + the rest paid once
+          developed/sold or refinanced) instead of the normal on-market/off-market percentage offer below —
           see the Make Your Offer banner once you've entered As-Is Value.</p>
         ` : ""}
 
@@ -1770,8 +1770,7 @@ const steps = [
               maxOfferBanner.innerHTML = maoSuite.landDeferredFullValue ? `
                 <strong>Full Value Offer (Deferred):</strong> ${fmt(maoSuite.maoCash)}
                 <br><span class="small-muted">(${maoSuite.cashExplanation})</span>
-                <br><br><strong>This only applies because the land is free and clear and the seller agreed to
-                wait to get paid until it's developed/sold.</strong> If either answer changes, come back to this
+                <br><br><strong>This only applies because the land is free and clear and the seller agreed to ~5% down now with the rest paid once developed/sold or refinanced.</strong> If either answer changes, come back to this
                 step to recompute the normal ${maoSuite.isOnMarket ? "on-market" : "off-market"} percentage-based offer instead.
               ` : `
                 <strong>Opening Offer${maoSuite.isOnMarket ? " (On-Market/FSBO)" : " (Off-Market)"}:</strong> ${fmt(maoSuite.maoCash)}
@@ -5732,19 +5731,19 @@ function openOutreachSop() {
         <p class="hint">Same as 3a: once the seller is interested, submit the lead through the site, then
         contact admin directly.</p>
 
-        <h3 style="margin-top:18px;">3c. Free and Clear, Seller Willing to Wait for Development (100% of Value)</h3>
+        <h3 style="margin-top:18px;">3c. Free and Clear, Seller Open to Deferred Payout (100% of Value)</h3>
         <p class="hint">Only applies if <strong>both</strong> are true: the land is <strong>free and clear</strong>
-        (no mortgage or liens to pay off now) and the seller is <strong>willing to wait to get paid until the
-        land is developed and sold</strong>, instead of getting paid at closing. Ask both questions directly —
-        the wizard has dedicated Yes/No fields for them right under As-Is Value on the Cash Deal Details step.</p>
+        (no mortgage or liens to pay off now) and the seller is <strong>open to a small down payment now</strong>
+        (~5% down + realtor commission) with the rest paid once the property is developed and sold or refinanced,
+        receiving their full asking price. Ask both questions directly — the wizard has dedicated Yes/No fields
+        for them right under As-Is Value on the Cash Deal Details step.</p>
         <div class="banner info">If both are <strong>Yes</strong>, the offer is <strong>100% of As-Is Value</strong>
-        (still net of the wholesale/assignment fee), paid out of proceeds once the property is developed/sold —
-        not at closing. This applies regardless of on-market or off-market status; it replaces the 3a/3b
-        percentage bands entirely once both conditions are confirmed.</div>
-        <p class="hint">This is a bigger ask of the seller (deferred payout, not a normal closing) so expect it to
+        (still net of the wholesale/assignment fee) — ~5% down at closing, remainder paid once developed/sold or refinanced.
+        This applies regardless of on-market or off-market status; it replaces the 3a/3b percentage bands entirely.</div>
+        <p class="hint">This is a bigger ask of the seller (deferred payout, not a full cash closing) so expect it to
         convert less often than 3a/3b — still worth offering whenever a land seller mentions no mortgage and no
-        urgency to get paid soon. Submit through the site and contact admin directly once they're interested,
-        same as the other two paths.</p>
+        urgency to get paid everything right now. Submit through the site and contact admin directly once they're
+        interested, same as the other two paths.</p>
       </div>
     </details>
   `;
