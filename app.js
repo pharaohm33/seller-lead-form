@@ -663,17 +663,6 @@ const steps = [
         <h2 class="step-title">Property Address</h2>
         <p class="step-sub">Full U.S. address required for every submission.</p>
 
-        ${showPropwire ? `
-        <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:14px 16px;margin-bottom:16px;font-size:13px;line-height:1.6;">
-          <strong style="color:#166534;">🔍 Check equity on <a href="https://propwire.com/" target="_blank" rel="noopener">PropWire</a> before texting this seller</strong>
-          ${isLand ? `
-          <p style="margin:8px 0 0;">Look up this parcel on PropWire for the owner's existing debt or liens against the land's value. <strong>Free and clear (no debt)</strong> is the best case — it's required for the seller-financing option. <strong>Debt at or above 60% of As-Is Value:</strong> our offer can't cover the payoff — skip it and move on. <strong>No data shows for this parcel?</strong> Skip it — don't spend time on unknowns when there are plenty of parcels where you can verify the numbers quickly.</p>
-          ` : `
-          <p style="margin:8px 0 0;">Run this address through PropWire to check the seller's approximate existing debt vs. the property's value. <strong>Has equity (debt below our MAO):</strong> proceed with a normal cash offer. <strong>No equity (debt at or above MAO):</strong> don't quote a dollar figure — the wizard will give you a subject-to pitch instead. <strong>No debt/equity data on PropWire?</strong> Skip it and move to the next property — volume is the game.</p>
-          `}
-        </div>
-        ` : ""}
-
         <label class="field-label">Street address <span class="req">*</span></label>
         <input type="text" id="street-input" placeholder="123 Main St">
         <div class="error-text" id="street-error">Street address is required.</div>
@@ -708,10 +697,38 @@ const steps = [
         <label class="field-label">Number of units <span class="req">*</span></label>
         <input type="number" id="units-input" min="1" step="1" placeholder="e.g. 1 for a single-family home">
         <div class="error-text" id="units-error">Enter the number of units (1 or more).</div>
-        <p class="hint">Use <strong>Commercial Property</strong> (already selected) for 5+ unit properties.</p>
+        <p class="hint">Use <strong>Commercial Property</strong> (selected earlier) for 5+ unit properties.</p>
         ` : `
         <p class="hint" style="margin-top:12px;color:#6b7280;">Unit count automatically set to 1 for ${isLand ? "Land" : "Business"} deals.</p>
         `}
+
+        ${showPropwire ? `
+        <div style="border:1px solid #ddd6fe;border-radius:8px;padding:14px 16px;margin-top:20px;font-size:13px;line-height:1.6;">
+          <strong style="font-size:14px;">🔍 PropWire Equity Check — do this before texting</strong>
+
+          <div style="border-left:3px solid #7c3aed;padding:4px 0 4px 12px;margin:12px 0 6px;">
+            <strong style="color:#7c3aed;font-size:13px;">Step 1 — Copy street address &amp; open PropWire</strong>
+          </div>
+          <p class="hint" style="margin:0 0 8px;">Use just the street number and name — PropWire searches better without city/state abbreviations.</p>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <code id="propwire-street-display" style="background:#f3f4f6;border:1px solid #e5e7eb;border-radius:4px;padding:4px 8px;font-size:13px;min-width:120px;">${answers.street || "enter street above first"}</code>
+            <button type="button" class="btn secondary" id="propwire-copy-btn" style="white-space:nowrap;">Copy Street</button>
+            <a href="https://propwire.com/" target="_blank" rel="noopener" class="btn secondary" style="white-space:nowrap;text-decoration:none;">Open PropWire →</a>
+          </div>
+
+          <div style="border-left:3px solid #7c3aed;padding:4px 0 4px 12px;margin:14px 0 6px;">
+            <strong style="color:#7c3aed;font-size:13px;">Step 2 — Scroll down &amp; check the equity</strong>
+          </div>
+          <p class="hint" style="margin:0 0 6px;">Once the page loads, scroll down — PropWire shows the estimated mortgage balance and equity %. ${isLand ? `<strong>Equity above 60%</strong> → deal has room to work. <strong>Debt at or above 60% of value</strong> → skip, our offer can't cover the payoff.` : `<strong>Equity above 60%</strong> → proceed with a cash offer. <strong>Little or no equity</strong> → subject-to pitch (the wizard handles this).`}</p>
+          <p class="hint" style="margin:0;"><strong>Property not found?</strong> Try the other street suffix — if you searched "Dr" try "Drive" (or vice versa). If it still doesn't show, skip this property and move to the next listing.</p>
+
+          <div style="border-left:3px solid #7c3aed;padding:4px 0 4px 12px;margin:14px 0 6px;">
+            <strong style="color:#7c3aed;font-size:13px;">Step 3 — Record the est. mortgage balance</strong>
+          </div>
+          <label class="field-label" style="margin-top:4px;">Est. Mortgage Balance from PropWire <span class="small-muted">(optional — enter 0 if free &amp; clear, leave blank if not found)</span></label>
+          <input type="number" id="est-mortgage-input" min="0" step="1000" placeholder="e.g. 120000">
+        </div>
+        ` : ""}
       `;
       root.querySelector("#street-input").value = answers.street || "";
       root.querySelector("#parcel-ids-input").value = answers.parcelIds || "";
@@ -719,6 +736,16 @@ const steps = [
       root.querySelector("#state-input").value = answers.state || "";
       root.querySelector("#zip-input").value = answers.zip || "";
       if (!isLand && !isBusiness) root.querySelector("#units-input").value = answers.units || "";
+      if (showPropwire) {
+        root.querySelector("#est-mortgage-input").value = answers.estMortgageBalance || "";
+        // Keep the street display live as the user types
+        const streetInput = root.querySelector("#street-input");
+        const streetDisplay = root.querySelector("#propwire-street-display");
+        streetInput.addEventListener("input", () => {
+          streetDisplay.textContent = streetInput.value.trim() || "enter street above first";
+        });
+        wireCopyPromptButton(root, "#propwire-copy-btn", () => root.querySelector("#street-input").value.trim() || "");
+      }
 
       const checkDupAddress = async () => {
         const street = root.querySelector("#street-input").value.trim();
@@ -753,6 +780,8 @@ const steps = [
     validate(root) {
       const isLand = answers.assetType === "Land";
       const isBusiness = answers.assetType === "Business";
+      const isSFR = answers.assetType === "Residential Property (1-4 units)";
+      const showPropwire = isLand || isSFR;
       answers.street = root.querySelector("#street-input").value.trim();
       answers.parcelIds = root.querySelector("#parcel-ids-input").value.trim();
       answers.city = root.querySelector("#city-input").value.trim();
@@ -762,6 +791,9 @@ const steps = [
         answers.units = "1";
       } else {
         answers.units = root.querySelector("#units-input").value;
+      }
+      if (showPropwire) {
+        answers.estMortgageBalance = root.querySelector("#est-mortgage-input").value.trim();
       }
       let ok = true;
       toggleError(root, "#street-error", !answers.street); if (!answers.street) ok = false;
@@ -4053,6 +4085,7 @@ function buildAnswerRows() {
   rows.push(
     ["Address", `${answers.street}, ${answers.city}, ${answers.state} ${answers.zip}`],
     ["Parcel ID(s)", answers.parcelIds || "—"],
+    ["Est. Mortgage Balance (PropWire)", answers.estMortgageBalance ? "$" + Number(answers.estMortgageBalance).toLocaleString() : "—"],
     ["Units", answers.units],
     ["Asset Type", answers.assetType],
     ["Subtype / Details", answers.assetType === "Commercial Property"
@@ -4644,6 +4677,7 @@ async function submitLead(container) {
         sellerContactName: answers.sellerContactName, sellerContactPhone: answers.sellerContactPhone,
         sellerContactEmail: answers.sellerContactEmail,
         street: answers.street, parcelIds: answers.parcelIds, city: answers.city, state: answers.state, zip: answers.zip, units: answers.units,
+        estMortgageBalance: answers.estMortgageBalance || "",
         assetType: answers.assetType, assetSubtype: answers.assetSubtype,
         beds: answers.beds, baths: answers.baths, sqft: answers.sqft, sellerReportedSqft: answers.sellerReportedSqft, acreage: answers.acreage, landZoning: answers.landZoning,
         landFreeAndClear: answers.landFreeAndClear || "", landWillingToWaitForDev: answers.landWillingToWaitForDev || "",
