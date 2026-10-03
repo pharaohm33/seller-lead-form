@@ -294,7 +294,7 @@ function checkMaoCap(d) {
 // Non-Exclusive fallback, where the seller can keep sourcing a buyer themselves but the listing still
 // has to come down through the end of due diligence, and they're free to relist if we don't perform --
 // before this can submit. Regardless of which form, the accepted price being low enough (at or below
-// 50% of ARV/As-Is Value, and not a full tear-down) only changes whether the listing itself is allowed
+// 70% of asking price, and not a full tear-down) only changes whether the listing itself is allowed
 // to stay up during that window, never whether some agreement is required.
 function checkOffMarketAgreement(d) {
   if (d.role === 'Seller' || d.dealType !== 'Cash Deal') return null;

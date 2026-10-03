@@ -17,6 +17,11 @@ const STR_EXPENSE_RATIO = 25;
 // for the no-rehab seller-financing-only pivot in cashDealDetails -- a judgment call, tune here.
 const ARV_VS_ASKING_CLOSE_PCT = 0.05;
 
+// Highest share of asking price an on-market cash deal can land at and still let the seller's
+// listing stay up during due diligence (cashDealOutcome) -- above it, the listing has to come off
+// market. A judgment call (65 to 70% in practice), tune here.
+const LISTING_CAN_STAY_UP_MAX_PCT_OF_ASKING = 0.70;
+
 const LEAD_STATUSES = ["New", "Contacted", "Under Review", "Offer Sent", "Negotiation", "Verbally Accepted But Not Signed", "Offer Signed By Seller", "In Escrow To Close", "Hold Off", "Closed", "Dead"];
 
 const STATUS_COLORS = {
@@ -966,6 +971,11 @@ const steps = [
           repair estimate. For your first offer to the seller, start at the <strong>lowest</strong> of the
           calculated Max Allowable Offer figures below (not the Cash Buyer ceiling) — that gets a
           conservative opening offer out fast, without needing full comps research yet.</p>
+          <p class="hint"><strong>Why Chase?</strong> It's only here to help you open with a lower offer, fast.
+          The real MAO comes from the comps in Step 2, because comps are what buyers look at when they price a
+          deal. Compare the Chase number against the As-Is Value and ARV that the Google AI comps give you — the
+          gap between them is your room to go up. Open low off Chase, then work toward the comps-based number if
+          the seller pushes back.</p>
           <p class="hint"><strong>Step 2 — if the seller counters, all you have to do is press the
           button below.</strong> Chase's number is enough for a fast first offer, but if the seller comes
           back asking for more, tap <strong>"Get Comps Research Prompt for Google AI"</strong> below to
@@ -1076,7 +1086,7 @@ const steps = [
             </div>
           ` : ""}
 
-          <button type="button" class="link-btn" id="comps-prompt-toggle-btn">Get Comps Research Prompt for Google AI &#9662;</button>
+          <button type="button" class="btn secondary" id="comps-prompt-toggle-btn" style="margin-top:6px;">Get Comps Research Prompt for Google AI &#9662;</button>
           <div id="comps-prompt-panel" hidden style="margin-top:10px;">
             <p class="hint">This is pre-filled with the address/${isLand ? "acreage or square footage" : isCommercial ? "asset type/size" : "beds/baths/sqft"}
             already on file. Copy it, ${googleAiHow}, and paste it in.</p>
@@ -1107,7 +1117,7 @@ const steps = [
 
         ${isResidential ? `
           <label class="field-label">Chase Bank Estimated Value
-            <span class="small-muted">(optional — the raw number from Chase's Home Value Estimator, for admin's reference alongside the ARV below)</span></label>
+            <span class="small-muted">(optional, but strongly encouraged — the raw number from Chase's Home Value Estimator. Keep it here even after you replace the ARV below with the Google AI number, so admin can compare the two)</span></label>
           <input type="number" id="chase-estimate-input" placeholder="$">
 
           ${isPreforeclosureAuction ? `
@@ -3178,17 +3188,22 @@ If this suggests the property is worth meaningfully less than expected, say so p
 
       // Anyone but the seller themselves selling this as a cash deal, on an on-market (FSBO or MLS)
       // property that isn't preforeclosure/auction, needs the seller/listing agent to agree to an
-      // Exclusive Agreement Through Due Diligence before this can submit: the listing comes off
-      // market while we're in due diligence, we close if we proceed past due diligence, and the
-      // seller is free to go find another buyer if we don't. The only way around that agreement is
-      // landing the accepted price at or below 50% of ARV (As-Is Value for land) -- and that
-      // exception never applies to a full tear-down, set on Cash Deal Details.
+      // Exclusive Agreement Through Due Diligence before this can submit: we close if we proceed past
+      // due diligence, and the seller is free to go find another buyer if we don't. Whether the
+      // listing itself can stay up during that window depends only on the accepted price as a share
+      // of asking price (LISTING_CAN_STAY_UP_MAX_PCT_OF_ASKING) -- and that never applies to a full
+      // tear-down, set on Cash Deal Details. The guidance block below turns that into the exact text
+      // to send, so the associate never has to decide which scenario they're in.
       const isOnMarket = answers.marketStatus === "On-Market";
       const needsExclusiveDdAgreement = isEligibleAssetType && isOnMarket && !isPreforeclosureAuction;
-      const valueLabel = answers.assetType === "Land" ? "As-Is Value" : "ARV";
-      const arvBase = Number(answers.asIsValue) || Number(answers.arv) || 0;
-      const halfArv = arvBase * 0.5;
+      // Residential collects an explicit asking price on Cash Deal Details; every asset type
+      // collects "price the seller is seeking" on the Price step, so that covers commercial/land.
+      const askingBase = Number(answers.askingPrice) || Number(answers.priceSought) || 0;
+      const stayUpPct = Math.round(LISTING_CAN_STAY_UP_MAX_PCT_OF_ASKING * 100);
+      const stayUpMaxPrice = askingBase * LISTING_CAN_STAY_UP_MAX_PCT_OF_ASKING;
       const isTearDown = answers.isTearDown === "Yes";
+      const sellerName = answers.sellerContactName || "[Name]";
+      const addressLine = `${answers.street || ""}, ${answers.city || ""}, ${answers.state || ""} ${answers.zip || ""}`.trim();
 
       root.innerHTML = `
         <h2 class="step-title">Deal Status</h2>
@@ -3253,7 +3268,7 @@ If this suggests the property is worth meaningfully less than expected, say so p
         sending a formal offer (assuming it's not already under contract).</p>
 
         ${needsExclusiveDdAgreement ? `
-          <div class="banner warn" id="exclusive-dd-banner" style="margin-top:16px;"></div>
+          <div id="exclusive-dd-guidance" style="margin-top:16px;"></div>
           <label class="field-label" style="margin-top:12px;">Has the seller/listing agent agreed to an
             Exclusive Agreement Through Due Diligence? <span class="req">*</span></label>
           <div class="choice-group" id="exclusive-dd-group">
@@ -3261,12 +3276,6 @@ If this suggests the property is worth meaningfully less than expected, say so p
             <button type="button" class="choice-btn" data-value="Yes - Non-Exclusive">Yes, Non-Exclusive (fallback)</button>
             <button type="button" class="choice-btn" data-value="No">No</button>
           </div>
-          <p class="hint">If they push back too hard on full exclusivity, fall back to
-            <strong>Non-Exclusive</strong>: the seller can keep seeking a buyer on their own, but the
-            property still has to come off market (or off MLS) through the end of our due diligence
-            period. If we don't bring a buyer by then, they're free to relist it. Either way, the
-            seller's own listing agent stays involved and still gets paid by the seller as usual --
-            nothing here cuts the listing agent out or blocks their commission.</p>
           <div class="error-text" id="exclusive-dd-error">Required before this can be submitted.</div>
         ` : ""}
       `;
@@ -3274,36 +3283,61 @@ If this suggests the property is worth meaningfully less than expected, say so p
       bindChoiceGroup(root, "#under-contract-group", "underContract");
       if (needsExclusiveDdAgreement) {
         bindChoiceGroup(root, "#exclusive-dd-group", "exclusiveDdAgreed");
-        // Every on-market cash deal here needs at least the non-exclusive fallback confirmed -- close
-        // if we proceed past due diligence, seller's free to source another buyer (Exclusive) or relist
-        // it (Non-Exclusive) if we don't. What varies by price/tear-down is only whether the listing
-        // itself has to come down for that window (below), never whether some form of agreement, and
-        // the listing coming down, is required.
+        // Every on-market cash deal here needs the seller/listing agent's agreement that we're the
+        // buyer through due diligence (Exclusive, or the Non-Exclusive fallback) -- that part never
+        // changes. The only thing that varies is whether the listing itself has to come down for that
+        // window, and that's decided by the price, not by the associate: the text below is picked for
+        // them, and the reply they get maps straight to one of the buttons underneath. No dashes in
+        // anything copy-pasted, same as every other seller-facing script here.
+        const guidanceEl = root.querySelector("#exclusive-dd-guidance");
         const updateExclusiveDdUi = () => {
           const price = Number(root.querySelector("#accepted-price-input").value) || 0;
-          const staysListed = !isTearDown && arvBase > 0 && price > 0 && price <= halfArv;
-          const banner = root.querySelector("#exclusive-dd-banner");
-          banner.className = "banner warn";
-          banner.innerHTML = `<strong>This needs an Exclusive Agreement Through Due Diligence (or the
-            Non-Exclusive fallback below).</strong> Since this is an on-market (FSBO or MLS) cash deal
-            and you're not the seller listing this directly, the seller/listing agent has to agree that
-            we're the buyer through our due diligence period, either exclusively or (if they push back)
-            non-exclusively. If we proceed past due diligence, we close. If we don't proceed, the seller
-            is free to go source another buyer (Exclusive) or relist it (Non-Exclusive).
-            The seller keeps working with their own listing agent through all of this in every scenario
-            -- this never cuts the listing agent out or blocks their commission from the seller, and if
-            we don't bring a cash buyer within due diligence, the listing agent is free to put it back
-            on MLS.
-            ${staysListed
-              ? ` The accepted price (${fmt(price)}) is at or below 50% of ${valueLabel} (${fmt(halfArv)}),
-                so the listing itself can stay up (FSBO/MLS) during due diligence -- an agreement with us
-                still has to be confirmed below either way.`
-              : isTearDown
-              ? ` This is a full tear-down, so the 50% ${valueLabel} exception doesn't apply -- the
-                listing has to come off market entirely during due diligence, no exceptions.`
-              : ` The listing has to come off market entirely during due diligence, unless the accepted
-                price comes down to 50% of ${valueLabel} or below (${fmt(halfArv)}), in which case it can
-                stay listed instead.`}`;
+          if (!price) {
+            guidanceEl.innerHTML = `<div class="banner warn">Enter the price the seller agreed to above and this
+              will show exactly what to text them about the listing and the agreement.</div>`;
+            return;
+          }
+          const staysListed = !isTearDown && askingBase > 0 && price <= stayUpMaxPrice;
+          const pctOfAsking = askingBase > 0 ? Math.round((price / askingBase) * 1000) / 10 : null;
+          const reason = isTearDown
+            ? `This is a full tear down, so the listing has to come off market during due diligence no matter the price.`
+            : pctOfAsking === null
+            ? `There's no asking price on file to compare this against, so assume the listing has to come off market.`
+            : `${fmt(price)} is ${pctOfAsking}% of the ${fmt(askingBase)} asking price, which is ${staysListed ? "at or below" : "above"}
+              the ${stayUpPct}% line (${fmt(stayUpMaxPrice)}).`;
+
+          const stayListedText = `Hi ${sellerName}, we're set at ${fmt(price)} for ${addressLine}. You can keep the listing up while we do our due diligence. All we need is your agreement that we're the buyer at that price through our due diligence period. If we move past due diligence, we close. If we don't, you're free to go with another buyer. Does that work for you?`;
+          const offMarketText = `Hi ${sellerName}, we're set at ${fmt(price)} for ${addressLine}. To lock that in, we need the property taken off the market (and off MLS if it's listed there) through our due diligence period, with your agreement that we're the buyer during that time. If we move past due diligence, we close. If we don't, you're free to go find another buyer. Your listing agent stays involved and gets paid by you as usual. Would you be open to that?`;
+          const nonExclusiveText = `Totally understand. We can make it non exclusive: you're free to keep looking for a buyer on your own, as long as the property stays off the market (and off MLS) through the end of our due diligence period. If we don't bring a buyer by then, you're free to relist it. Your listing agent stays involved and gets paid by you as usual.`;
+          const primaryText = staysListed ? stayListedText : offMarketText;
+
+          guidanceEl.innerHTML = `
+            <div class="banner warn"><strong>${staysListed
+              ? "The listing can stay up during due diligence."
+              : "The seller has to take the listing off market during due diligence."}</strong>
+              <br><span class="small-muted">${reason} Either way, we still need the seller/listing agent
+              to agree that we're the buyer through due diligence.</span></div>
+            <div class="banner info" style="margin-top:10px;">
+              <strong>Text this:</strong>
+              <br><span class="small-muted">${escapeHtml(primaryText)}</span>
+              <br><button type="button" class="btn secondary" id="exclusive-dd-script-copy-btn" style="margin-top:8px;">Copy Text</button>
+            </div>
+            ${staysListed ? "" : `
+              <div class="banner info" style="margin-top:10px;">
+                <strong>If they push back on full exclusivity, text this instead:</strong>
+                <br><span class="small-muted">${escapeHtml(nonExclusiveText)}</span>
+                <br><button type="button" class="btn secondary" id="exclusive-dd-fallback-copy-btn" style="margin-top:8px;">Copy Text</button>
+              </div>
+            `}
+            <p class="hint" style="margin-top:10px;">${staysListed
+              ? `If they agree, pick <strong>Yes, Exclusive</strong> below. If they won't agree to this, it can't
+                be submitted yet, so keep negotiating.`
+              : `If they agree to the first text, pick <strong>Yes, Exclusive</strong> below. If they only agree
+                to the second one, pick <strong>Yes, Non-Exclusive (fallback)</strong>. If they won't agree to
+                either, it can't be submitted yet, so keep negotiating.`}</p>
+          `;
+          wireCopyPromptButton(guidanceEl, "#exclusive-dd-script-copy-btn", () => primaryText);
+          wireCopyPromptButton(guidanceEl, "#exclusive-dd-fallback-copy-btn", () => nonExclusiveText);
         };
         root.querySelector("#accepted-price-input").addEventListener("input", updateExclusiveDdUi);
         updateExclusiveDdUi();
@@ -3403,9 +3437,9 @@ If this suggests the property is worth meaningfully less than expected, say so p
       }
 
       // See render()'s comment above -- every on-market cash deal here needs at least the Non-Exclusive
-      // fallback confirmed, regardless of whether the 50% ARV price lets the listing itself stay up.
-      // That price only changes whether the listing comes down, never whether some form of agreement
-      // (Exclusive or Non-Exclusive) is required.
+      // fallback confirmed, regardless of whether the price (as a share of asking) lets the listing
+      // itself stay up. That price only changes whether the listing comes down, never whether some
+      // form of agreement (Exclusive or Non-Exclusive) is required.
       const isOnMarket = answers.marketStatus === "On-Market";
       if (isEligibleAssetType && isOnMarket && !isPreforeclosureAuction) {
         const agreed = answers.exclusiveDdAgreed === "Yes - Exclusive" || answers.exclusiveDdAgreed === "Yes - Non-Exclusive";
@@ -5075,6 +5109,11 @@ function openOutreachSop() {
       <br><strong>Debt at or above ~50%?</strong> Seller financing won't work here — go cash-only, offered
       above the existing debt so the payoff is covered, start low, and leave room to go up (Step 4, cash only).
     </div>
+    <p class="hint"><strong>Why the ~50% line (1–4 units and 5+ alike):</strong> seller financing here works
+    because our buyer takes out a new senior (1st position) loan on the property, which funds the seller's
+    down payment, with the seller carrying the rest behind it in 2nd position. That only works when the
+    seller's existing debt is low enough (under ~50% of value) for that new 1st position loan to fit. At or
+    above that, it won't, so the seller gets a cash offer only.</p>
     <p class="hint"><strong>5+ unit multifamily:</strong> PropWire won't have data here — that's expected,
     not a reason to skip. Instead, ask the seller directly:
     <br><span class="small-muted">"Does the property have under 50% debt compared to its total value?"</span>
