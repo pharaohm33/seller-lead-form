@@ -1901,6 +1901,10 @@ If this suggests the property is worth meaningfully less than expected, say so p
               arvInput.value = parsed.arvLow;
               recomputeCashDeal();
             }
+            // Save comps data into answers for admin/submission
+            answers.arvRange = parsed.arvLow && parsed.arvHigh ? `$${Number(parsed.arvLow).toLocaleString()} – $${Number(parsed.arvHigh).toLocaleString()}` : "";
+            answers.soldCompsJson = parsed.soldComps.length ? JSON.stringify(parsed.soldComps) : "";
+            answers.activeCompsJson = parsed.activeComps.length ? JSON.stringify(parsed.activeComps) : "";
             // Build results display
             const fmt = n => n ? "$" + Number(n).toLocaleString() : "—";
             const compRow = (c, isLandComp) => isLandComp
@@ -4177,6 +4181,9 @@ async function submitLead(container) {
         rehabEstimateLow: answers.rehabEstimateLow, rehabEstimateHigh: answers.rehabEstimateHigh,
         countyAssessedValue: answers.countyAssessedValue,
         cmaScreenshotUrls: (answers.cmaScreenshotUrls || []).join("\n"),
+        arvRange: answers.arvRange || "",
+        soldCompsJson: answers.soldCompsJson || "",
+        activeCompsJson: answers.activeCompsJson || "",
         bottomDollarPrice: answers.bottomDollarPrice,
         cashDealNotes: answers.cashDealNotes, wholesaleFee: answers.wholesaleFee,
         maoCash: answers.maoCash, maoHardMoney10: answers.maoHardMoney10, maoHardMoney20: answers.maoHardMoney20,
@@ -4473,6 +4480,7 @@ function buildLeadFields(lead) {
       ["Rehab Estimate (average)", lead["Rehab Estimate"] || "—"],
       ["County Assessed Value", lead["County Assessed Value"] || "—"],
       ["CMA Screenshots", lead["CMA Screenshot URLs"] || "—"],
+      ["ARV Range (AI Comps)", lead["ARV Range"] || "—"],
       ["Bottom Dollar Price", lead["Bottom Dollar Price"] || "—"],
       ["Notes (Why Sell / Good Lead)", lead["Cash Deal Notes"] || "—"]
     );
@@ -5469,6 +5477,32 @@ function openDetail(lead) {
           `<a href="${escapeHtml(url)}" target="_blank" rel="noopener">Screenshot ${i + 1}</a>`).join(" &middot; ")}
       </div>
     ` : ""}
+    ${(lead["Sold Comps"] || lead["Active Comps"]) ? (() => {
+      const isLandLead = lead["Asset Type"] === "Land";
+      const tdS = "border:1px solid #e5e7eb;padding:5px 7px;font-size:12px;";
+      const thS = tdS + "background:#f3f4f6;font-weight:600;";
+      const colHeaders = isLandLead
+        ? `<tr><th style="${thS}">Address</th><th style="${thS}">Price</th><th style="${thS}">Acres</th><th style="${thS}">Price/Acre</th><th style="${thS}">Distance</th></tr>`
+        : `<tr><th style="${thS}">Address</th><th style="${thS}">Price</th><th style="${thS}">Sqft</th><th style="${thS}">$/Sqft</th><th style="${thS}">Beds</th><th style="${thS}">Baths</th><th style="${thS}">Distance</th></tr>`;
+      const fmtC = n => n ? "$" + Number(n).toLocaleString() : "—";
+      const rowHtml = (c) => isLandLead
+        ? `<tr><td style="${tdS}">${escapeHtml(c.address||"")}</td><td style="${tdS}">${fmtC(c.price)}</td><td style="${tdS}">${escapeHtml(c.acres||"—")}</td><td style="${tdS}">${escapeHtml(c.pricePerUnit||"—")}</td><td style="${tdS}">${escapeHtml(c.distance||"—")}</td></tr>`
+        : `<tr><td style="${tdS}">${escapeHtml(c.address||"")}</td><td style="${tdS}">${fmtC(c.price)}</td><td style="${tdS}">${escapeHtml(c.sqft||"—")}</td><td style="${tdS}">${escapeHtml(c.pricePerSqft||"—")}</td><td style="${tdS}">${escapeHtml(c.beds||"—")}</td><td style="${tdS}">${escapeHtml(c.baths||"—")}</td><td style="${tdS}">${escapeHtml(c.distance||"—")}</td></tr>`;
+      let soldComps = [], activeComps = [];
+      try { soldComps = lead["Sold Comps"] ? JSON.parse(lead["Sold Comps"]) : []; } catch(e) {}
+      try { activeComps = lead["Active Comps"] ? JSON.parse(lead["Active Comps"]) : []; } catch(e) {}
+      return `<div class="banner info" style="margin-top:16px;text-align:left;">
+        <strong>AI Comps Data${lead["ARV Range"] ? " — ARV Range: " + escapeHtml(lead["ARV Range"]) : ""}</strong>
+        ${soldComps.length ? `
+          <div style="margin-top:10px;font-weight:600;font-size:12px;color:#374151;">SOLD COMPS (${soldComps.length})</div>
+          <div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;margin-top:4px;">${colHeaders}${soldComps.map(rowHtml).join("")}</table></div>
+        ` : ""}
+        ${activeComps.length ? `
+          <div style="margin-top:10px;font-weight:600;font-size:12px;color:#374151;">ACTIVE / FOR-SALE COMPS (${activeComps.length})</div>
+          <div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;margin-top:4px;">${colHeaders}${activeComps.map(rowHtml).join("")}</table></div>
+        ` : ""}
+      </div>`;
+    })() : ""}
     <div style="margin-top:16px;padding-top:14px;border-top:1px solid #e5e7eb;">
       <button class="btn primary" id="open-loi-btn" style="width:100%;font-size:14px;">🏠 Open in LOI Generator →</button>
       <p style="font-size:11px;color:#6b7280;margin:6px 0 0;text-align:center;">Opens <strong>loi-generator</strong> pre-filled with this lead's data — ready to generate the LOI.</p>
