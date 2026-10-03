@@ -5453,13 +5453,23 @@ function openOutreachSop() {
   const panel = document.getElementById("outreach-sop-panel");
   overlay.hidden = false;
   panel.innerHTML = `
+    <style>
+      .sop-tab { border:1px solid #e5e7eb; border-radius:8px; margin-bottom:10px; overflow:hidden; }
+      .sop-tab > summary { background:#f9fafb; padding:12px 16px; cursor:pointer; font-weight:700; font-size:14px; list-style:none; display:flex; align-items:center; justify-content:space-between; user-select:none; }
+      .sop-tab > summary::-webkit-details-marker { display:none; }
+      .sop-tab > summary::after { content:"▶"; font-size:11px; color:#6b7280; margin-left:8px; }
+      .sop-tab[open] > summary { background:#ede9fe; color:#7c3aed; border-bottom:1px solid #ddd6fe; }
+      .sop-tab[open] > summary::after { content:"▼"; color:#7c3aed; }
+      .sop-tab-body { padding:16px; }
+    </style>
+
     <button class="link-btn" id="close-outreach-sop-btn" style="float:right;">Close ✕</button>
     <h2>Acquisition SOP</h2>
     <p class="small-muted">Three outreach tracks, run alongside each other. Option 2 (preforeclosure
     auction) has the higher probability of getting accepted and closing fast — prioritize it first
     each day, then fill remaining volume with Option 1 and Option 3 (land).</p>
 
-    <div class="banner info"><strong>Batch workflow, both tracks:</strong> send your day's outreach
+    <div class="banner info"><strong>Batch workflow, all tracks:</strong> send your day's outreach
     texts to your <em>entire</em> list first, before opening the wizard for any single property —
     don't fill in property details until one actually responds. Fill in your own info at the very
     start of the wizard (Contact step), then hit <strong>"Save My Progress"</strong> at the top of the
@@ -5469,242 +5479,267 @@ function openOutreachSop() {
     later in the day, reopen that <em>same</em> saved link again and repeat — no need to retype your
     own info each time.</div>
 
-    <h2 style="margin-top:28px;">Option 1: FSBO + On Market Acquisition</h2>
-    <p class="small-muted">This SOP is for deals that need rehab/renovation (fix and flip). Cold-text every
-    lead with two soft offers, cash and seller financing, unless the seller's already ruled one out.
-    <strong>Daily target: 50 new properties texted per day.</strong></p>
-
-    <h3 style="margin-top:22px;">1. Source the lead</h3>
-    <p class="hint"><strong>1–4 units:</strong> Zillow and Redfin For-Sale-By-Owner listings around the
-    US — <strong>single-family only, up to 4 units, no condos or apartments.</strong>
-    <br><strong>5+ unit multifamily:</strong> Crexi or LoopNet instead — FSBO sites aren't where commercial
-    listings live.</p>
-    <p class="hint"><strong>Also pull 180+ day listings on Redfin (1–4 units):</strong> filter Redfin listings to
-    those <strong>above 180 days old</strong> (time on Redfin / days on market) — same single-family, up to 4
-    units rules as above. A listing that's sat 6+ months hasn't sold at its asking price, so those sellers are
-    often more open to a discounted offer. These are usually agent-listed, so the listing shows the agent
-    rather than the owner — skip trace the owner for a phone number the same way as Option 2, Step 2.</p>
-    <p class="hint">City population <strong>50,000+</strong>. We can go up to <strong>$90M</strong> on
-    commercial deals, but for simplicity, stick to deals <strong>under $20M</strong>.</p>
-
-    <h3 style="margin-top:22px;">2. Screen before you text</h3>
-    <p class="hint"><strong>1–4 units</strong> (FSBO and 180+ day Redfin listings alike): run the address through <a href="https://propwire.com/" target="_blank" rel="noopener">PropWire</a> and estimate the seller's
-    loan balance against the property's value. PropWire's equity/debt data only shows reliably for 1–4
-    unit properties.</p>
-    <div class="banner warn">
-      <strong>No data shows on a 1–4 unit property?</strong> Skip it and move to the next address — don't guess.
-      <br><strong>Debt below ~50% of value?</strong> Proceed with both offers (Step 4).
-      <br><strong>Debt at or above ~50%?</strong> Seller financing won't work here — go cash-only, offered
-      above the existing debt so the payoff is covered, start low, and leave room to go up (Step 4, cash only).
-    </div>
-    <p class="hint"><strong>Why the ~50% line (1–4 units and 5+ alike):</strong> seller financing here works
-    because our buyer takes out a new senior (1st position) loan on the property, which funds the seller's
-    down payment, with the seller carrying the rest behind it in 2nd position. That only works when the
-    seller's existing debt is low enough (under ~50% of value) for that new 1st position loan to fit. At or
-    above that, it won't, so the seller gets a cash offer only.</p>
-    <p class="hint"><strong>5+ unit multifamily:</strong> PropWire won't have data here — that's expected,
-    not a reason to skip. Instead, ask the seller directly:
-    <br><span class="small-muted">"Does the property have under 50% debt compared to its total value?"</span>
-    <br>"Yes" &rarr; qualifies for seller financing, send both offers. "No" (or high debt) &rarr; cash offer
-    only, above the existing debt, start low.
-    <br><strong>Skip any 5+ unit listing that requires an NDA to see financials if no NOI is shown AND the
-    property is generating income</strong> — too much friction for a cold-outreach volume play. A vacant
-    property is fine to pursue either way, NDA or not.</p>
-
-    <h3 style="margin-top:22px;">3. Price it on SendMySeller before you text</h3>
-    <p class="hint">Run the address through the SendMySeller wizard for the low cash offer number (the
-    lowest of the calculated Max Allowable Offer figures) and the as-is/ARV value (used to frame the
-    seller-financing alternative). Always follow the site's guidance for the initial low cash offer —
-    don't estimate it by hand.</p>
-
-    <h3 style="margin-top:22px;">4. Text the offer(s)</h3>
-    <p class="hint">Never mention who's buying or whether it's an investor — just ask. Default to offering
-    both, unless Step 2 ruled seller financing out, or the seller has separately already said no to one.
-    This SOP assumes the property needs rehab — a turnkey property with nothing to fix uses a different,
-    longer-horizon seller-financing structure (the wizard's Make Your Offers step switches to it
-    automatically once no rehab estimate is entered).</p>
-    <p class="hint">Our written offer is a <strong>30-day close</strong> for single-family, full stop — don't
-    offer to move faster for this seller. We have closed in under 2 weeks before, so that track record is
-    fair to mention, but only as a past fact, never as a capability on offer for this particular deal. For
-    5+ unit deals, quote a <strong>45–60 day close</strong> instead, regardless of whether that deal needs
-    rehab (see Step 6).</p>
-    <p class="hint">Seller financing is always framed as full asking price, contingent on the property
-    appraising at or above that — that's the pitch for why they'd take financing over a discounted cash
-    offer.</p>
-    <div class="banner info">
-      <strong>Both live:</strong> "Hi [Name] — saw [Address] is for sale. Would you be open to $[cash] cash
-      to purchase outright, with a 30-day close (our requirement for deals like this, though we have closed
-      in under 2 weeks before)? As another option, we could also do $[20% down] down now, with the
-      remaining $[balance] paid within 1 year, at your full asking price as long as it appraises at or
-      above that. Let me know which works better for you."
-    </div>
-    <div class="banner info" style="margin-top:10px;">
-      <strong>Cash only</strong> (high debt, or seller financing already declined): "Hi [Name] — saw
-      [Address] is for sale. Would you be open to $[cash] cash to purchase outright, with a 30-day close
-      (our requirement for deals like this, though we have closed in under 2 weeks before)?"
-    </div>
-    <p class="hint" style="margin-top:14px;"><strong>If they ask who the buyer is:</strong></p>
-    <div class="banner info">
-      <strong>Cash:</strong> "We have a database of over 6 million buyers we can send this deal to once
-      we agree on cash terms together."
-    </div>
-    <div class="banner info" style="margin-top:10px;">
-      <strong>Seller financing:</strong> "For seller financing, we already have a specific buyer ready to go."
-    </div>
-    <p class="hint" style="margin-top:14px;"><strong>Only if they specifically ask whether we're the end
-    buyer</strong> (don't volunteer this otherwise, same answer as above for cash):</p>
-    <div class="banner info">
-      <strong>Cash:</strong> "We have a database of over 6 million buyers we can send this deal to once
-      we agree on cash terms together."
-    </div>
-    <div class="banner info" style="margin-top:10px;">
-      <strong>Seller financing:</strong> "For seller financing, you'd be carrying it, and the buyer
-      taking over the property would be getting an investment loan on it. We already have an end buyer
-      ready to close on it right now."
+    <div style="background:#fef9c3;border:1px solid #fde047;border-radius:6px;padding:12px 14px;margin:14px 0;font-size:13px;line-height:1.6;">
+      ⭐ <strong>Just starting out? Focus here first (simplest to close):</strong>
+      <ol style="margin:6px 0 0 18px;padding:0;">
+        <li><strong>Option 3a — On-Market Land</strong> (Redfin/Zillow land listings, 50k+ city population) — fewest moving parts, always a cash deal, no financing complexity.</li>
+        <li><strong>Option 1 — Redfin 180+ day single-family listings</strong> — sellers who've been on market 6+ months are the most motivated and most likely to accept a discount. Aim for <strong>1 year on market</strong> for light-to-medium rehab deals, or <strong>2+ years on market</strong> for heavy rehab properties.</li>
+      </ol>
+      <p style="margin:8px 0 0;"><strong>Speed tip for both:</strong> skip any property where <a href="https://propwire.com/" target="_blank" rel="noopener">PropWire</a> shows no debt/equity data — don't investigate, just move to the next one. Volume is the game; time spent on unknowns is time not spent on motivated sellers you <em>can</em> price quickly.</p>
     </div>
 
-    <h3 style="margin-top:22px;">5. If they ask "how much down?"</h3>
-    <p class="hint">Don't quote a number or imply there's room to negotiate up. Just say you'll review:</p>
-    <div class="banner info">"Good question — I'll put a real offer together for you rather than guess
-    over text. If 20% down isn't enough, let me know what you have in mind and we'll review it and get
-    back to you."</div>
-    <p class="hint" style="margin-top:10px;"><strong>Turnkey / no rehab needed instead:</strong> "Good
-    question — it really depends on the terms we land on together, typically 20-50% down with a 5-15 year
-    payoff. Let me know what you're looking for and we'll put a real offer together for you."</p>
+    <details class="sop-tab">
+      <summary>Option 1: FSBO + On Market Acquisition</summary>
+      <div class="sop-tab-body">
+        <p class="small-muted">This SOP is for deals that need rehab/renovation (fix and flip). Cold-text every
+        lead with two soft offers, cash and seller financing, unless the seller's already ruled one out.
+        <strong>Daily target: 50 new properties texted per day.</strong></p>
 
-    <h3 style="margin-top:22px;">6. Timelines</h3>
-    <p class="hint">Single-family / 1–4 units needing rehab: <strong>30-day close</strong> (as fast as 2
-    weeks or less if needed), seller-financing payoff within 1 year.
-    <br>Commercial multifamily (5+ units) needing rehab: <strong>45–60 day close</strong>, seller-financing
-    payoff within 2 years.
-    <br>Turnkey / no rehab needed: same close timelines as above by size, seller-financing payoff over
-    5–15 years instead.</p>
+        <h3 style="margin-top:18px;">1. Source the lead</h3>
+        <p class="hint"><strong>1–4 units:</strong> Zillow and Redfin For-Sale-By-Owner listings around the
+        US — <strong>single-family only, up to 4 units, no condos or apartments.</strong>
+        <br><strong>5+ unit multifamily:</strong> Crexi or LoopNet instead — FSBO sites aren't where commercial
+        listings live.</p>
+        <p class="hint"><strong>⭐ Also pull 180+ day listings on Redfin (1–4 units) — highly recommended for beginners starting out:</strong>
+        filter Redfin listings to those <strong>above 180 days old</strong> (time on Redfin / days on market) — same single-family, up to 4
+        units rules as above. A listing that's sat 6+ months hasn't sold at its asking price, so those sellers are
+        often more open to a discounted offer. These are usually agent-listed, so the listing shows the agent
+        rather than the owner — skip trace the owner for a phone number the same way as Option 2, Step 2.
+        <br><br><strong>On market ~1 year</strong> → ideal for <strong>light to medium rehab</strong> properties.
+        <br><strong>On market 2+ years</strong> → best for <strong>heavy rehab</strong> properties — seller has been
+        waiting long enough to be very motivated and more likely to accept a deep discount.</p>
+        <p class="hint">City population <strong>50,000+</strong>. We can go up to <strong>$90M</strong> on
+        commercial deals, but for simplicity, stick to deals <strong>under $20M</strong>.</p>
 
-    <h3 style="margin-top:22px;">7. Follow up</h3>
-    <p class="hint">Default to following up every <strong>3 days</strong> while an offer is out and unsigned
-    — only stretch to day 7 if the conversation itself makes that the smarter call (e.g. the seller said
-    they need more time, or you're waiting on something specific from them). Log every counter or objection
-    in the lead's notes — admin uses it to decide how to adjust either offer.</p>
+        <h3 style="margin-top:18px;">2. Screen before you text</h3>
+        <p class="hint"><strong>1–4 units</strong> (FSBO and 180+ day Redfin listings alike): run the address through <a href="https://propwire.com/" target="_blank" rel="noopener">PropWire</a> and estimate the seller's
+        loan balance against the property's value. PropWire's equity/debt data only shows reliably for 1–4
+        unit properties.</p>
+        <div class="banner warn">
+          <strong>No debt/equity data shows on PropWire for a 1–4 unit property?</strong> Skip it immediately and move to the next address — for speed, don't investigate properties where you can't quickly verify the numbers.
+          <br><strong>Debt below ~50% of value?</strong> Proceed with both offers (Step 4).
+          <br><strong>Debt at or above ~50%?</strong> Seller financing won't work here — go cash-only, offered
+          above the existing debt so the payoff is covered, start low, and leave room to go up (Step 4, cash only).
+        </div>
+        <p class="hint"><strong>Why the ~50% line (1–4 units and 5+ alike):</strong> seller financing here works
+        because our buyer takes out a new senior (1st position) loan on the property, which funds the seller's
+        down payment, with the seller carrying the rest behind it in 2nd position. That only works when the
+        seller's existing debt is low enough (under ~50% of value) for that new 1st position loan to fit. At or
+        above that, it won't, so the seller gets a cash offer only.</p>
+        <p class="hint"><strong>5+ unit multifamily:</strong> PropWire won't have data here — that's expected,
+        not a reason to skip. Instead, ask the seller directly:
+        <br><span class="small-muted">"Does the property have under 50% debt compared to its total value?"</span>
+        <br>"Yes" &rarr; qualifies for seller financing, send both offers. "No" (or high debt) &rarr; cash offer
+        only, above the existing debt, start low.
+        <br><strong>Skip any 5+ unit listing that requires an NDA to see financials if no NOI is shown AND the
+        property is generating income</strong> — too much friction for a cold-outreach volume play. A vacant
+        property is fine to pursue either way, NDA or not.</p>
 
-    <h2 style="margin-top:32px;">Option 2: Preforeclosure Auction Soon — High Deal Probability Of Being
-    Accepted and Closing</h2>
-    <p class="small-muted">Cash offer if there's equity to work with; a subject-to pitch (never a
-    dollar figure) if there isn't. <strong>No standard seller-financing/carryback offers here.
-    Single-family properties only.</strong></p>
+        <h3 style="margin-top:18px;">3. Price it on SendMySeller before you text</h3>
+        <p class="hint">Run the address through the SendMySeller wizard for the low cash offer number (the
+        lowest of the calculated Max Allowable Offer figures) and the as-is/ARV value (used to frame the
+        seller-financing alternative). Always follow the site's guidance for the initial low cash offer —
+        don't estimate it by hand.</p>
 
-    <div class="banner warn"><strong>Why the urgency in these scripts (for you, not the seller):</strong>
-    sellers in this situation routinely wait until it's genuinely too late for a deal to close before
-    the auction date. Framing time as almost up is what actually gets them to act while there's still
-    enough runway left to close and get them real help. Keep this reasoning to yourself — never explain
-    it to the seller, just use the scripts as written.</div>
+        <h3 style="margin-top:18px;">4. Text the offer(s)</h3>
+        <p class="hint">Never mention who's buying or whether it's an investor — just ask. Default to offering
+        both, unless Step 2 ruled seller financing out, or the seller has separately already said no to one.
+        This SOP assumes the property needs rehab — a turnkey property with nothing to fix uses a different,
+        longer-horizon seller-financing structure (the wizard's Make Your Offers step switches to it
+        automatically once no rehab estimate is entered).</p>
+        <p class="hint">Our written offer is a <strong>30-day close</strong> for single-family, full stop — don't
+        offer to move faster for this seller. We have closed in under 2 weeks before, so that track record is
+        fair to mention, but only as a past fact, never as a capability on offer for this particular deal. For
+        5+ unit deals, quote a <strong>45–60 day close</strong> instead, regardless of whether that deal needs
+        rehab (see Step 6).</p>
+        <p class="hint">Seller financing is always framed as full asking price, contingent on the property
+        appraising at or above that — that's the pitch for why they'd take financing over a discounted cash
+        offer. The payoff timeline offered in the text is <strong>1 year</strong> for single-family needing rehab,
+        <strong>2 years</strong> for 5+ unit multifamily needing rehab, or <strong>5–15 years</strong> for turnkey
+        (no rehab needed) — the wizard's Make Your Offers step shows the right numbers for each case.</p>
+        <div class="banner info">
+          <strong>Both live (single-family rehab):</strong> "Hi [Name] — saw [Address] is for sale. Would you be open to $[cash] cash
+          to purchase outright, with a 30-day close (our requirement for deals like this, though we have closed
+          in under 2 weeks before)? As another option, we could also do $[20% down] down now, with the
+          remaining $[balance] paid within 1 year, at your full asking price as long as it appraises at or
+          above that. Let me know which works better for you."
+        </div>
+        <div class="banner info" style="margin-top:10px;">
+          <strong>Cash only</strong> (high debt, or seller financing already declined): "Hi [Name] — saw
+          [Address] is for sale. Would you be open to $[cash] cash to purchase outright, with a 30-day close
+          (our requirement for deals like this, though we have closed in under 2 weeks before)?"
+        </div>
+        <p class="hint" style="margin-top:14px;"><strong>If they ask who the buyer is:</strong></p>
+        <div class="banner info">
+          <strong>Cash:</strong> "We have a database of over 6 million buyers we can send this deal to once
+          we agree on cash terms together."
+        </div>
+        <div class="banner info" style="margin-top:10px;">
+          <strong>Seller financing:</strong> "For seller financing, we already have a specific buyer ready to go."
+        </div>
+        <p class="hint" style="margin-top:14px;"><strong>Only if they specifically ask whether we're the end
+        buyer</strong> (don't volunteer this otherwise, same answer as above for cash):</p>
+        <div class="banner info">
+          <strong>Cash:</strong> "We have a database of over 6 million buyers we can send this deal to once
+          we agree on cash terms together."
+        </div>
+        <div class="banner info" style="margin-top:10px;">
+          <strong>Seller financing:</strong> "For seller financing, you'd be carrying it, and the buyer
+          taking over the property would be getting an investment loan on it. We already have an end buyer
+          ready to close on it right now."
+        </div>
 
-    <h3 style="margin-top:22px;">1. Source</h3>
-    <p class="hint">auction.com. Filter for single-family preforeclosure properties with <strong>27 to
-    30 days left</strong> until the auction date, and pull about 50 of them into a spreadsheet/CSV per
-    day.</p>
+        <h3 style="margin-top:18px;">5. If they ask "how much down?"</h3>
+        <p class="hint">Don't quote a number or imply there's room to negotiate up. Just say you'll review:</p>
+        <div class="banner info">"Good question — I'll put a real offer together for you rather than guess
+        over text. If 20% down isn't enough, let me know what you have in mind and we'll review it and get
+        back to you."</div>
+        <p class="hint" style="margin-top:10px;"><strong>Turnkey / no rehab needed instead:</strong> "Good
+        question — it really depends on the terms we land on together, typically 20-50% down with a 5-15 year
+        payoff. Let me know what you're looking for and we'll put a real offer together for you."</p>
 
-    <h3 style="margin-top:22px;">2. Skip trace</h3>
-    <p class="hint">auction.com doesn't give you a phone number. Look up each owner on
-    <strong>truepeoplesearch.com</strong> (free, one at a time) or pay for a bulk skip tracing service
-    if you want to move through 50 at once faster.</p>
+        <h3 style="margin-top:18px;">6. Timelines</h3>
+        <p class="hint">Single-family / 1–4 units needing rehab: <strong>30-day close</strong> (as fast as 2
+        weeks or less if needed), seller-financing payoff within <strong>1 year</strong>.
+        <br>Commercial multifamily (5+ units) needing rehab: <strong>45–60 day close</strong>, seller-financing
+        payoff within <strong>2 years</strong>.
+        <br>Turnkey / no rehab needed: same close timelines as above by size, seller-financing payoff over
+        <strong>5–15 years</strong> instead.</p>
 
-    <h3 style="margin-top:22px;">3. Text once, then call</h3>
-    <p class="hint"><strong>Single-family only</strong> — unlike Option 1 above, this track doesn't
-    have a 5+ unit variant. Send the text below <strong>one time only</strong> — do not send multiple
-    texts to the same owner. After that single opening text, switch to <strong>calling the owner and
-    leaving voicemails</strong>, and keep calling/leaving voicemails from there (no more texts) until
-    they respond. If there's still no response after <strong>3 to 7 total touch points</strong> (the
-    text plus calls/voicemails combined), stop and move on to different auction properties elsewhere
-    in the US.</p>
-    <div class="banner info">
-      "Hey [Name], this is [Your Name]. Would you consider an offer on [Address]? I couldn't help but
-      notice that its auction date is around the corner, next week or so. I was planning to go and bid on
-      it, but figured it wouldn't hurt to try and work something out with you before it's gone."
-    </div>
-    <p class="hint"><strong>Volume:</strong> 50 new owners contacted a day for 7 days (350 total) — at
-    that volume you're very likely to land a deal. Follow ups (the 3 to 7 touch points above) matter
-    just as much as new outreach — don't skip them to chase new volume. If you can't handle both
-    50 new contacts a day and every follow up that's due, cap your day at <strong>50 total contacts</strong>
-    — new leads and follow ups combined — rather than dropping follow ups.</p>
+        <h3 style="margin-top:18px;">7. Follow up</h3>
+        <p class="hint">Default to following up every <strong>3 days</strong> while an offer is out and unsigned
+        — only stretch to day 7 if the conversation itself makes that the smarter call (e.g. the seller said
+        they need more time, or you're waiting on something specific from them). Log every counter or objection
+        in the lead's notes — admin uses it to decide how to adjust either offer.</p>
+      </div>
+    </details>
 
-    <h3 style="margin-top:22px;">4. Existing debt &amp; equity check</h3>
-    <p class="hint"><strong>Single-family only</strong> — same as the rest of Option 2. Once they
-    respond, run the address through the SendMySeller wizard for the MAO numbers (Asset Type:
-    Residential Property, 1-4 units), then check <strong><a href="https://propwire.com/" target="_blank" rel="noopener">PropWire</a></strong> for their approximate
-    existing debt (the wizard has a dedicated step for this once you pick "Upcoming
-    Auction/Preforeclosure Property" as the deal type).</p>
-    <p class="hint">If PropWire doesn't have it, ask the seller directly. If they're hesitant to share
-    it:</p>
-    <div class="banner info">"I want to ensure you get a fair offer and we don't waste time. If the
-    offer is below existing debt, we wasted a day or longer and we don't have much time to prevent you
-    from getting nothing if you do nothing."</div>
-    <p class="hint">Also ask how far behind on payments (arrears) they are — needed to know if a
-    subject-to structure is even workable.</p>
-    <p class="hint"><strong>Debt below our highest MAO (has equity):</strong> proceed as a normal cash
-    offer, texted with a real dollar number, same as Option 1's cash offers above.
-    <br><strong>Debt at or above our highest MAO (no equity):</strong> don't quote a dollar figure —
-    the wizard gives you a subject-to script instead, along the lines of "we can put together an offer
-    that saves your credit from being damaged any further, and gets you as much money as possible at
-    closing, by taking over your existing mortgage payments." Text that, then have the seller call
-    their lender for a payoff statement, screenshot it, and upload it in the wizard, along with
-    whatever loan details they know (monthly payment, principal, interest, taxes, insurance). Submit
-    the lead to admin as a <strong>Subject To - Only Possible</strong> lead — admin structures the
-    actual offer directly with the seller from there.</p>
+    <details class="sop-tab">
+      <summary>Option 2: Preforeclosure Auction — High Deal Probability</summary>
+      <div class="sop-tab-body">
+        <p class="small-muted">Cash offer if there's equity to work with; a subject-to pitch (never a
+        dollar figure) if there isn't. <strong>No standard seller-financing/carryback offers here.
+        Single-family properties only.</strong></p>
 
-    <h2 style="margin-top:32px;">Option 3: Land Acquisition</h2>
-    <p class="small-muted">Land is always a cash deal — no seller financing/carryback offers here. Which of
-    the three paths below applies depends on how the land is sourced and the seller's own situation; run
-    the address through the SendMySeller wizard (Asset Type: Land) for the actual comps and MAO numbers in
-    every case — don't estimate any of this by hand.</p>
+        <div class="banner warn"><strong>Why the urgency in these scripts (for you, not the seller):</strong>
+        sellers in this situation routinely wait until it's genuinely too late for a deal to close before
+        the auction date. Framing time as almost up is what actually gets them to act while there's still
+        enough runway left to close and get them real help. Keep this reasoning to yourself — never explain
+        it to the seller, just use the scripts as written.</div>
 
-    <h3 style="margin-top:22px;">3a. FSBO / On-Market Land (Recommended — simplest, start here)</h3>
-    <p class="hint">Source the same way as Option 1: Zillow/Redfin FSBO listings and MLS, land parcels only.
-    <strong>City population must be 50,000+</strong> — same bar as Option 1, skip anything smaller.</p>
-    <p class="hint"><strong>Also pull 180+ day land listings on Redfin:</strong> filter Redfin land listings to
-    those <strong>above 180 days old</strong> (time on Redfin / days on market). Land that's sat 6+ months
-    without selling is where sellers are most likely to take a discounted cash offer. These are usually
-    agent-listed, so skip trace the owner for a phone number the same way as Option 2, Step 2.</p>
-    <p class="hint">Run the address through the wizard's land comps prompt (Google AI, matched on zoning/
-    topography/access per the wizard's own comping criteria) for a current As-Is Value — never a house's
-    ARV, land has no post-repair value. Off of that As-Is Value:</p>
-    <div class="banner info"><strong>Open at 50% of As-Is Value</strong>, and never go above a
-    <strong>60% ceiling</strong> (both numbers already net out the wholesale/assignment fee — the wizard
-    computes them for you). <strong>If the seller won't accept anywhere at or below the 60% ceiling, this
-    deal needs to come off-market</strong> before we can offer more — let them know we can revisit at a
-    better number once the listing comes down, then work it as Option 3b instead.</div>
-    <p class="hint"><strong>Check equity on <a href="https://propwire.com/" target="_blank" rel="noopener">PropWire</a>
-    before you text</strong> (FSBO and 180+ day listings alike): look up the parcel for the owner's existing
-    debt or liens against the land's value. <strong>No debt (free and clear)</strong> is the best case — it's
-    also the first requirement for 3c below. <strong>Debt at or above the 60% ceiling:</strong> our offer can't
-    cover the payoff, so skip it and move to the next listing. <strong>No data on the parcel?</strong> Ask the
-    seller directly about any mortgage or liens rather than skipping it.</p>
-    <p class="hint">Once the seller is interested at a number in range, submit the lead through the site,
-    <strong>then separately contact admin directly</strong> so they can move on it fast — don't rely on
-    admin noticing the new submission on its own.</p>
+        <h3 style="margin-top:18px;">1. Source</h3>
+        <p class="hint">auction.com. Filter for single-family preforeclosure properties with <strong>27 to
+        30 days left</strong> until the auction date, and pull about 50 of them into a spreadsheet/CSV per
+        day.</p>
 
-    <h3 style="margin-top:22px;">3b. Off-Market Land</h3>
-    <p class="hint">Sourced directly (referral, driving for dollars, a seller who reached out, or a listing
-    that came off-market per 3a above) — no population minimum, since there's no live listing to compete
-    with. Same land comps prompt for As-Is Value.</p>
-    <div class="banner info"><strong>Base the offer at 60% of As-Is Value</strong>, with room to negotiate
-    up to a <strong>70% ceiling</strong> if that's what it takes to close — off-market gives more room than
-    a live listing, but don't open at 70%, work up to it.</div>
-    <p class="hint">Same as 3a: once the seller is interested, submit the lead through the site, then
-    contact admin directly.</p>
+        <h3 style="margin-top:18px;">2. Skip trace</h3>
+        <p class="hint">auction.com doesn't give you a phone number. Look up each owner on
+        <strong>truepeoplesearch.com</strong> (free, one at a time) or pay for a bulk skip tracing service
+        if you want to move through 50 at once faster.</p>
 
-    <h3 style="margin-top:22px;">3c. Free and Clear, Seller Willing to Wait for Development (100% of Value)</h3>
-    <p class="hint">Only applies if <strong>both</strong> are true: the land is <strong>free and clear</strong>
-    (no mortgage or liens to pay off now) and the seller is <strong>willing to wait to get paid until the
-    land is developed and sold</strong>, instead of getting paid at closing. Ask both questions directly —
-    the wizard has dedicated Yes/No fields for them right under As-Is Value on the Cash Deal Details step.</p>
-    <div class="banner info">If both are <strong>Yes</strong>, the offer is <strong>100% of As-Is Value</strong>
-    (still net of the wholesale/assignment fee), paid out of proceeds once the property is developed/sold —
-    not at closing. This applies regardless of on-market or off-market status; it replaces the 3a/3b
-    percentage bands entirely once both conditions are confirmed.</div>
-    <p class="hint">This is a bigger ask of the seller (deferred payout, not a normal closing) so expect it to
-    convert less often than 3a/3b — still worth offering whenever a land seller mentions no mortgage and no
-    urgency to get paid soon. Submit through the site and contact admin directly once they're interested,
-    same as the other two paths.</p>
+        <h3 style="margin-top:18px;">3. Text once, then call</h3>
+        <p class="hint"><strong>Single-family only</strong> — unlike Option 1 above, this track doesn't
+        have a 5+ unit variant. Send the text below <strong>one time only</strong> — do not send multiple
+        texts to the same owner. After that single opening text, switch to <strong>calling the owner and
+        leaving voicemails</strong>, and keep calling/leaving voicemails from there (no more texts) until
+        they respond. If there's still no response after <strong>3 to 7 total touch points</strong> (the
+        text plus calls/voicemails combined), stop and move on to different auction properties elsewhere
+        in the US.</p>
+        <div class="banner info">
+          "Hey [Name], this is [Your Name]. Would you consider an offer on [Address]? I couldn't help but
+          notice that its auction date is around the corner, next week or so. I was planning to go and bid on
+          it, but figured it wouldn't hurt to try and work something out with you before it's gone."
+        </div>
+        <p class="hint"><strong>Volume:</strong> 50 new owners contacted a day for 7 days (350 total) — at
+        that volume you're very likely to land a deal. Follow ups (the 3 to 7 touch points above) matter
+        just as much as new outreach — don't skip them to chase new volume. If you can't handle both
+        50 new contacts a day and every follow up that's due, cap your day at <strong>50 total contacts</strong>
+        — new leads and follow ups combined — rather than dropping follow ups.</p>
+
+        <h3 style="margin-top:18px;">4. Existing debt &amp; equity check</h3>
+        <p class="hint"><strong>Single-family only</strong> — same as the rest of Option 2. Once they
+        respond, run the address through the SendMySeller wizard for the MAO numbers (Asset Type:
+        Residential Property, 1-4 units), then check <strong><a href="https://propwire.com/" target="_blank" rel="noopener">PropWire</a></strong> for their approximate
+        existing debt (the wizard has a dedicated step for this once you pick "Upcoming
+        Auction/Preforeclosure Property" as the deal type).</p>
+        <p class="hint">If PropWire doesn't have it, ask the seller directly. If they're hesitant to share
+        it:</p>
+        <div class="banner info">"I want to ensure you get a fair offer and we don't waste time. If the
+        offer is below existing debt, we wasted a day or longer and we don't have much time to prevent you
+        from getting nothing if you do nothing."</div>
+        <p class="hint">Also ask how far behind on payments (arrears) they are — needed to know if a
+        subject-to structure is even workable.</p>
+        <p class="hint"><strong>Debt below our highest MAO (has equity):</strong> proceed as a normal cash
+        offer, texted with a real dollar number, same as Option 1's cash offers above.
+        <br><strong>Debt at or above our highest MAO (no equity):</strong> don't quote a dollar figure —
+        the wizard gives you a subject-to script instead, along the lines of "we can put together an offer
+        that saves your credit from being damaged any further, and gets you as much money as possible at
+        closing, by taking over your existing mortgage payments." Text that, then have the seller call
+        their lender for a payoff statement, screenshot it, and upload it in the wizard, along with
+        whatever loan details they know (monthly payment, principal, interest, taxes, insurance). Submit
+        the lead to admin as a <strong>Subject To - Only Possible</strong> lead — admin structures the
+        actual offer directly with the seller from there.</p>
+      </div>
+    </details>
+
+    <details class="sop-tab">
+      <summary>Option 3: Land Acquisition</summary>
+      <div class="sop-tab-body">
+        <p class="small-muted">Land is always a cash deal — no seller financing/carryback offers here. Which of
+        the three paths below applies depends on how the land is sourced and the seller's own situation; run
+        the address through the SendMySeller wizard (Asset Type: Land) for the actual comps and MAO numbers in
+        every case — don't estimate any of this by hand.</p>
+
+        <h3 style="margin-top:18px;">3a. ⭐ FSBO / On-Market Land (Start Here — Simplest for Beginners)</h3>
+        <p class="hint">Source the same way as Option 1: Zillow/Redfin FSBO listings and MLS, land parcels only.
+        <strong>City population must be 50,000+</strong> — same bar as Option 1, skip anything smaller.</p>
+        <p class="hint"><strong>Also pull 180+ day land listings on Redfin:</strong> filter Redfin land listings to
+        those <strong>above 180 days old</strong> (time on Redfin / days on market). Land that's sat 6+ months
+        without selling is where sellers are most likely to take a discounted cash offer. These are usually
+        agent-listed, so skip trace the owner for a phone number the same way as Option 2, Step 2.</p>
+        <p class="hint">Run the address through the wizard's land comps prompt (Google AI, matched on zoning/
+        topography/access per the wizard's own comping criteria) for a current As-Is Value — never a house's
+        ARV, land has no post-repair value. Off of that As-Is Value:</p>
+        <div class="banner info"><strong>Open at 50% of As-Is Value</strong>, and never go above a
+        <strong>60% ceiling</strong> (both numbers already net out the wholesale/assignment fee — the wizard
+        computes them for you). <strong>If the seller won't accept anywhere at or below the 60% ceiling, this
+        deal needs to come off-market</strong> before we can offer more — let them know we can revisit at a
+        better number once the listing comes down, then work it as Option 3b instead.</div>
+        <p class="hint"><strong>Check equity on <a href="https://propwire.com/" target="_blank" rel="noopener">PropWire</a>
+        before you text</strong> (FSBO and 180+ day listings alike): look up the parcel for the owner's existing
+        debt or liens against the land's value. <strong>No debt (free and clear)</strong> is the best case — it's
+        also the first requirement for 3c below. <strong>Debt at or above the 60% ceiling:</strong> our offer can't
+        cover the payoff, skip it and move on. <strong>No data on the parcel?</strong> For speed, skip it and move to
+        the next listing — don't spend time on unknowns when there are plenty of parcels where you can verify the numbers quickly.</p>
+        <p class="hint">Once the seller is interested at a number in range, submit the lead through the site,
+        <strong>then separately contact admin directly</strong> so they can move on it fast — don't rely on
+        admin noticing the new submission on its own.</p>
+
+        <h3 style="margin-top:18px;">3b. Off-Market Land</h3>
+        <p class="hint">Sourced directly (referral, driving for dollars, a seller who reached out, or a listing
+        that came off-market per 3a above) — no population minimum, since there's no live listing to compete
+        with. Same land comps prompt for As-Is Value.</p>
+        <div class="banner info"><strong>Base the offer at 60% of As-Is Value</strong>, with room to negotiate
+        up to a <strong>70% ceiling</strong> if that's what it takes to close — off-market gives more room than
+        a live listing, but don't open at 70%, work up to it.</div>
+        <p class="hint">Same as 3a: once the seller is interested, submit the lead through the site, then
+        contact admin directly.</p>
+
+        <h3 style="margin-top:18px;">3c. Free and Clear, Seller Willing to Wait for Development (100% of Value)</h3>
+        <p class="hint">Only applies if <strong>both</strong> are true: the land is <strong>free and clear</strong>
+        (no mortgage or liens to pay off now) and the seller is <strong>willing to wait to get paid until the
+        land is developed and sold</strong>, instead of getting paid at closing. Ask both questions directly —
+        the wizard has dedicated Yes/No fields for them right under As-Is Value on the Cash Deal Details step.</p>
+        <div class="banner info">If both are <strong>Yes</strong>, the offer is <strong>100% of As-Is Value</strong>
+        (still net of the wholesale/assignment fee), paid out of proceeds once the property is developed/sold —
+        not at closing. This applies regardless of on-market or off-market status; it replaces the 3a/3b
+        percentage bands entirely once both conditions are confirmed.</div>
+        <p class="hint">This is a bigger ask of the seller (deferred payout, not a normal closing) so expect it to
+        convert less often than 3a/3b — still worth offering whenever a land seller mentions no mortgage and no
+        urgency to get paid soon. Submit through the site and contact admin directly once they're interested,
+        same as the other two paths.</p>
+      </div>
+    </details>
   `;
   panel.querySelector("#close-outreach-sop-btn").onclick = () => overlay.hidden = true;
 }
