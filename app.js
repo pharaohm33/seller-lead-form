@@ -202,6 +202,17 @@ function parseListingText(text) {
     else if (r.beds || /\bsingle.family\b|\bcondo\b|\btownhome\b|\btownhouse\b/i.test(clean)) r.assetType = "Residential Property (1-4 units)";
   }
 
+  // For land parcels, derive zoning from Redfin's Style field — Redfin uses Style for zoning
+  // (e.g. "Style Single Family Residential" means the land is zoned single family).
+  if (r.assetType === "Land" && styleM) {
+    const styleLow = styleM[1].toLowerCase().trim();
+    if (!/land|lot/i.test(styleLow)) { // skip "Lots / Land" — that's the parcel type, not zoning
+      if (/single.family|sfr/.test(styleLow)) r.landZoning = "Single Family";
+      else if (/multi.family|multifamily/.test(styleLow)) r.landZoning = "Multifamily";
+      else r.landZoning = styleM[1].trim(); // free-text "Other" zoning
+    }
+  }
+
   return r;
 }
 
@@ -574,11 +585,13 @@ const steps = [
         if (extracted.assetType) answers.assetType = extracted.assetType;
         if (extracted.assetType === "Residential Property (1-4 units)") answers.units = "1";
         if (extracted.assetType === "Land") answers.units = "1";
+        if (extracted.landZoning) answers.landZoning = extracted.landZoning;
 
         // Build preview card
         const rows = [
           ["Address", [extracted.street, extracted.city, extracted.state, extracted.zip].filter(Boolean).join(", ")],
           ["Asset Type", extracted.assetType || ""],
+          ["Land Zoning", extracted.landZoning || ""],
           ["Parcel ID / APN", extracted.parcelIds || ""],
           ["Asking Price", extracted.price ? "$" + Number(String(extracted.price).replace(/[^0-9.]/g, "")).toLocaleString() + "  ·  For sale listing" : ""],
           ["Beds / Baths / Sqft", [extracted.beds && extracted.beds + " bd", extracted.baths && extracted.baths + " ba", extracted.sqft && Number(extracted.sqft).toLocaleString() + " sqft"].filter(Boolean).join("  ·  ")],
