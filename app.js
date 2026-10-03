@@ -85,10 +85,11 @@ function parseListingText(text) {
   // Use the FIRST occurrence to get subject property stats, not nearby comps
   const bedsM = clean.match(/\b(\d+)\s*(?:bd|bed(?:room)?s?)\b/i);
   const bathsM = clean.match(/\b(\d+(?:\.\d)?)\s*(?:ba(?:\b)|bath(?:room)?s?)\b/i);
-  // sqft: "1,284 sq ft" or "1284 sqft" or "1,284 Finished Sq. Ft."
-  const sqftM = clean.match(/\b([\d,]+)\s*(?:sq\.?\s*ft\.?|sqft|square\s*feet)\b/i)
+  // sqft: "1,284 sq ft" / "1284 sqft" / "2,365 SF" (LoopNet) / "Finished Sq. Ft. 1,284"
+  const sqftM = clean.match(/\b([\d,]+)\s*(?:sq\.?\s*ft\.?|sqft|square\s*feet|\bSF\b)\b/i)
              || clean.match(/(?:[Ff]inished\s+Sq\.?\s*Ft\.?|Total\s+Sq\.?\s*Ft\.?)[:\s]+([\d,]+)/i);
-  const acreM = clean.match(/\b([\d.]+)\s*acres?\b/i);
+  // acreage: "7.50 acres" / "1.14 Acres Lot" / "0.22 AC" (LoopNet)
+  const acreM = clean.match(/\b([\d.]+)\s*(?:acres?|AC)\b/i);
   if (bedsM) r.beds = bedsM[1];
   if (bathsM) r.baths = bathsM[1];
   if (sqftM) r.sqft = (sqftM[1] || sqftM[2] || "").replace(/,/g, "");
@@ -108,7 +109,9 @@ function parseListingText(text) {
   //   "7410 North Zanjero Blvd, Glendale, AZ 85305, Glendale, AZ 85305"  (Crexi duplicate)
   const US_STATE_NAMES = /Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connecticut|Delaware|Florida|Georgia|Hawaii|Idaho|Illinois|Indiana|Iowa|Kansas|Kentucky|Louisiana|Maine|Maryland|Massachusetts|Michigan|Minnesota|Mississippi|Missouri|Montana|Nebraska|Nevada|New Hampshire|New Jersey|New Mexico|New York|North Carolina|North Dakota|Ohio|Oklahoma|Oregon|Pennsylvania|Rhode Island|South Carolina|South Dakota|Tennessee|Texas|Utah|Vermont|Virginia|Washington|West Virginia|Wisconsin|Wyoming/i;
   const US_STATE_ABBR_MAP = {alabama:"AL",alaska:"AK",arizona:"AZ",arkansas:"AR",california:"CA",colorado:"CO",connecticut:"CT",delaware:"DE",florida:"FL",georgia:"GA",hawaii:"HI",idaho:"ID",illinois:"IL",indiana:"IN",iowa:"IA",kansas:"KS",kentucky:"KY",louisiana:"LA",maine:"ME",maryland:"MD",massachusetts:"MA",michigan:"MI",minnesota:"MN",mississippi:"MS",missouri:"MO",montana:"MT",nebraska:"NE",nevada:"NV","new hampshire":"NH","new jersey":"NJ","new mexico":"NM","new york":"NY","north carolina":"NC","north dakota":"ND",ohio:"OH",oklahoma:"OK",oregon:"OR",pennsylvania:"PA","rhode island":"RI","south carolina":"SC","south dakota":"SD",tennessee:"TN",texas:"TX",utah:"UT",vermont:"VT",virginia:"VA",washington:"WA","west virginia":"WV",wisconsin:"WI",wyoming:"WY"};
-  const addrM = clean.match(/(\d+\s+[A-Za-z0-9 .#'-]+(?:St|Ave|Rd|Dr|Blvd|Boulevard|Ln|Way|Ct|Pl|Cir|Hwy|Pkwy|Trail|Terrace|Loop|Pass|Run|Path|Trl)[.,]?\s+[A-Za-z ]+,\s+(?:[A-Z]{2}|[A-Za-z ]+)\s+(\d{5}))/i);
+  // Negative lookbehind (?<![0-9,]) stops the regex from latching onto trailing digits of a price
+  // (e.g. "000" from "$475,000") as a house number. Max 6 digits covers all real addresses.
+  const addrM = clean.match(/(?<![0-9,])(\d{1,6}\s+[A-Za-z0-9 .#'-]+(?:St|Ave|Rd|Dr|Blvd|Boulevard|Ln|Way|Ct|Pl|Cir|Hwy|Pkwy|Trail|Terrace|Loop|Pass|Run|Path|Trl)[.,]?\s+[A-Za-z ]+,\s+(?:[A-Z]{2}|[A-Za-z ]+)\s+(\d{5}))/i);
   if (addrM) {
     const parts = addrM[1].split(",").map(s => s.trim());
     r.street = parts[0] || "";
@@ -122,14 +125,34 @@ function parseListingText(text) {
         else r.city = seg;
       }
     }
-    if (parts[2]) r.zip = (parts[2].match(/\d{5}/) || [])[0] || "";
+    // parts[2] holds "AZ 75232" or "Arizona 75232" when city and state are in separate comma segments
+    if (parts[2]) {
+      const p2 = parts[2].trim();
+      const szAbbr = p2.match(/^([A-Z]{2})\s+(\d{5})/);
+      const szFull = p2.match(new RegExp("^(" + US_STATE_NAMES.source + ")\\s+(\\d{5})", "i"));
+      if (szAbbr) { if (!r.state) r.state = szAbbr[1]; r.zip = szAbbr[2]; }
+      else if (szFull) { if (!r.state) r.state = US_STATE_ABBR_MAP[szFull[1].toLowerCase()] || szFull[1]; r.zip = szFull[2]; }
+      else r.zip = (p2.match(/\d{5}/) || [])[0] || "";
+    }
   }
 
-  // Agent name: "Listed by Chaz Cameli" / "Listing Agent: ..." / "Listing Contacts\nTim Dulany" (Crexi)
-  const agentListedBy = clean.match(/(?:listed\s*by|listing\s*agent)[:\s•]+([A-Z][a-z]+(?: [A-Z][a-z]+)+)/i);
+  // Agent name — priority order:
+  //   1. "Listing Contacts Tim Dulany" (Crexi — more specific than "Listed by Kidder Mathews" brokerage)
+  //   2. "Listed by Chaz Cameli" / "Listing Agent: ..."
+  //   3. "Contact Amber Brandt" (LoopNet — last resort, "Contact" is generic)
   const agentContacts = clean.match(/[Ll]isting\s+[Cc]ontacts\s+([A-Z][a-z]+(?: [A-Z][a-z]+)+)/);
-  if (agentListedBy) r.agentName = agentListedBy[1];
-  else if (agentContacts) r.agentName = agentContacts[1];
+  const agentListedBy = clean.match(/(?:listed\s*by|listing\s*agent)[:\s•]+([A-Z][a-z]+(?: [A-Z][a-z]+)+)/i);
+  const agentContact  = clean.match(/\bContact\s+([A-Z][a-z]+(?: [A-Z][a-z]+)+)/);
+  if (agentContacts) r.agentName = agentContacts[1];
+  else if (agentListedBy) r.agentName = agentListedBy[1];
+  else if (agentContact) r.agentName = agentContact[1];
+  // Deduplicate if name appears twice consecutively (e.g. LoopNet shows name on two lines)
+  if (r.agentName) {
+    const ws = r.agentName.trim().split(/\s+/);
+    const h = ws.length / 2;
+    if (ws.length >= 4 && ws.length % 2 === 0 && ws.slice(0, h).join(" ") === ws.slice(h).join(" "))
+      r.agentName = ws.slice(0, h).join(" ");
+  }
 
   // Phone: "Contact: 714-580-6346" preferred; then "Brokerage Phone 6023304468" (Crexi); then first plain phone
   const contactPhoneM  = clean.match(/[Cc]ontact[:\s]+(\(?\d{3}\)?[\s.\-]\d{3}[\s.\-]\d{4})/);
@@ -150,7 +173,7 @@ function parseListingText(text) {
   if (ptM) {
     const pt = ptM[1].toLowerCase().trim();
     if (/land|lot|vacant|acreage|raw/.test(pt)) r.assetType = "Land";
-    else if (/multi.family|multifamily|apartment|commercial|retail|office|industrial/.test(pt)) r.assetType = "Commercial Property";
+    else if (/multi.family|multifamily|apartment|commercial|retail|office|industrial|hospitality|hotel|mixed.use/.test(pt)) r.assetType = "Commercial Property";
     else r.assetType = "Residential Property (1-4 units)";
   } else if (/\blands?\b|\bvacant\s*lot\b|\braw\s*land\b|\bacreage\b/i.test(clean)) {
     r.assetType = "Land";
