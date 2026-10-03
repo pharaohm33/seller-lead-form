@@ -15,16 +15,16 @@ function parseAICompsResponse(text, isLand, isBusiness) {
   const blockMatch = text.match(/---COMPS SUMMARY---([\s\S]*?)---END SUMMARY---/i);
   const block = blockMatch ? blockMatch[1] : text;
 
-  // Extract ARV range: "$175,500 to $194,000" or "$175,500–$194,000" or "ARV RANGE: $X to $Y"
+  // Extract value range: supports both "ARV RANGE:" (residential/commercial) and "AS-IS VALUE RANGE:" (land)
   let arvLow = 0, arvHigh = 0, arvEstimate = 0;
-  const rangeMatch = block.match(/ARV RANGE:\s*\$?([\d,]+)\s*(?:to|–|-)\s*\$?([\d,]+)/i)
+  const rangeMatch = block.match(/(?:ARV RANGE|AS-IS VALUE RANGE):\s*\$?([\d,]+)\s*(?:to|–|-)\s*\$?([\d,]+)/i)
     || text.match(/(?:ARV|Estimated ARV|value)\s*(?:Range|range)?:\s*\$?([\d,]+)\s*(?:to|–|-)\s*\$?([\d,]+)/i)
     || text.match(/\$?([\d,]+)\s*(?:to|–|-)\s*\$?([\d,]+)\s*(?:ARV|range)/i);
   if (rangeMatch) {
     arvLow = parseDollar(rangeMatch[1]);
     arvHigh = parseDollar(rangeMatch[2]);
   }
-  const estimateMatch = block.match(/ARV ESTIMATE:\s*\$?([\d,]+)/i)
+  const estimateMatch = block.match(/(?:ARV ESTIMATE|AS-IS VALUE ESTIMATE):\s*\$?([\d,]+)/i)
     || text.match(/(?:most likely|single best|best estimate|ARV estimate)[^$\d]*\$?([\d,]+)/i);
   if (estimateMatch) arvEstimate = parseDollar(estimateMatch[1]);
   if (!arvEstimate && arvLow && arvHigh) arvEstimate = Math.round((arvLow + arvHigh) / 2);
@@ -34,7 +34,7 @@ function parseAICompsResponse(text, isLand, isBusiness) {
     const comps = [];
     const lines = section.split("\n").map(l => l.trim()).filter(Boolean);
     for (const line of lines) {
-      if (/^(SOLD|ACTIVE|BUSINESS|ARV)/i.test(line)) continue;
+      if (/^(SOLD|ACTIVE|BUSINESS|ARV|AS-IS)/i.test(line)) continue;
       const parts = line.split("|").map(p => p.trim());
       if (parts.length >= 2) {
         const comp = { address: parts[0] };
@@ -65,9 +65,9 @@ function parseAICompsResponse(text, isLand, isBusiness) {
   }
 
   const soldMatch = isBusiness
-    ? block.match(/BUSINESS COMPS:\s*([\s\S]*?)(?=ARV RANGE:|$)/i)
-    : block.match(/SOLD COMPS:\s*([\s\S]*?)(?=ACTIVE COMPS:|ARV RANGE:|$)/i);
-  const activeMatch = !isBusiness && block.match(/ACTIVE COMPS:\s*([\s\S]*?)(?=ARV RANGE:|$)/i);
+    ? block.match(/BUSINESS COMPS:\s*([\s\S]*?)(?=ARV RANGE:|AS-IS VALUE RANGE:|$)/i)
+    : block.match(/SOLD COMPS:\s*([\s\S]*?)(?=ACTIVE COMPS:|ARV RANGE:|AS-IS VALUE RANGE:|$)/i);
+  const activeMatch = !isBusiness && block.match(/ACTIVE COMPS:\s*([\s\S]*?)(?=ARV RANGE:|AS-IS VALUE RANGE:|$)/i);
   const soldComps = soldMatch ? parseCompLines(soldMatch[1]) : [];
   const activeComps = activeMatch ? parseCompLines(activeMatch[1]) : [];
 
@@ -2155,8 +2155,8 @@ SOLD COMPS:
 [For each sold comp: ADDRESS | PRICE | ACRES | PRICE/ACRE | DISTANCE | SOLD DATE (e.g. Jan 2025)]
 ACTIVE COMPS:
 [For each active/for-sale listing used: ADDRESS | PRICE | ACRES | PRICE/ACRE | DISTANCE | DAYS ON MARKET (e.g. 45 days)]
-ARV RANGE: $[low] to $[high]
-ARV ESTIMATE: $[single best estimate]
+AS-IS VALUE RANGE: $[low] to $[high]
+AS-IS VALUE ESTIMATE: $[single best estimate]
 ---END SUMMARY---`
 : isCommercial
 ? `Act as a professional commercial real estate underwriter. Explain your math simply and avoid real estate jargon — I have no real estate experience.
@@ -2317,7 +2317,7 @@ If this suggests the property is worth meaningfully less than expected, say so p
             const parsed = parseAICompsResponse(text, isLand, isBusiness);
             if (!parsed.arvLow && !parsed.arvHigh && !parsed.arvEstimate) {
               aiParseResults.hidden = false;
-              aiParseResults.innerHTML = `<div class="banner warn">Couldn't find an ARV range in the response. Make sure you copied the full AI response including the summary block at the bottom, then try again.</div>`;
+              aiParseResults.innerHTML = `<div class="banner warn">Couldn't find ${isLand ? "an As-Is Value range" : "an ARV range"} in the response. Make sure you copied the full AI response including the summary block at the bottom, then try again.</div>`;
               return;
             }
             // Auto-fill ARV with the low estimate (conservative starting offer)
