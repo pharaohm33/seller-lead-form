@@ -178,14 +178,17 @@ function parseListingText(text) {
   const realEmail = emailAll.find(m => !BLOCKED_EMAIL_DOMAINS.test(m[2]) && !BLOCKED_EMAIL_PREFIXES.test(m[1].split("@")[0]));
   if (realEmail) r.agentEmail = realEmail[1];
 
-  // APN / Parcel ID — "APN 00000460627000000" / "Parcel ID: 123-456-789" / "Parcel # 12.34.56"
-  const apnM = clean.match(/(?:APN|Assessor['']?s?\s+Parcel\s+(?:Number|No\.?)|Parcel\s+(?:ID|Number|No\.?|#))[:\s#]+([A-Za-z0-9][A-Za-z0-9\-. ]{1,40}?)(?=\s{2,}|[,;]|$)/i);
+  // APN / Parcel ID — "APN 1234567890" / "Parcel ID: 123-456-789" / "Parcel # 12.34.56"
+  // APNs don't contain spaces (they use hyphens/dots as separators), so we stop at the first space.
+  const apnM = clean.match(/(?:APN|Assessor['']?s?\s+Parcel\s+(?:Number|No\.?)|Parcel\s+(?:ID|Number|No\.?|#))[:\s#]*([0-9][0-9A-Za-z\-./]{1,39})(?=\s|$|[,;])/i);
   if (apnM) r.parcelIds = apnM[1].trim();
 
-  // Asset type — check Property Type / Home Type first, then Redfin's "Style" field (used for
-  // zoning/type on land listings, e.g. "Style Lots/Land"), then fall back to keyword inference
-  const ptM = clean.match(/(?:[Pp]roperty\s+[Tt]ype|[Hh]ome\s+[Tt]ype)[:\s•]+([A-Za-z\s\-]+?)(?:\s{2,}|\.|,|$)/);
-  const styleM = clean.match(/\b[Ss]tyle[:\s•]+([A-Za-z][A-Za-z\s\/\-]{1,40}?)(?:\s{2,}|\.|,|$)/);
+  // Asset type — check Property Type / Home Type first, then Redfin's "Style" field (e.g.
+  // "Style Single Family Residential" or "Style Lots / Land"), then fall back to keyword inference.
+  // After whitespace-collapsing, field values run directly into the next label with only a single
+  // space, so \s{2,} never fires — stop instead at a digit or a known next-field keyword.
+  const ptM = clean.match(/(?:[Pp]roperty\s+[Tt]ype|[Hh]ome\s+[Tt]ype)[:\s•]+([A-Za-z][A-Za-z\s\-/]{1,45}?)(?=\s+(?:Year\b|Lot\b|HOA\b|MLS\b|Parcel\b|APN\b|Garage\b|Stories\b|Bath|Bed|Sq\s|Style\b|Status\b|Price\b|\d)|\s*[.,;]|$)/i);
+  const styleM = clean.match(/\b[Ss]tyle[:\s•]+([A-Za-z][A-Za-z\s\/\-]{2,45}?)(?=\s+(?:Year\b|Lot\b|HOA\b|MLS\b|Parcel\b|APN\b|Garage\b|Stories\b|Bath|Bed|Sq\s|Type\b|Status\b|Price\b|Updated\b|Listed\b|\d)|\s*[.,;]|$)/i);
   const typeCandidate = ptM ? ptM[1] : (styleM ? styleM[1] : "");
   if (typeCandidate) {
     const tc = typeCandidate.toLowerCase().trim();
@@ -474,6 +477,7 @@ const steps = [
       root.innerHTML = `
         <h2 class="step-title">Auto-Fill from Listing</h2>
         <p class="step-sub">Give us the listing and we'll pre-fill the form. Use either option below, or hit Skip to enter everything manually.</p>
+        <div class="banner info" style="margin-bottom:14px;">⚡ <strong>Auto-fill is a work in progress</strong> — it's designed to save you as much time as possible so you can send offers fast. It won't always catch every field, especially on less common listing sites. Review what it fills in and correct anything that looks off before continuing.</div>
 
         <label class="field-label">Option 1 — Paste page text <span class="small-muted">(Ctrl+A → Ctrl+C on the listing page, paste here — works on Redfin, Crexi, Zillow, LoopNet, any site)</span></label>
         <textarea id="autofill-page-text" rows="5" placeholder="Go to the listing page, select all text (Ctrl+A), copy (Ctrl+C), then paste here. Captures address, beds, baths, sqft, price, agent name &amp; phone." style="font-size:13px;width:100%;box-sizing:border-box;resize:vertical;"></textarea>
@@ -574,6 +578,8 @@ const steps = [
         // Build preview card
         const rows = [
           ["Address", [extracted.street, extracted.city, extracted.state, extracted.zip].filter(Boolean).join(", ")],
+          ["Asset Type", extracted.assetType || ""],
+          ["Parcel ID / APN", extracted.parcelIds || ""],
           ["Asking Price", extracted.price ? "$" + Number(String(extracted.price).replace(/[^0-9.]/g, "")).toLocaleString() + "  ·  For sale listing" : ""],
           ["Beds / Baths / Sqft", [extracted.beds && extracted.beds + " bd", extracted.baths && extracted.baths + " ba", extracted.sqft && Number(extracted.sqft).toLocaleString() + " sqft"].filter(Boolean).join("  ·  ")],
           ["Acreage", extracted.acreage || ""],
@@ -636,14 +642,30 @@ const steps = [
     key: "address",
     progress: true,
     render(root) {
+      const isLand = answers.assetType === "Land";
+      const isBusiness = answers.assetType === "Business";
+      const isSFR = answers.assetType === "Residential Property (1-4 units)";
+      const showPropwire = isLand || isSFR;
       root.innerHTML = `
         <h2 class="step-title">Property Address</h2>
         <p class="step-sub">Full U.S. address required for every submission.</p>
+
+        ${showPropwire ? `
+        <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:14px 16px;margin-bottom:16px;font-size:13px;line-height:1.6;">
+          <strong style="color:#166534;">🔍 Check equity on <a href="https://propwire.com/" target="_blank" rel="noopener">PropWire</a> before texting this seller</strong>
+          ${isLand ? `
+          <p style="margin:8px 0 0;">Look up this parcel on PropWire for the owner's existing debt or liens against the land's value. <strong>Free and clear (no debt)</strong> is the best case — it's required for the seller-financing option. <strong>Debt at or above 60% of As-Is Value:</strong> our offer can't cover the payoff — skip it and move on. <strong>No data shows for this parcel?</strong> Skip it — don't spend time on unknowns when there are plenty of parcels where you can verify the numbers quickly.</p>
+          ` : `
+          <p style="margin:8px 0 0;">Run this address through PropWire to check the seller's approximate existing debt vs. the property's value. <strong>Has equity (debt below our MAO):</strong> proceed with a normal cash offer. <strong>No equity (debt at or above MAO):</strong> don't quote a dollar figure — the wizard will give you a subject-to pitch instead. <strong>No debt/equity data on PropWire?</strong> Skip it and move to the next property — volume is the game.</p>
+          `}
+        </div>
+        ` : ""}
+
         <label class="field-label">Street address <span class="req">*</span></label>
         <input type="text" id="street-input" placeholder="123 Main St">
         <div class="error-text" id="street-error">Street address is required.</div>
 
-        <label class="field-label">Parcel ID(s) <span class="small-muted">(optional, if known — separate multiple with commas)</span></label>
+        <label class="field-label">Parcel ID / APN <span class="small-muted">(optional, if known — separate multiple with commas)</span></label>
         <input type="text" id="parcel-ids-input" placeholder="e.g. 123-456-789">
 
         <div class="row3" style="margin-top:16px;">
@@ -669,17 +691,21 @@ const steps = [
 
         <div class="banner warn" id="dup-address-banner" hidden style="margin-top:16px;"></div>
 
+        ${(!isLand && !isBusiness) ? `
         <label class="field-label">Number of units <span class="req">*</span></label>
         <input type="number" id="units-input" min="1" step="1" placeholder="e.g. 1 for a single-family home">
         <div class="error-text" id="units-error">Enter the number of units (1 or more).</div>
-        <p class="hint">If this property has more than 4 units, choose <strong>Commercial Property</strong> as the asset type on the next step instead of Residential.</p>
+        <p class="hint">Use <strong>Commercial Property</strong> (already selected) for 5+ unit properties.</p>
+        ` : `
+        <p class="hint" style="margin-top:12px;color:#6b7280;">Unit count automatically set to 1 for ${isLand ? "Land" : "Business"} deals.</p>
+        `}
       `;
       root.querySelector("#street-input").value = answers.street || "";
       root.querySelector("#parcel-ids-input").value = answers.parcelIds || "";
       root.querySelector("#city-input").value = answers.city || "";
       root.querySelector("#state-input").value = answers.state || "";
       root.querySelector("#zip-input").value = answers.zip || "";
-      root.querySelector("#units-input").value = answers.units || "";
+      if (!isLand && !isBusiness) root.querySelector("#units-input").value = answers.units || "";
 
       const checkDupAddress = async () => {
         const street = root.querySelector("#street-input").value.trim();
@@ -712,19 +738,27 @@ const steps = [
       root.querySelector("#state-input").addEventListener("change", checkDupAddress);
     },
     validate(root) {
+      const isLand = answers.assetType === "Land";
+      const isBusiness = answers.assetType === "Business";
       answers.street = root.querySelector("#street-input").value.trim();
       answers.parcelIds = root.querySelector("#parcel-ids-input").value.trim();
       answers.city = root.querySelector("#city-input").value.trim();
       answers.state = root.querySelector("#state-input").value;
       answers.zip = root.querySelector("#zip-input").value.trim();
-      answers.units = root.querySelector("#units-input").value;
+      if (isLand || isBusiness) {
+        answers.units = "1";
+      } else {
+        answers.units = root.querySelector("#units-input").value;
+      }
       let ok = true;
       toggleError(root, "#street-error", !answers.street); if (!answers.street) ok = false;
       toggleError(root, "#city-error", !answers.city); if (!answers.city) ok = false;
       toggleError(root, "#state-error", !answers.state); if (!answers.state) ok = false;
       toggleError(root, "#zip-error", !/^\d{5}(-\d{4})?$/.test(answers.zip)); if (!/^\d{5}(-\d{4})?$/.test(answers.zip)) ok = false;
-      const unitsOk = Number(answers.units) >= 1;
-      toggleError(root, "#units-error", !unitsOk); if (!unitsOk) ok = false;
+      if (!isLand && !isBusiness) {
+        const unitsOk = Number(answers.units) >= 1;
+        toggleError(root, "#units-error", !unitsOk); if (!unitsOk) ok = false;
+      }
       return ok;
     }
   },
@@ -3978,6 +4012,15 @@ If this suggests the property is worth meaningfully less than expected, say so p
     validate() { return true; }
   }
 ];
+
+// Move sourcing and assetType before address — asset class must be known before address
+// so downstream logic (land seller financing, business branches, Propwire check) works correctly.
+{
+  const sourcing = steps.splice(steps.findIndex(s => s.key === "sourcing"), 1)[0];
+  const assetType = steps.splice(steps.findIndex(s => s.key === "assetType"), 1)[0];
+  const addressIdx = steps.findIndex(s => s.key === "address");
+  steps.splice(addressIdx, 0, sourcing, assetType);
+}
 
 let stepIndex = 0;
 
