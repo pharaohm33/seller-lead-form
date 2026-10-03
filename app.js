@@ -582,110 +582,6 @@ const steps = [
     validate() { return true; }
   },
   {
-    key: "rehabEstimate",
-    progress: true,
-    skip() { return answers.assetType === "Land"; },
-    render(root) {
-      const addressLine = [answers.street, answers.city, answers.state, answers.zip].filter(Boolean).join(", ");
-      const arv = answers.askingPrice || "";
-      const arvFmt = arv ? `$${Number(arv).toLocaleString()}` : "";
-      const arvPart = arv ? ` to reach an ARV of ${arvFmt}` : "";
-      const isResidential = answers.assetType === "Residential Property (1-4 units)";
-      const bedBathPart = (isResidential && answers.beds && answers.baths)
-        ? ` It's currently ${answers.beds} bed / ${answers.baths} bath -- estimate repair costs for that existing layout (however light or heavy the work actually is), with no bedroom or bathroom additions or conversions planned.`
-        : "";
-      const zillowSlug = addressLine.replace(/[^a-zA-Z0-9]+/g, "-");
-      const listingUrl = answers.sourceLink || `https://www.zillow.com/homes/${zillowSlug}_rb/`;
-      const repairPrompt = `how much fix and flip investor repair is needed at ${addressLine}${arvPart}?${bedBathPart} ${listingUrl}`;
-
-      root.innerHTML = `
-        <h2 class="step-title">Rehab Estimate</h2>
-        <p class="step-sub">Open <strong>Google AI Mode</strong> — go to google.com, search anything, then click the <strong>AI Mode</strong> tab near the top (next to All, Images, News). Copy the prompt below and include the listing link so it can see the property's condition — a repair estimate without photos is just a guess.</p>
-        <div style="display:flex;gap:8px;align-items:flex-start;margin-top:12px;">
-          <textarea id="rehab-prompt-box" readonly rows="3" style="flex:1;font-size:13px;background:#f8fafc;border:1px solid #cbd5e1;border-radius:6px;padding:10px;resize:vertical;">${repairPrompt}</textarea>
-          <button class="btn secondary" id="copy-prompt-btn" style="white-space:nowrap;flex-shrink:0;margin-top:2px;">Copy Prompt</button>
-        </div>
-
-        <label class="field-label" style="margin-top:16px;">Paste Google AI's full response here <span class="small-muted">(the form will extract the repair estimate for you)</span></label>
-        <textarea id="rehab-ai-text" rows="5" placeholder="Paste the full AI response here…"></textarea>
-        <button class="btn secondary" id="rehab-parse-btn" style="margin-top:8px;">Extract Estimate from Response</button>
-        <div id="rehab-parse-status" style="margin-top:6px;font-size:13px;display:none;"></div>
-
-        <div style="display:flex;gap:12px;margin-top:16px;flex-wrap:wrap;">
-          <div style="flex:1;min-width:120px;">
-            <label class="field-label">Repair — low <span class="req">*</span></label>
-            <input type="number" id="rehab-low-input" placeholder="$">
-          </div>
-          <div style="flex:1;min-width:120px;">
-            <label class="field-label">Repair — high <span class="req">*</span></label>
-            <input type="number" id="rehab-high-input" placeholder="$">
-          </div>
-        </div>
-        <div class="error-text" id="rehab-error">Enter repair estimate low and high (enter 0 in both if no repairs needed).</div>
-
-        ${arv ? `<div id="as-is-display" style="margin-top:14px;display:none;background:#f0fdf4;border:1px solid #86efac;border-radius:6px;padding:12px;font-size:14px;"><strong>As-Is Value:</strong> <span id="as-is-num" style="font-size:16px;font-weight:600;"></span> <span style="color:#6b7280;font-size:13px;">(ARV ${arvFmt} minus midpoint repair)</span></div>` : ""}
-      `;
-
-      root.querySelector("#rehab-ai-text").value = answers.rehabAiText || "";
-      root.querySelector("#rehab-low-input").value = answers.rehabEstimateLow || "";
-      root.querySelector("#rehab-high-input").value = answers.rehabEstimateHigh || "";
-
-      const updateAsIs = () => {
-        if (!arv) return;
-        const low = Number(root.querySelector("#rehab-low-input").value) || 0;
-        const high = Number(root.querySelector("#rehab-high-input").value) || 0;
-        const mid = (low && high) ? (low + high) / 2 : (low || high);
-        const asIsDisplay = root.querySelector("#as-is-display");
-        root.querySelector("#as-is-num").textContent = "$" + Math.max(Number(arv) - mid, 0).toLocaleString();
-        asIsDisplay.style.display = (low || high || root.querySelector("#rehab-low-input").value === "0") ? "block" : "none";
-      };
-
-      root.querySelector("#copy-prompt-btn").onclick = () => {
-        navigator.clipboard.writeText(repairPrompt).then(() => {
-          const btn = root.querySelector("#copy-prompt-btn");
-          btn.textContent = "Copied!";
-          setTimeout(() => { btn.textContent = "Copy Prompt"; }, 2000);
-        });
-      };
-
-      root.querySelector("#rehab-parse-btn").onclick = () => {
-        const text = root.querySelector("#rehab-ai-text").value;
-        const parsed = parseRehabText(text);
-        const statusEl = root.querySelector("#rehab-parse-status");
-        statusEl.style.display = "block";
-        if (parsed.low != null) {
-          root.querySelector("#rehab-low-input").value = parsed.low;
-          root.querySelector("#rehab-high-input").value = parsed.high != null ? parsed.high : parsed.low;
-          statusEl.innerHTML = `<span style="color:#166534;">✓ Extracted: low $${Number(parsed.low).toLocaleString()} / high $${Number(parsed.high != null ? parsed.high : parsed.low).toLocaleString()}</span>`;
-          updateAsIs();
-        } else {
-          statusEl.innerHTML = `<span style="color:#b45309;">Couldn't find a dollar amount — enter the estimate manually below.</span>`;
-        }
-      };
-
-      root.querySelector("#rehab-low-input").addEventListener("input", updateAsIs);
-      root.querySelector("#rehab-high-input").addEventListener("input", updateAsIs);
-      if (answers.rehabEstimateLow || answers.rehabEstimateHigh) updateAsIs();
-    },
-    validate(root) {
-      const low = root.querySelector("#rehab-low-input").value.trim();
-      const high = root.querySelector("#rehab-high-input").value.trim();
-      const ok = low !== "" && high !== "";
-      toggleError(root, "#rehab-error", !ok);
-      if (!ok) return false;
-      answers.rehabAiText = root.querySelector("#rehab-ai-text").value.trim();
-      answers.rehabEstimateLow = low;
-      answers.rehabEstimateHigh = high;
-      const rLow = Number(low) || 0, rHigh = Number(high) || 0;
-      answers.rehabEstimate = String(rLow && rHigh ? (rLow + rHigh) / 2 : (rLow || rHigh || ""));
-      if (answers.askingPrice) {
-        answers.arv = answers.askingPrice;
-        answers.asIsValue = Math.max(Number(answers.askingPrice) - (Number(answers.rehabEstimate) || 0), 0);
-      }
-      return true;
-    }
-  },
-  {
     key: "sellerContact",
     progress: true,
     skip() { return answers.role === "Seller"; },
@@ -1316,7 +1212,7 @@ const steps = [
       // estimate repairs against an actual target value instead of guessing blind. By the time repair
       // costs matter, that ARV is usually the AI-CMA-refined number (see Step 2 above), not Chase's
       // quick estimate, so it isn't attributed to a specific source here anymore.
-      const buildRepairPrompt = (arv) => {
+      const buildRepairPrompt = (arv, picturesLink) => {
         const arvPart = arv ? ` to reach an ARV of $${Number(arv).toLocaleString()}` : "";
         // This deal doesn't add or convert bedrooms/bathrooms, so tell the AI to price the repair
         // for the CURRENT bed/bath count, not a hypothetical one -- this doesn't limit the repair
@@ -1324,7 +1220,7 @@ const steps = [
         const bedBathPart = (isResidential && answers.beds && answers.baths)
           ? ` It's currently ${answers.beds} bed / ${answers.baths} bath -- estimate repair costs for that existing layout (however light or heavy the work actually is), with no bedroom or bathroom additions or conversions planned.`
           : "";
-        return `how much fix and flip investor repair is needed at ${addressLine}${arvPart}?${bedBathPart} ${zillowSearchUrl}`;
+        return `how much fix and flip investor repair is needed at ${addressLine}${arvPart}?${bedBathPart} ${picturesLink || zillowSearchUrl}`;
       };
       // Auction/preforeclosure properties usually have no listing or photos to research condition
       // from, so repair cost gets estimated from purchase year, home age, and reported maintenance
@@ -1503,26 +1399,11 @@ const steps = [
 
           <!-- STEP 3 header -->
           <div style="border-left:3px solid #7c3aed;padding:4px 0 4px 12px;margin:20px 0 4px;">
-            <strong style="color:#7c3aed;font-size:14px;">Step 3 — Photos, rehab estimate &amp; remaining details</strong>
-            <p class="hint" style="margin:3px 0 0;">Paste the listing or photos link so Google AI can estimate repairs. Add multiple links or upload screenshots.</p>
+            <strong style="color:#7c3aed;font-size:14px;">Step 3 — Listing/photos link, rehab estimate &amp; remaining details</strong>
+            <p class="hint" style="margin:3px 0 0;">Enter the listing or photos link first — it feeds directly into the repair estimate prompt below.</p>
           </div>
-        ` : ""}
-
-        ${isResidential ? `
-          <label class="field-label">Chase Bank Estimated Value
-            <span class="small-muted">(for admin reference only — optional. Paste the number from <a href="https://www.chase.com/personal/mortgage/calculators-resources/home-value-estimator" target="_blank" rel="noopener">Chase's Home Value Estimator</a> if you have it. Admin uses this to cross-check the AI comps, not to set the offer.)</span></label>
-          <input type="number" id="chase-estimate-input" placeholder="$">
-
-          ${isPreforeclosureAuction ? `
-            <div class="banner info" style="margin-top:16px;"><strong>No asking price here</strong> —
-            auction/preforeclosure sellers don't have one. The offer is built entirely off As-Is Value,
-            ARV, and the repair estimate below.</div>
-          ` : `
-            <label class="field-label">Asking Price <span class="req">*</span>
-              <span class="small-muted">(what the seller is asking/listing for)</span></label>
-            <input type="number" id="asking-price-input" placeholder="$">
-            <div class="error-text" id="asking-price-error">Required.</div>
-          `}
+          <label class="field-label">Pictures / Listing Link <span class="small-muted">(paste the for-sale listing URL or photos link — this is what Google AI uses to see the property's condition)</span></label>
+          <input type="text" id="pictures-link-input" placeholder="https://...">
         ` : ""}
 
         <label class="field-label">${isLand ? "As-Is Value" : "ARV"}
@@ -1556,9 +1437,6 @@ const steps = [
           Value</strong> deferred offer instead of the normal on-market/off-market percentage offer below —
           see the Make Your Offer banner once you've entered As-Is Value.</p>
         ` : ""}
-
-        <label class="field-label">Pictures Link <span class="small-muted">(optional, if available)</span></label>
-        <input type="text" id="pictures-link-input" placeholder="https://...">
 
         ${isCommercial ? `
           <div id="commercial-vacant-block" style="margin-top:16px;" ${answers.commercialOccupancyStatus === "Vacant" ? "" : "hidden"}>
@@ -1652,6 +1530,10 @@ const steps = [
           <br><span class="small-muted" id="repair-prompt-hint"></span>
           <br><button type="button" class="btn secondary" id="repair-prompt-copy-btn" style="margin-top:8px;">Copy Prompt</button>
           </p>
+          <label class="field-label" style="margin-top:12px;">Paste Google AI's full response <span class="small-muted">(the form will auto-extract the repair estimate)</span></label>
+          <textarea id="rehab-ai-text-input" rows="4" placeholder="Paste the full AI response here…" style="width:100%;box-sizing:border-box;font-size:13px;border:1px solid #d1d5db;border-radius:6px;padding:10px;"></textarea>
+          <button type="button" class="btn secondary" id="rehab-ai-parse-btn" style="margin-top:8px;">Extract Estimate from Response</button>
+          <div id="rehab-ai-parse-status" style="margin-top:6px;font-size:13px;display:none;"></div>
           <div class="banner info" id="rehab-average-banner" hidden></div>
 
           ${hasCompsWorkflow ? `<div class="banner info" id="as-is-value-banner" hidden></div>` : ""}
@@ -1666,6 +1548,23 @@ const steps = [
             </div>
             <div class="error-text" id="tear-down-error">Please choose one.</div>
           ` : ""}
+        ` : ""}
+
+        ${isResidential ? `
+          <label class="field-label" style="margin-top:4px;">Approximate As-Is Value
+            <span class="small-muted">(optional — use <a href="https://www.chase.com/personal/mortgage/calculators-resources/home-value-estimator" target="_blank" rel="noopener">Chase's Home Value Estimator</a>. Chase's estimate accounts for approximate property condition and age, making it a useful proxy for current as-is value — it may already reflect repair needs for older homes.)</span></label>
+          <input type="number" id="chase-estimate-input" placeholder="$">
+
+          ${isPreforeclosureAuction ? `
+            <div class="banner info" style="margin-top:16px;"><strong>No asking price here</strong> —
+            auction/preforeclosure sellers don't have one. The offer is built entirely off As-Is Value,
+            ARV, and the repair estimate below.</div>
+          ` : `
+            <label class="field-label" style="margin-top:16px;">Asking Price <span class="req">*</span>
+              <span class="small-muted">(what the seller is asking/listing for)</span></label>
+            <input type="number" id="asking-price-input" placeholder="$">
+            <div class="error-text" id="asking-price-error">Required.</div>
+          `}
         ` : ""}
 
         <label class="field-label">County Assessed Value <span class="small-muted">(optional — powerful negotiation tool)</span></label>
@@ -1735,6 +1634,7 @@ const steps = [
       if (!isLand) {
         root.querySelector("#rehab-low-input").value = answers.rehabEstimateLow || "";
         root.querySelector("#rehab-high-input").value = answers.rehabEstimateHigh || "";
+        root.querySelector("#rehab-ai-text-input").value = answers.rehabAiText || "";
         if (!isSellerFinancing && !isPreforeclosureAuction && isOnMarket) {
           bindChoiceGroup(root, "#tear-down-group", "isTearDown");
         }
@@ -1783,7 +1683,7 @@ const steps = [
         }
 
         if (!isLand) {
-          root.querySelector("#repair-prompt-hint").textContent = `"${buildRepairPrompt(arv)}"`;
+          root.querySelector("#repair-prompt-hint").textContent = `"${buildRepairPrompt(arv, root.querySelector("#pictures-link-input").value.trim())}"`;
           const rehabAverageBanner = root.querySelector("#rehab-average-banner");
           if (rehabLow && rehabHigh) {
             rehabAverageBanner.hidden = false;
@@ -1986,7 +1886,7 @@ const steps = [
       if (!isLand) {
         root.querySelector("#repair-prompt-copy-btn").onclick = () => {
           const arv = Number(root.querySelector("#arv-input").value) || 0;
-          const text = buildRepairPrompt(arv);
+          const text = buildRepairPrompt(arv, root.querySelector("#pictures-link-input").value.trim());
           if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText(text).then(() => {
               alert("Prompt copied to clipboard.");
@@ -1995,6 +1895,20 @@ const steps = [
             });
           } else {
             prompt("Copy this prompt:", text);
+          }
+        };
+        root.querySelector("#rehab-ai-parse-btn").onclick = () => {
+          const text = root.querySelector("#rehab-ai-text-input").value;
+          const parsed = parseRehabText(text);
+          const statusEl = root.querySelector("#rehab-ai-parse-status");
+          statusEl.style.display = "block";
+          if (parsed.low != null) {
+            root.querySelector("#rehab-low-input").value = parsed.low;
+            root.querySelector("#rehab-high-input").value = parsed.high != null ? parsed.high : parsed.low;
+            statusEl.innerHTML = `<span style="color:#166534;">✓ Extracted: low $${Number(parsed.low).toLocaleString()} / high $${Number(parsed.high != null ? parsed.high : parsed.low).toLocaleString()}</span>`;
+            recomputeCashDeal();
+          } else {
+            statusEl.innerHTML = `<span style="color:#b45309;">Couldn't find a dollar amount — enter the repair estimate manually.</span>`;
           }
         };
       }
@@ -2389,6 +2303,7 @@ If this suggests the property is worth meaningfully less than expected, say so p
       if (isResidentialForChase) answers.chaseEstimate = root.querySelector("#chase-estimate-input").value;
       answers.picturesLink = root.querySelector("#pictures-link-input").value.trim();
       // Land has no Rehab Estimate inputs -- offers run purely off the As-Is Value entered above.
+      if (!isLand) answers.rehabAiText = root.querySelector("#rehab-ai-text-input").value.trim();
       answers.rehabEstimateLow = isLand ? "" : root.querySelector("#rehab-low-input").value;
       answers.rehabEstimateHigh = isLand ? "" : root.querySelector("#rehab-high-input").value;
       const rLow = Number(answers.rehabEstimateLow) || 0;
@@ -3979,7 +3894,7 @@ function buildAnswerRows() {
   const showsCashDealFields = answers.dealType === "Cash Deal" || answers.dealType === "Seller Financing / Creative Finance";
   if (showsCashDealFields) {
     rows.push(
-      ["Chase Bank Estimated Value", answers.chaseEstimate || "—"],
+      ["Approximate As-Is Value (Chase)", answers.chaseEstimate || "—"],
       ["Asking Price", answers.askingPrice || "—"],
       ["ARV", answers.arv || "—"],
       ["As-Is Value", answers.asIsValue || "—"],
