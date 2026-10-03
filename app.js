@@ -584,7 +584,7 @@ const steps = [
         if (extracted.parcelIds)  answers.parcelIds = extracted.parcelIds;
         if (extracted.assetType) answers.assetType = extracted.assetType;
         if (extracted.assetType === "Residential Property (1-4 units)") answers.units = "1";
-        if (extracted.assetType === "Land") answers.units = "1";
+        if (extracted.assetType === "Land") { answers.units = "1"; answers.dealType = "Cash Deal"; }
         if (extracted.landZoning) answers.landZoning = extracted.landZoning;
 
         // Build preview card
@@ -1255,6 +1255,7 @@ const steps = [
     // hidden from the associate for Seller Financing (see isSellerFinancing in render()/validate())
     // -- that's a display choice, not a reason to skip gathering the underlying numbers.
     skip() {
+      if (answers.assetType === "Land") return false; // land always needs comps/MAO workflow
       return answers.dealType !== "Cash Deal" && answers.dealType !== "Seller Financing / Creative Finance";
     },
     render(root) {
@@ -4911,6 +4912,8 @@ function restoreFromUrl() {
   try {
     const payload = JSON.parse(raw);
     Object.assign(answers, payload.a || {});
+    // Land is always cash-only -- dealType may be absent from saves made before autofill set it
+    if (answers.assetType === "Land" && !answers.dealType) answers.dealType = "Cash Deal";
     stepIndex = Math.min(Math.max(payload.s || 0, 0), steps.length - 1);
     return true;
   } catch (e) {
