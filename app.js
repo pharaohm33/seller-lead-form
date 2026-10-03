@@ -440,6 +440,10 @@ const steps = [
           return;
         }
 
+        // Wipe stale listing data immediately so a failed/partial fetch never leaves old info behind
+        ["street","city","state","zip","beds","baths","sqft","acreage","askingPrice","yearBuilt",
+         "sellerContactName","sellerContactPhone","sellerContactEmail","sourceLink","assetType","units"].forEach(k => { delete answers[k]; });
+
         let extracted = {};
 
         // Option 2: paste text — most reliable, runs first so URL can fill gaps
@@ -497,10 +501,6 @@ const steps = [
         }
 
         if (Object.keys(extracted).length === 0) return;
-
-        // Wipe all autofill-able fields first so no stale data from a previous listing bleeds through
-        ["street","city","state","zip","beds","baths","sqft","acreage","askingPrice","yearBuilt",
-         "sellerContactName","sellerContactPhone","sellerContactEmail","sourceLink","assetType","units"].forEach(k => { delete answers[k]; });
 
         // Apply freshly extracted data
         if (extracted.street)    answers.street = extracted.street;
