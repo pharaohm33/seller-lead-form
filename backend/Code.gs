@@ -49,6 +49,7 @@ const LEAD_COLUMNS = [
   'Total Debt', 'Senior Loan Willing', 'Payment Structure Willing',
   'Price Sought', 'Price Reasoning', 'Down Payment Intent', 'Down Payment Needed', 'Down Payment Non-Negotiable',
   'Market Status', 'Source Link',
+  'Days On Market', 'Zoning Notes', 'Red Flag Investigation Notes',
   'Status', 'Closing Likelihood', 'Sort Priority', 'Team'
 ];
 
@@ -154,6 +155,16 @@ function doPost(e) {
         return jsonOut(deletePublicNote(body));
       case 'fetchListing':
         return jsonOut(fetchListing(body));
+      case 'saveCrmEntry':
+        return jsonOut(saveCrmEntry(body));
+      case 'getCrmEntries':
+        return jsonOut(getCrmEntries(body));
+      case 'getCrmEntry':
+        return jsonOut(getCrmEntry(body));
+      case 'updateCrmStatus':
+        return jsonOut(updateCrmStatus(body));
+      case 'deleteCrmEntry':
+        return jsonOut(deleteCrmEntry(body));
       default:
         return jsonOut({ ok: false, error: 'Unknown action.' });
     }
@@ -313,6 +324,36 @@ function checkOffMarketAgreement(d) {
   return null;
 }
 
+// Server-side mirror of BLOCKED_PHONE_NUMBERS/blockedPhoneReason in app.js (separate runtime, so keep
+// the two lists in sync by hand). Phones that belong to a listing site's own support/HQ line or to our
+// own admin line, plus obvious placeholders, are never a seller's or realtor's real direct number.
+const BLOCKED_PHONE_NUMBERS = {
+  '8447597732': "Redfin's customer service line",
+  '2027597581': "Redfin's Washington, D.C. office line",
+  '8882730423': "Crexi's support line",
+  '8883674009': "Zillow's support line",
+  '8884663501': "Zillow/Trulia's partner support line",
+  '8006131303': "LoopNet's customer support line",
+  '8333996604': "LoopNet's advertising line",
+  '8008784166': "Realtor.com's customer care line",
+  '8007936107': "Auction.com's customer service line",
+  '8002802832': "Auction.com's main line",
+  '5206336437': 'our own admin line'
+};
+
+function blockedPhoneReason(raw) {
+  let d = String(raw || '').replace(/\D/g, '');
+  if (d.length === 11 && d.charAt(0) === '1') d = d.slice(1);
+  if (d.length !== 10) return '';
+  if (BLOCKED_PHONE_NUMBERS[d]) {
+    return "The seller/realtor phone entered is " + BLOCKED_PHONE_NUMBERS[d] + ", not their direct number.";
+  }
+  if (/^(\d)\1{9}$/.test(d) || d === '1234567890' || d === '0123456789' || /^\d{3}55501\d{2}$/.test(d)) {
+    return 'The seller/realtor phone entered looks like a placeholder number, not a real one.';
+  }
+  return '';
+}
+
 function submitLead(body) {
   const d = body.data || {};
   const required = ['role', 'name', 'email', 'phone', 'street', 'city', 'state', 'zip', 'units', 'assetType', 'marketStatus'];
@@ -330,6 +371,11 @@ function submitLead(body) {
   const offMarketError = checkOffMarketAgreement(d);
   if (offMarketError) {
     return { ok: false, error: offMarketError };
+  }
+
+  const phoneError = d.sellerContactPhone ? blockedPhoneReason(d.sellerContactPhone) : '';
+  if (phoneError) {
+    return { ok: false, error: phoneError };
   }
 
   const sheet = getSheet(LEADS_SHEET, LEAD_COLUMNS);
@@ -361,6 +407,8 @@ function submitLead(body) {
     'Beds': d.beds || '', 'Baths': d.baths || '', 'Sq Ft': d.sqft || '',
     'Seller Reported Sq Ft': d.sellerReportedSqft || '',
     'Acreage': d.acreage || '', 'Land Zoning': d.landZoning || '',
+    'Days On Market': d.daysOnMarket || '', 'Zoning Notes': d.zoningNotes || '',
+    'Red Flag Investigation Notes': d.redFlagInvestigationNotes || '',
     'Land Free And Clear': d.landFreeAndClear || '', 'Land Willing To Wait For Development': d.landWillingToWaitForDev || '',
     'Deal Type': d.dealType || '', 'Deal Category': d.dealCategory || '',
     'ARV': d.arv || '', 'Asking Price': d.askingPrice || '', 'Chase Estimated Value': d.chaseEstimate || '', 'As-Is Value': d.asIsValue || '', 'Pictures Link': d.picturesLink || '',
@@ -468,6 +516,183 @@ function earlyCaptureLead(body) {
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, error: 'Invalid email.' };
   beehiivUpsertSubscriber(email, d.name, leadTags(d.role, ''));
   return { ok: true };
+}
+
+// ---------- Personal CRM: in-progress "cold leads", saved per submitter email ----------
+//
+// A cold lead is one the submitter has contacted (or sent an offer to) who hasn't responded or
+// countered yet -- there's no deal to send to admin, but the work shouldn't be lost. Each entry is the
+// wizard's full answers plus the step they were on, keyed by the submitter's own email so they can
+// resume exactly where they left off. Access works like getLeadsByEmail: knowing the email is the
+// access check, no password. These rows never touch the admin Leads sheet -- a real submitLead is
+// still the only way a lead reaches admin.
+
+const CRM_SHEET = 'CRM';
+const CRM_STATUSES = ['Contact Initiated on Cold Lead', 'Offer sent to cold lead', 'Auto Pre-LOI Before Contact'];
+// Sheets caps a single cell at 50,000 characters, so the answers JSON is split across a few columns.
+const CRM_ANSWER_CHUNK_SIZE = 45000;
+const CRM_ANSWER_COLUMNS = ['Answers 1', 'Answers 2', 'Answers 3', 'Answers 4'];
+const CRM_COLUMNS = [
+  'CRM ID', 'Owner Email', 'Status', 'Created At', 'Updated At',
+  'Street Address', 'City', 'State', 'Zip', 'Asset Type', 'Asking Price',
+  'Seller Contact Name', 'Seller Contact Phone', 'Seller Contact Email', 'Step Index'
+].concat(CRM_ANSWER_COLUMNS);
+
+function normalizeCrmEmail(raw) {
+  const email = String(raw || '').trim().toLowerCase();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : '';
+}
+
+function crmSummary(row) {
+  return {
+    crmId: row['CRM ID'], status: row['Status'], createdAt: row['Created At'], updatedAt: row['Updated At'],
+    street: row['Street Address'], city: row['City'], state: row['State'], zip: row['Zip'],
+    assetType: row['Asset Type'], askingPrice: row['Asking Price'],
+    sellerContactName: row['Seller Contact Name'], sellerContactPhone: row['Seller Contact Phone'],
+    sellerContactEmail: row['Seller Contact Email'], stepIndex: Number(row['Step Index']) || 0
+  };
+}
+
+function findCrmRow(sheet, crmId) {
+  if (!crmId) return null;
+  const rows = sheetToObjects(sheet);
+  for (let i = 0; i < rows.length; i++) {
+    if (rows[i]['CRM ID'] === crmId) return rows[i];
+  }
+  return null;
+}
+
+// Every CRM row is written as plain text: the answers JSON is split into arbitrary chunks, and a
+// chunk that happens to start with "=", "+", or "-" would otherwise be parsed as a formula/number.
+function writeCrmRow(sheet, rowNum, fields) {
+  const lastCol = sheet.getLastColumn();
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  const existing = rowNum <= sheet.getLastRow() ? sheet.getRange(rowNum, 1, 1, lastCol).getValues()[0] : [];
+  const merged = headers.map(function (h, i) {
+    const v = Object.prototype.hasOwnProperty.call(fields, h) ? fields[h] : existing[i];
+    return (v === undefined || v === null) ? '' : String(v);
+  });
+  const range = sheet.getRange(rowNum, 1, 1, lastCol);
+  range.setNumberFormat('@');
+  range.setValues([merged]);
+}
+
+function saveCrmEntry(body) {
+  const email = normalizeCrmEmail(body.email);
+  if (!email) return { ok: false, error: 'A valid email is required.' };
+  if (CRM_STATUSES.indexOf(body.status) === -1) return { ok: false, error: 'Unknown CRM status.' };
+  const answers = body.answers;
+  if (!answers || typeof answers !== 'object') return { ok: false, error: 'Nothing to save.' };
+  const json = JSON.stringify(answers);
+  const maxLen = CRM_ANSWER_CHUNK_SIZE * CRM_ANSWER_COLUMNS.length;
+  if (json.length > maxLen) {
+    return { ok: false, error: 'This lead has too much data to save to your CRM (' + json.length + ' characters, limit ' + maxLen + '). Try clearing large pasted text, then save again.' };
+  }
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const sheet = getSheet(CRM_SHEET, CRM_COLUMNS);
+    const now = new Date().toISOString();
+    const fields = {
+      'Owner Email': email, 'Status': body.status, 'Updated At': now,
+      'Street Address': answers.street || '', 'City': answers.city || '', 'State': answers.state || '',
+      'Zip': answers.zip || '', 'Asset Type': answers.assetType || '',
+      'Asking Price': answers.askingPrice || answers.priceSought || '',
+      'Seller Contact Name': answers.sellerContactName || '',
+      'Seller Contact Phone': sanitizePhone(answers.sellerContactPhone),
+      'Seller Contact Email': answers.sellerContactEmail || '',
+      'Step Index': Number(body.stepIndex) || 0
+    };
+    CRM_ANSWER_COLUMNS.forEach(function (col, i) {
+      fields[col] = json.slice(i * CRM_ANSWER_CHUNK_SIZE, (i + 1) * CRM_ANSWER_CHUNK_SIZE);
+    });
+
+    let crmId = String(body.crmId || '');
+    const existing = findCrmRow(sheet, crmId);
+    if (existing) {
+      if (normalizeCrmEmail(existing['Owner Email']) !== email) {
+        return { ok: false, error: 'That saved lead belongs to a different email address.' };
+      }
+      writeCrmRow(sheet, existing._row, fields);
+    } else {
+      crmId = Utilities.getUuid();
+      fields['CRM ID'] = crmId;
+      fields['Created At'] = now;
+      writeCrmRow(sheet, sheet.getLastRow() + 1, fields);
+    }
+    return { ok: true, crmId: crmId, updatedAt: now };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function getCrmEntries(body) {
+  const email = normalizeCrmEmail(body.email);
+  if (!email) return { ok: false, error: 'A valid email is required.' };
+  const sheet = getSheet(CRM_SHEET, CRM_COLUMNS);
+  const entries = sheetToObjects(sheet)
+    .filter(function (r) { return normalizeCrmEmail(r['Owner Email']) === email; })
+    .map(crmSummary);
+  entries.sort(function (a, b) { return String(b.updatedAt).localeCompare(String(a.updatedAt)); });
+  return { ok: true, entries: entries };
+}
+
+// Full answers for one entry, only fetched when someone actually hits Resume -- the list above stays
+// small by leaving them out.
+function getCrmEntry(body) {
+  const email = normalizeCrmEmail(body.email);
+  if (!email || !body.crmId) return { ok: false, error: 'Missing information.' };
+  const sheet = getSheet(CRM_SHEET, CRM_COLUMNS);
+  const row = findCrmRow(sheet, String(body.crmId));
+  if (!row || normalizeCrmEmail(row['Owner Email']) !== email) {
+    return { ok: false, error: 'No saved lead found for that email address.' };
+  }
+  const json = CRM_ANSWER_COLUMNS.map(function (c) { return row[c] || ''; }).join('');
+  let answers;
+  try { answers = JSON.parse(json); } catch (err) {
+    return { ok: false, error: 'This saved lead is damaged and cannot be resumed.' };
+  }
+  const entry = crmSummary(row);
+  entry.answers = answers;
+  return { ok: true, entry: entry };
+}
+
+function updateCrmStatus(body) {
+  const email = normalizeCrmEmail(body.email);
+  if (!email || !body.crmId) return { ok: false, error: 'Missing information.' };
+  if (CRM_STATUSES.indexOf(body.status) === -1) return { ok: false, error: 'Unknown CRM status.' };
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const sheet = getSheet(CRM_SHEET, CRM_COLUMNS);
+    const row = findCrmRow(sheet, String(body.crmId));
+    if (!row || normalizeCrmEmail(row['Owner Email']) !== email) {
+      return { ok: false, error: 'No saved lead found for that email address.' };
+    }
+    writeCrmRow(sheet, row._row, { 'Status': body.status, 'Updated At': new Date().toISOString() });
+    return { ok: true };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function deleteCrmEntry(body) {
+  const email = normalizeCrmEmail(body.email);
+  if (!email || !body.crmId) return { ok: false, error: 'Missing information.' };
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const sheet = getSheet(CRM_SHEET, CRM_COLUMNS);
+    const row = findCrmRow(sheet, String(body.crmId));
+    if (!row || normalizeCrmEmail(row['Owner Email']) !== email) {
+      return { ok: false, error: 'No saved lead found for that email address.' };
+    }
+    sheet.deleteRow(row._row);
+    return { ok: true };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // ---------- Beehiiv sync ----------

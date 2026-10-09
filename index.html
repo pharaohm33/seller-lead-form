@@ -74,6 +74,30 @@
   }
   header.top button:hover { background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.35); }
 
+  /* Save My Progress dropdown: copy a resume link, or save into your own CRM under your email */
+  .save-menu-wrap { position: relative; }
+  .save-menu {
+    position: absolute; right: 0; top: calc(100% + 8px); z-index: 1000;
+    width: 310px; max-width: calc(100vw - 28px);
+    background: var(--card-bg); color: var(--text);
+    border: 1px solid var(--border-strong); border-radius: 10px;
+    box-shadow: var(--shadow-raised); padding: 6px; text-align: left;
+  }
+  .save-menu[hidden] { display: none; }
+  .save-menu-section {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+    color: var(--muted-faint); padding: 10px 10px 4px;
+  }
+  .save-menu-section .save-menu-email { text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--muted); }
+  header.top .save-menu button.save-menu-item {
+    display: block; width: 100%; text-align: left; background: transparent; border: none;
+    color: var(--text); padding: 9px 10px; border-radius: 7px; font-size: 13px; font-weight: 600;
+  }
+  header.top .save-menu button.save-menu-item span { display: block; font-weight: 400; font-size: 12px; color: var(--muted); margin-top: 2px; }
+  header.top .save-menu button.save-menu-item:hover { background: var(--accent-light); border: none; }
+  header.top .save-menu button.save-menu-item.link-style { color: var(--accent); }
+  .save-menu-divider { height: 1px; background: var(--border); margin: 4px 6px; }
+
   .wrap { max-width: 720px; margin: 0 auto; padding: 32px 16px 80px; }
   .card {
     background: var(--card-bg);
@@ -227,7 +251,23 @@
   <div style="display:flex; gap:8px; align-items:center;">
     <a href="https://sendmybuyer.com" target="_blank" rel="noopener" class="small-muted">Send Buyers/Buy Deals</a>
     <button id="restart-btn">Restart</button>
-    <button id="save-progress-btn">Save My Progress</button>
+    <div class="save-menu-wrap">
+      <button id="save-progress-btn" aria-haspopup="true" aria-expanded="false">Save My Progress &#9662;</button>
+      <div class="save-menu" id="save-menu" hidden>
+        <button type="button" class="save-menu-item" id="save-link-btn">Copy my resume link
+          <span>A link back to exactly where you are. For your own use only.</span></button>
+        <div class="save-menu-divider"></div>
+        <div class="save-menu-section">Save to my CRM <span class="save-menu-email" id="save-menu-email"></span></div>
+        <button type="button" class="save-menu-item" data-crm-status="Contact Initiated on Cold Lead">Contact Initiated on Cold Lead
+          <span>You've texted or called, and they haven't responded or countered yet.</span></button>
+        <button type="button" class="save-menu-item" data-crm-status="Offer sent to cold lead">Offer sent to cold lead
+          <span>A text or written offer is out. Waiting on their response.</span></button>
+        <button type="button" class="save-menu-item" data-crm-status="Auto Pre-LOI Before Contact">Auto Pre-LOI Before Contact
+          <span>Offer prepared before any contact. Nothing is submitted and no one is emailed.</span></button>
+        <div class="save-menu-divider"></div>
+        <button type="button" class="save-menu-item link-style" id="open-crm-btn">Open my CRM &rarr;</button>
+      </div>
+    </div>
     <button id="mao-calc-public-btn">MAO Calculator</button>
     <button id="outreach-sop-btn">Outreach SOP</button>
     <button id="admin-access-btn">Admin Access</button>
@@ -288,6 +328,15 @@
     </div>
   </div>
   <div id="status-message" class="banner info" hidden></div>
+  <div id="crm-section" hidden>
+    <div class="card" style="margin-bottom:16px;">
+      <h3 class="step-title" style="font-size:18px; margin-bottom:8px;">My CRM: leads in progress</h3>
+      <div class="banner info" style="text-align:left;">A cold lead can still show strong signs of motivation, but we need them to
+        respond to us, or counter with something that fits an actual deal, before you can reach the end of the form and
+        submit it. Keep following up, then hit <strong>Resume</strong> to pick the form back up once they do.</div>
+      <div id="crm-entries"></div>
+    </div>
+  </div>
   <div style="display:flex; gap:8px; margin-bottom:12px;">
     <input type="text" id="status-search-input" placeholder="Search your leads by address..." hidden style="flex:1; width:auto; margin-bottom:0;">
     <select id="status-sort-select" hidden style="flex:0 0 auto; width:auto;">

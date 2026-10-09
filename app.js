@@ -163,13 +163,16 @@ function parseListingText(text) {
       r.agentName = ws.slice(0, h).join(" ");
   }
 
-  // Phone: "Contact: 714-580-6346" preferred; then "Brokerage Phone 6023304468" (Crexi); then first plain phone
-  const contactPhoneM  = clean.match(/[Cc]ontact[:\s]+(\(?\d{3}\)?[\s.\-]\d{3}[\s.\-]\d{4})/);
-  const brokerPhoneM   = clean.match(/[Bb]rokerage\s+[Pp]hone\s+(\d{10})/);
-  const plainPhoneM    = clean.match(/(\(?\d{3}\)?[\s.\-]\d{3}[\s.\-]\d{4})/);
-  if (contactPhoneM) r.agentPhone = contactPhoneM[1];
-  else if (brokerPhoneM) { const d = brokerPhoneM[1]; r.agentPhone = `(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}`; }
-  else if (plainPhoneM) r.agentPhone = plainPhoneM[1];
+  // Phone: "Contact: 714-580-6346" preferred; then "Brokerage Phone 6023304468" (Crexi); then any plain
+  // phone. Candidates are tried in that order and the first one that isn't a listing site's own
+  // support line (or a placeholder) wins -- see BLOCKED_PHONE_NUMBERS.
+  const phoneCandidates = [
+    ...[...clean.matchAll(/[Cc]ontact[:\s]+(\(?\d{3}\)?[\s.\-]\d{3}[\s.\-]\d{4})/g)].map(m => m[1]),
+    ...[...clean.matchAll(/[Bb]rokerage\s+[Pp]hone\s+(\d{10})/g)].map(m => `(${m[1].slice(0,3)}) ${m[1].slice(3,6)}-${m[1].slice(6)}`),
+    ...[...clean.matchAll(/(\(?\d{3}\)?[\s.\-]\d{3}[\s.\-]\d{4})/g)].map(m => m[1])
+  ];
+  const usablePhone = phoneCandidates.find(p => !blockedPhoneReason(p));
+  if (usablePhone) r.agentPhone = usablePhone;
 
   // Email — skip listing platform domains, placeholder domains, and generic/no-reply prefixes
   const BLOCKED_EMAIL_DOMAINS = /^(?:redfin|zillow|loopnet|crexi|realtor|trulia|homes|movoto|homesnap|listhub|example|test|sample|fake|placeholder|domain|email|mailinator|guerrillamail|tempmail|throwam|yopmail)\.(?:com|org|net)$/i;
@@ -177,6 +180,20 @@ function parseListingText(text) {
   const emailAll = [...clean.matchAll(/([a-zA-Z0-9._%+\-]+@([a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}))/g)];
   const realEmail = emailAll.find(m => !BLOCKED_EMAIL_DOMAINS.test(m[2]) && !BLOCKED_EMAIL_PREFIXES.test(m[1].split("@")[0]));
   if (realEmail) r.agentEmail = realEmail[1];
+
+  // Days on market — Redfin "211 days on Redfin" / "Time on Redfin: 211 days", Zillow "211 days on Zillow",
+  // generic "Days on Market: 211" / "211 days on market". First match only: later ones are usually
+  // nearby comps, not the subject property.
+  const domMatches = [
+    clean.match(/\b(\d{1,4})\s+days?\s+on\s+(?:Redfin|Zillow|Trulia|Realtor\.com|Homes\.com|LoopNet|Crexi|(?:the\s+)?market)\b/i),
+    clean.match(/\b(?:Time\s+on\s+(?:Redfin|Zillow)|Days\s+on\s+(?:Market|Redfin|Zillow)|DOM)[:\s]+(\d{1,4})\b/i)
+  ].filter(Boolean).sort((a, b) => a.index - b.index); // earliest on the page wins, either wording
+  if (domMatches.length) r.daysOnMarket = domMatches[0][1];
+
+  // Zoning — Redfin's Zoning tab / "Zoning: R-1" style text. Short snippet only; the full tab text
+  // gets pasted separately into the zoning box on the auto-fill step.
+  const zoningM = clean.match(/\bZoning(?:\s+(?:Code|Type|Designation|Description))?\s*[:\-]?\s+([A-Z0-9][A-Za-z0-9\-\/ ,&()]{1,60}?)(?=\s+(?:Year|Lot|HOA|MLS|Parcel|APN|Garage|Stories|Bath|Bed|Sq|Style|Status|Price|Type|Updated|Listed|Source)\b|$)/);
+  if (zoningM) r.zoningNotes = zoningM[1].trim();
 
   // APN / Parcel ID — "APN 1234567890" / "Parcel ID: 123-456-789" / "Parcel # 12.34.56"
   // APNs don't contain spaces (they use hyphens/dots as separators), so we stop at the first space.
@@ -241,6 +258,44 @@ const COMMERCIAL_SUBTYPES = ["Multifamily","Office","Hotel/Motel","Mixed Use","I
 
 const ADMIN_CONTACT_PHONE = "+1 520 633 6437";
 
+// Numbers that are NOT a seller's or realtor's direct line: listing sites' own support/HQ lines (a
+// pasted listing page often carries one in its footer or contact widget, and autofill used to grab
+// it as the "agent" phone) plus our own admin line. Keys are bare 10-digit numbers. Only numbers
+// confirmed on the site's own page, or matched by two separate sources, are listed -- add more as
+// they turn up, and keep backend/Code.gs's BLOCKED_PHONE_NUMBERS in sync (separate runtime).
+const BLOCKED_PHONE_NUMBERS = {
+  "8447597732": "Redfin's customer service line",
+  "2027597581": "Redfin's Washington, D.C. office line",
+  "8882730423": "Crexi's support line",
+  "8883674009": "Zillow's support line",
+  "8884663501": "Zillow/Trulia's partner support line",
+  "8006131303": "LoopNet's customer support line",
+  "8333996604": "LoopNet's advertising line",
+  "8008784166": "Realtor.com's customer care line",
+  "8007936107": "Auction.com's customer service line",
+  "8002802832": "Auction.com's main line",
+  "5206336437": "our own admin line"
+};
+
+// Bare 10 digits, with a leading country code 1 dropped; anything else comes back as plain digits.
+function phoneDigits(raw) {
+  const d = String(raw || "").replace(/\D/g, "");
+  return d.length === 11 && d[0] === "1" ? d.slice(1) : d;
+}
+
+// "" if this phone is fine to use as a seller/realtor's direct number, else a sentence saying why not.
+function blockedPhoneReason(raw) {
+  const d = phoneDigits(raw);
+  if (d.length !== 10) return ""; // too short/long to judge here -- other checks handle format
+  if (BLOCKED_PHONE_NUMBERS[d]) {
+    return `That's ${BLOCKED_PHONE_NUMBERS[d]}, not the seller's or realtor's direct number. Look for the listing agent's own phone on the page.`;
+  }
+  if (/^(\d)\1{9}$/.test(d) || d === "1234567890" || d === "0123456789" || /^\d{3}55501\d{2}$/.test(d)) {
+    return "That looks like a placeholder number, not a real one. Enter the seller's or realtor's actual phone.";
+  }
+  return "";
+}
+
 // Fixed preset for the STR (short-term rental) income path -- unlike the
 // long-term-rental path, the submitter never types an expense ratio here;
 // this business-set 25% is applied silently on top of whatever taxes and
@@ -255,6 +310,13 @@ const ARV_VS_ASKING_CLOSE_PCT = 0.05;
 // listing stay up during due diligence (cashDealOutcome) -- above it, the listing has to come off
 // market. A judgment call (65 to 70% in practice), tune here.
 const LISTING_CAN_STAY_UP_MAX_PCT_OF_ASKING = 0.70;
+
+// A listing priced this far below the researched As-Is Value that has ALSO sat on market longer than
+// STALE_LISTING_DAYS is almost never a bargain nobody noticed -- it usually means something is wrong
+// that the price doesn't show (flood zone, rezoning needed, no utilities, undisclosed repairs,
+// foundation problems). cashDealDetails flags it. Judgment calls, tune here.
+const STALE_LISTING_DAYS = 180;
+const DRASTICALLY_UNDERPRICED_PCT = 0.25; // asking is at least 25% below As-Is Value
 
 const LEAD_STATUSES = ["New", "Contacted", "Under Review", "Offer Sent", "Negotiation", "Verbally Accepted But Not Signed", "Offer Signed By Seller", "In Escrow To Close", "Hold Off", "Closed", "Dead"];
 
@@ -493,6 +555,10 @@ const steps = [
         <label class="field-label">Option 1 — Paste page text <span class="small-muted">(Ctrl+A → Ctrl+C on the listing page, paste here — works on Redfin, Crexi, Zillow, LoopNet, any site)</span></label>
         <textarea id="autofill-page-text" rows="5" placeholder="Go to the listing page, select all text (Ctrl+A), copy (Ctrl+C), then paste here. Captures address, beds, baths, sqft, price, agent name &amp; phone." style="font-size:13px;width:100%;box-sizing:border-box;resize:vertical;"></textarea>
 
+        <label class="field-label" style="margin-top:16px;">Redfin Zoning tab <span class="small-muted">(optional — Redfin listings only)</span></label>
+        <p class="hint" style="margin-top:0;">Check whether the Redfin page has a <strong>"Zoning" tab</strong>. If it does, click it, copy what it shows, and paste it here. It's added to the auto-fill and to the comps prompt, so the comps get matched on zoning.</p>
+        <textarea id="autofill-zoning-text" rows="3" placeholder="Paste the Zoning tab text here (leave blank if the page has no Zoning tab)." style="font-size:13px;width:100%;box-sizing:border-box;resize:vertical;"></textarea>
+
         <label class="field-label" style="margin-top:16px;">Option 2 — Upload screenshot(s)</label>
         <input type="file" id="autofill-screenshots" accept="image/*" multiple style="margin-top:4px;">
         <p class="hint" style="margin-top:4px;">Processed free in your browser via OCR.</p>
@@ -511,7 +577,7 @@ const steps = [
       ["street","city","state","zip","beds","baths","sqft","acreage","askingPrice","yearBuilt",
        "sellerContactName","sellerContactPhone","sellerContactEmail","sourceLink","assetType","units",
        "priceSought","priceReasoning","arv","rehabEstimate","rehabEstimateLow","rehabEstimateHigh",
-       "rehabAiText","parcelIds","_autofillUrl"].forEach(k => { delete answers[k]; });
+       "rehabAiText","parcelIds","_autofillUrl","daysOnMarket","zoningNotes","redFlagInvestigationNotes"].forEach(k => { delete answers[k]; });
       root.querySelector("#autofill-skip-btn").onclick = () => goTo(nextIndex(stepIndex));
 
       root.querySelector("#autofill-run-btn").onclick = async () => {
@@ -560,6 +626,10 @@ const steps = [
           }
         }
 
+        // Full Zoning tab text beats the short "Zoning: ..." snippet the page-text parser may have caught.
+        const zoningTabText = root.querySelector("#autofill-zoning-text").value.trim();
+        if (zoningTabText) extracted.zoningNotes = zoningTabText.slice(0, 1500);
+
         if (Object.keys(extracted).length === 0) return;
 
         // Apply freshly extracted data
@@ -586,12 +656,16 @@ const steps = [
         if (extracted.assetType === "Residential Property (1-4 units)") answers.units = "1";
         if (extracted.assetType === "Land") { answers.units = "1"; answers.dealType = "Cash Deal"; }
         if (extracted.landZoning) answers.landZoning = extracted.landZoning;
+        if (extracted.daysOnMarket) answers.daysOnMarket = extracted.daysOnMarket;
+        if (extracted.zoningNotes) answers.zoningNotes = extracted.zoningNotes;
 
         // Build preview card
         const rows = [
           ["Address", [extracted.street, extracted.city, extracted.state, extracted.zip].filter(Boolean).join(", ")],
           ["Asset Type", extracted.assetType || ""],
           ["Land Zoning", extracted.landZoning || ""],
+          ["Zoning (Redfin)", extracted.zoningNotes ? extracted.zoningNotes.slice(0, 140) + (extracted.zoningNotes.length > 140 ? "…" : "") : ""],
+          ["Days on Market", extracted.daysOnMarket || ""],
           ["Parcel ID / APN", extracted.parcelIds || ""],
           ["Asking Price", extracted.price ? "$" + Number(String(extracted.price).replace(/[^0-9.]/g, "")).toLocaleString() + "  ·  For sale listing" : ""],
           ["Beds / Baths / Sqft", [extracted.beds && extracted.beds + " bd", extracted.baths && extracted.baths + " ba", extracted.sqft && Number(extracted.sqft).toLocaleString() + " sqft"].filter(Boolean).join("  ·  ")],
@@ -631,6 +705,7 @@ const steps = [
 
         <label class="field-label">Their phone</label>
         <input type="tel" id="sc-phone-input" placeholder="(555) 555-5555">
+        <div class="error-text" id="sc-phone-error"></div>
 
         <label class="field-label">Their email</label>
         <input type="email" id="sc-email-input" placeholder="name@example.com">
@@ -646,6 +721,11 @@ const steps = [
       answers.sellerContactEmail = root.querySelector("#sc-email-input").value.trim();
       let ok = true;
       toggleError(root, "#sc-name-error", !answers.sellerContactName); if (!answers.sellerContactName) ok = false;
+      const phoneProblem = answers.sellerContactPhone ? blockedPhoneReason(answers.sellerContactPhone) : "";
+      const phoneErrEl = root.querySelector("#sc-phone-error");
+      phoneErrEl.textContent = phoneProblem;
+      phoneErrEl.classList.toggle("show", !!phoneProblem);
+      if (phoneProblem) ok = false;
       const hasContact = !!(answers.sellerContactPhone || answers.sellerContactEmail);
       toggleError(root, "#sc-contact-error", !hasContact); if (!hasContact) ok = false;
       return ok;
@@ -1683,6 +1763,18 @@ const steps = [
           formula, no override) and feeds the cash-offer option in Make Your Offers.</div>
         `}
 
+        ${isOnMarket && !isPreforeclosureAuction && !isBusiness ? `
+          <label class="field-label" style="margin-top:16px;">Days on market
+            <span class="small-muted">(from the listing page — on Redfin it's "days on Redfin". Auto-filled when the pasted page text had it.)</span></label>
+          <input type="number" id="days-on-market-input" min="0" placeholder="e.g. 210">
+          <div class="banner danger" id="stale-underpriced-banner" hidden style="margin-top:12px;"></div>
+          <div id="red-flag-notes-wrap" hidden style="margin-top:10px;">
+            <label class="field-label">What did the AI find, and what did you read yourself?
+              <span class="small-muted">(strongly encouraged — admin sees this)</span></label>
+            <textarea id="red-flag-notes-input" placeholder="e.g. FEMA flood zone on the north half, no public water within a mile, county says it needs a rezone..."></textarea>
+          </div>
+        ` : ""}
+
         ${isOnMarket ? `
           <div style="background:#fef9c3;border:1px solid #fde047;border-radius:6px;padding:12px 14px;margin-top:16px;font-size:13px;line-height:1.5;">
             <strong>Pricing guidance:</strong> for best results, aim for around 70% of the price posted online for an accepted offer. Only use our highest MAO as a last resort, and round down to the nearest $5,000. The tighter the deal, the less likely it is to sell.
@@ -1730,6 +1822,13 @@ const steps = [
         }
       }
       root.querySelector("#assessed-value-input").value = answers.countyAssessedValue || "";
+      const domInput = root.querySelector("#days-on-market-input");
+      if (domInput) {
+        domInput.value = answers.daysOnMarket || "";
+        const redFlagNotesInput = root.querySelector("#red-flag-notes-input");
+        redFlagNotesInput.value = answers.redFlagInvestigationNotes || "";
+        redFlagNotesInput.oninput = (e) => { answers.redFlagInvestigationNotes = e.target.value; };
+      }
       if (!isPreforeclosureAuction) {
         root.querySelector("#bottom-dollar-input").value = answers.bottomDollarPrice || "";
         root.querySelector("#cash-notes-input").value = answers.cashDealNotes || "";
@@ -1836,6 +1935,46 @@ const steps = [
             arvVsAskingBanner.hidden = true;
             answers.arvBelowAskingBlocked = false;
             answers.forcedSellerFinancingOnly = false;
+          }
+        }
+
+        // Red flag: listed drastically under the researched As-Is Value AND on market 180+ days. Nobody
+        // buys a real bargain that cheaply and lets it sit, so the price is hiding a problem. Advisory,
+        // not a hard stop -- the associate either skips the property or investigates it first.
+        {
+          const staleBanner = root.querySelector("#stale-underpriced-banner");
+          if (staleBanner) {
+            const notesWrap = root.querySelector("#red-flag-notes-wrap");
+            const dom = Number(root.querySelector("#days-on-market-input").value) || 0;
+            const askingNow = isResidential
+              ? (Number(root.querySelector("#asking-price-input")?.value) || 0)
+              : (Number(answers.askingPrice) || Number(answers.priceSought) || 0);
+            const asIsNow = isLand ? arv : Math.max(arv - rehab, 0);
+            const flagged = dom > STALE_LISTING_DAYS && askingNow > 0 && asIsNow > 0
+              && askingNow <= asIsNow * (1 - DRASTICALLY_UNDERPRICED_PCT);
+            answers.staleUnderpricedFlag = flagged;
+            staleBanner.hidden = !flagged;
+            notesWrap.hidden = !flagged;
+            if (flagged) {
+              const fmt$ = n => "$" + Math.round(n).toLocaleString();
+              const pctUnder = Math.round((1 - askingNow / asIsNow) * 100);
+              const subject = `${addressLine || "[ADDRESS]"}${isLand && answers.acreage ? `, ${answers.acreage} acre(s)` : ""}${isLand && (answers.zoningNotes || answers.landZoning) ? `, zoning: ${answers.zoningNotes || answers.landZoning}` : ""}`;
+              const investigatePrompt = isLand
+                ? `Act as a skeptical land due diligence researcher. This land is listed at ${fmt$(askingNow)}, but comps put its as-is value at about ${fmt$(asIsNow)}, and it has been on the market for ${dom} days without selling. Explain the most likely reasons nobody has bought it, and identify red flags specific to this parcel: ${subject}. Check: flood zone (FEMA flood map) and wetlands; whether it needs rezoning or has zoning or use restrictions; legal road access (is it landlocked?); whether power, water, and sewer or septic suitability are nearby; easements, HOA or deed restrictions; back taxes or liens; environmental issues; and anything else that would explain the discount. For every claim, say where the information came from so I can verify it, and clearly separate confirmed facts from guesses. List the red flags first, then what I should check manually.`
+                : `Act as a skeptical real estate due diligence researcher. This ${isCommercial ? "property" : "house"} is listed at ${fmt$(askingNow)}, but comps put its as-is value at about ${fmt$(asIsNow)}, and it has been on the market for ${dom} days without selling. Explain the most likely reasons nobody has bought it, and identify red flags for: ${subject}. Look for signs of very high undisclosed repair costs or structural or foundation problems (foundation cracks or settling, roof, water damage, mold, termites, sewer line, outdated electrical, plumbing, or HVAC), flood zone, title issues or liens, permit or unpermitted work problems, neighborhood or lot issues${isCommercial ? ", environmental issues, tenant or lease problems, and vacancy" : ""}, and anything in the listing history (price drops, relists, pending then back on market, "as-is", "cash only", or "investor special" language). For every claim, say where the information came from so I can verify it, and clearly separate confirmed facts from guesses. List the red flags first, then what I should check manually.`;
+              staleBanner.innerHTML = `
+                <strong>Red flag: asking is ${pctUnder}% under the researched As-Is Value (${fmt$(askingNow)} vs ${fmt$(asIsNow)}), and it's been on market ${dom} days.</strong>
+                <br><span class="small-muted">A listing priced this far under value that still hasn't sold after 6+ months usually means
+                something is wrong that the price doesn't show. ${isLand
+                  ? "For land, that's often a flood zone, rezoning needed, no nearby utilities, or no legal access."
+                  : "For a house, that's often very high undisclosed repair costs or structural or foundation problems."}</span>
+                <br><br><strong>Two options:</strong> skip this one and move on to the next property, <em>or</em> investigate before you
+                text anyone. To investigate, copy the prompt below, ${googleAiHow}, and paste it in. Then
+                <strong>read through what it finds yourself</strong> instead of trusting the summary, and write down what you found in the notes box underneath.
+                <textarea readonly rows="7" style="width:100%; margin-top:8px; font-size:12px; font-family:'IBM Plex Mono', ui-monospace, monospace;">${escapeHtml(investigatePrompt)}</textarea>
+                <button type="button" class="btn secondary" id="red-flag-prompt-copy-btn" style="margin-top:8px;">Copy Prompt</button>`;
+              wireCopyPromptButton(staleBanner, "#red-flag-prompt-copy-btn", () => investigatePrompt);
+            }
           }
         }
 
@@ -1955,6 +2094,7 @@ const steps = [
           recomputeTriggerSelectors.push("#asking-price-input");
         }
       }
+      if (root.querySelector("#days-on-market-input")) recomputeTriggerSelectors.push("#days-on-market-input");
       recomputeTriggerSelectors.forEach(sel => {
         root.querySelector(sel).oninput = recomputeCashDeal;
       });
@@ -2082,6 +2222,10 @@ const steps = [
           : (answers.beds && answers.baths
               ? `${answers.beds} bedroom(s), ${answers.baths} bathroom(s), ${answers.sqft ? answers.sqft + " square feet" : "[SQUARE FEET]"}`
               : (answers.sqft ? `${answers.sqft} square feet` : "[BEDROOMS/BATHROOMS/SQUARE FEET]"));
+        // Pasted from the Zoning tab on Redfin listings (auto-fill step) -- lets the AI match comps on zoning.
+        const zoningLine = answers.zoningNotes && !isBusiness
+          ? `\n- Zoning details from the listing site's Zoning tab: ${answers.zoningNotes}`
+          : "";
         // Feeds both the "Current occupancy" line and the Income Approach paragraph below -- an
         // in-place NOI on a partially occupied or vacant property understates what it earns fully
         // leased, so Google AI needs to know the occupancy behind whatever NOI number it's given.
@@ -2112,7 +2256,7 @@ const steps = [
 
 Find recent comparable land sales (comps) and an estimated As-Is Value (current market value — this is NOT an after-repair or projected value, land doesn't get "fixed up") for this property:
 - Address: ${addressLine || "[SUBJECT ADDRESS]"}
-- Details: ${detailsPart}
+- Details: ${detailsPart}${zoningLine}
 
 For land, what a comp has in common matters more than how close it is. Search live for up to 3 properties that meet ALL of these rules, prioritizing the most recent and closest qualifying matches first, in this order of importance:
 1. Identical or equivalent zoning to the subject property — never treat a commercially-zoned parcel as comparable to a residentially-zoned one, even if they're next to each other.
@@ -2155,7 +2299,7 @@ AS-IS VALUE ESTIMATE: $[single best estimate]
 Find recent comparable SOLD properties and an estimated market value (ARV) for this property:
 - Address: ${addressLine || "[SUBJECT ADDRESS]"}
 - Asset Type: ${answers.assetSubtype || "[ASSET TYPE]"}
-- Size: ${detailsPart}${occupancyPart ? `
+- Size: ${detailsPart}${zoningLine}${occupancyPart ? `
 - Current occupancy: ${occupancyPart}` : ""}${liveNOI ? `
 - Current reported annual NOI: $${Number(liveNOI).toLocaleString()}` : ""}
 
@@ -2227,7 +2371,7 @@ ARV ESTIMATE: $[single best estimate]
 
 Find recent comparable sales (comps) and an estimated After Repair Value (ARV) for this property:
 - Address: ${addressLine || "[SUBJECT ADDRESS]"}
-- Details: ${detailsPart}
+- Details: ${detailsPart}${zoningLine}
 
 Search live for up to 3 properties that meet ALL of these rules, prioritizing the most recent and closest qualifying matches first:
 1. Sold within the last 12 months — strongly prefer comps sold within the last 6 months if there are enough to choose from. Comps older than 12 months don't count, no exceptions.
@@ -2443,6 +2587,11 @@ If this suggests the property is worth meaningfully less than expected, say so p
       const rHigh = Number(answers.rehabEstimateHigh) || 0;
       answers.rehabEstimate = rLow && rHigh ? String((rLow + rHigh) / 2) : String(rLow || rHigh || "");
       answers.countyAssessedValue = root.querySelector("#assessed-value-input").value;
+      const domEl = root.querySelector("#days-on-market-input");
+      if (domEl) {
+        answers.daysOnMarket = domEl.value;
+        answers.redFlagInvestigationNotes = root.querySelector("#red-flag-notes-input").value.trim();
+      }
       if ((answers.assetType === "Residential Property (1-4 units)" || answers.assetType === "Land") && answers.arv) {
         answers.asIsValue = Number(answers.arv) - (Number(answers.rehabEstimate) || 0);
       }
@@ -3559,6 +3708,7 @@ If this suggests the property is worth meaningfully less than expected, say so p
             script = `Hi ${sellerName}, saw ${addressLine} is for sale. Would you be open to ${financeClause}?`;
           }
           scriptWrap.innerHTML = `
+            ${recipientBannerHtml()}
             ${script ? `
               <div class="banner info">
                 <strong>Text this:</strong>
@@ -3584,6 +3734,7 @@ If this suggests the property is worth meaningfully less than expected, say so p
               </div>
             ` : ""}
           `;
+          wireRecipientButtons(scriptWrap);
           if (script) wireCopyPromptButton(scriptWrap, "#land-offer-copy-btn", () => script);
           if (!cashDeclined && pushbackText) wireCopyPromptButton(scriptWrap, "#land-pushback-copy-btn", () => pushbackText);
           if (!sfDeclined && financeClause) bindChoiceGroup(scriptWrap, "#land-sf-accept-group", "landSellerFinancingAccepted");
@@ -3712,8 +3863,9 @@ If this suggests the property is worth meaningfully less than expected, say so p
             <input type="checkbox" id="finance-declined-checkbox" ${financeDeclined ? "checked" : ""}>
             Seller already said no to seller financing
           </label>
+          <div style="margin-top:14px;">${recipientBannerHtml()}</div>
           ${script ? `
-            <div class="banner info" style="margin-top:14px;">
+            <div class="banner info">
               <strong>Text this:</strong>
               <br><span class="small-muted">${script}</span>
               <br><button type="button" class="btn secondary" id="offer-script-copy-btn" style="margin-top:8px;">Copy Text</button>
@@ -3774,6 +3926,7 @@ If this suggests the property is worth meaningfully less than expected, say so p
           answers.sellerDeclinedSellerFinancing = e.target.checked;
           renderOfferScript();
         };
+        wireRecipientButtons(wrap);
         wireCopyPromptButton(wrap, "#offer-script-copy-btn", () => script);
         wireCopyPromptButton(wrap, "#down-payment-script-copy-btn", () => downPaymentResponse);
         wireCopyPromptButton(wrap, "#who-buyer-script-copy-btn", () => whoBuyerScript);
@@ -4191,6 +4344,7 @@ function buildAnswerRows() {
     rows.push(
       ["Approximate As-Is Value (Chase)", answers.chaseEstimate || "—"],
       ["Asking Price", answers.askingPrice || "—"],
+      ["Days on Market", answers.daysOnMarket || "—"],
       ["ARV", answers.arv || "—"],
       ["As-Is Value", answers.asIsValue || "—"],
       ["Pictures Link", answers.picturesLink || "—"],
@@ -4202,7 +4356,9 @@ function buildAnswerRows() {
       ["CMA Screenshots", (answers.cmaScreenshotUrls || []).join("\n") || "—"],
       [answers.assetType === "Land" ? "As-Is Value Range (AI Comps)" : "ARV Range (AI Comps)", answers.arvRange || "—"],
       ["Bottom Dollar Price", answers.bottomDollarPrice || "—"],
-      ["Notes (Why Sell / Good Lead)", answers.cashDealNotes || "—"]
+      ["Notes (Why Sell / Good Lead)", answers.cashDealNotes || "—"],
+      ["Zoning Notes (Redfin)", answers.zoningNotes || "—"],
+      ["Red Flag Investigation Notes", answers.redFlagInvestigationNotes || "—"]
     );
     if (answers.assetType === "Commercial Property") {
       rows.push(
@@ -4401,6 +4557,27 @@ function wireCopyPromptButton(root, buttonSelector, getText) {
       prompt("Copy this prompt:", text);
     }
   };
+}
+
+// Who the offer text goes to -- collected on the Seller/Realtor Contact step, shown right above the
+// script on Make Your Offers so nobody has to flip back to look up the number or email.
+function recipientBannerHtml() {
+  const name = answers.sellerContactName;
+  const phone = answers.sellerContactPhone;
+  const email = answers.sellerContactEmail;
+  if (!name && !phone && !email) return "";
+  const copyBtn = (id, label) => `<button type="button" class="btn secondary" id="${id}" style="margin-left:8px; padding:4px 10px; font-size:12px;">${label}</button>`;
+  return `
+    <div class="banner info" style="margin-bottom:10px;">
+      <strong>Send this to:</strong> ${escapeHtml(name || "the seller/realtor")}
+      ${phone ? `<br><span class="small-muted">Phone: <strong>${escapeHtml(phone)}</strong></span>${copyBtn("recipient-phone-copy-btn", "Copy Phone")}` : ""}
+      ${email ? `<br><span class="small-muted">Email: <strong>${escapeHtml(email)}</strong></span>${copyBtn("recipient-email-copy-btn", "Copy Email")}` : ""}
+    </div>`;
+}
+
+function wireRecipientButtons(root) {
+  wireCopyPromptButton(root, "#recipient-phone-copy-btn", () => answers.sellerContactPhone);
+  wireCopyPromptButton(root, "#recipient-email-copy-btn", () => answers.sellerContactEmail);
 }
 
 function readFileAsBase64(file) {
@@ -4807,6 +4984,8 @@ async function submitLead(container) {
         estMortgageBalance: answers.estMortgageBalance || "",
         assetType: answers.assetType, assetSubtype: answers.assetSubtype,
         beds: answers.beds, baths: answers.baths, sqft: answers.sqft, sellerReportedSqft: answers.sellerReportedSqft, acreage: answers.acreage, landZoning: answers.landZoning,
+        zoningNotes: answers.zoningNotes || "", daysOnMarket: answers.daysOnMarket || "",
+        redFlagInvestigationNotes: answers.redFlagInvestigationNotes || "",
         landFreeAndClear: answers.landFreeAndClear || "", landWillingToWaitForDev: answers.landWillingToWaitForDev || "",
         dealType: answers.dealType, dealCategory: answers.dealCategory,
         arv: answers.arv, askingPrice: answers.askingPrice, chaseEstimate: answers.chaseEstimate, asIsValue: answers.asIsValue, picturesLink: answers.picturesLink, rehabEstimate: answers.rehabEstimate,
@@ -4962,18 +5141,22 @@ function restartWizard() {
 document.getElementById("restart-btn").onclick = restartWizard;
 document.getElementById("status-followup-reminder").innerHTML = FOLLOWUP_REMINDER;
 
-document.getElementById("save-progress-btn").onclick = () => {
-  // Every step only writes its fields into `answers` inside validate() (normally triggered by the
-  // Next button) -- so without this, anything typed into the CURRENT step but not yet advanced past
-  // was silently missing from the saved link. Run validate() here purely for that side effect (sync
-  // DOM -> answers), ignore its pass/fail, and clear any error highlights it triggers, since saving
-  // progress with required fields still blank is explicitly allowed.
+// Every step only writes its fields into `answers` inside validate() (normally triggered by the
+// Next button) -- so without this, anything typed into the CURRENT step but not yet advanced past
+// was silently missing from a saved link or CRM entry. Run validate() here purely for that side
+// effect (sync DOM -> answers), ignore its pass/fail, and clear any error highlights it triggers,
+// since saving progress with required fields still blank is explicitly allowed.
+function syncCurrentStepAnswers() {
   const stepContainer = document.getElementById("step-container");
   const currentStep = steps[stepIndex];
   if (currentStep.validate) {
     currentStep.validate(stepContainer);
     stepContainer.querySelectorAll(".error-text.show").forEach(el => el.classList.remove("show"));
   }
+}
+
+function copyResumeLink() {
+  syncCurrentStepAnswers();
   const url = buildShareUrl();
   window.history.replaceState(null, "", url);
   const message = "This saved link lets you pick up exactly where you left off. It's for your own use — anyone who has this link can see and resume this data, so don't share it with anyone else.";
@@ -4985,6 +5168,82 @@ document.getElementById("save-progress-btn").onclick = () => {
     });
   } else {
     prompt(message + "\n\nCopy this link:", url);
+  }
+}
+
+/* ---------- Personal CRM: save an in-progress cold lead under your own email ---------- */
+
+const CRM_STATUS_CONTACT = "Contact Initiated on Cold Lead";
+const CRM_STATUS_OFFER = "Offer sent to cold lead";
+const CRM_STATUS_PRELOI = "Auto Pre-LOI Before Contact"; // offers prepared before any contact; never emails admin
+const CRM_STATUSES = [CRM_STATUS_CONTACT, CRM_STATUS_OFFER, CRM_STATUS_PRELOI];
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function answersForCrm() {
+  const trimmed = {};
+  Object.keys(answers).forEach(k => {
+    if (!DERIVED_ANSWER_KEYS.includes(k)) trimmed[k] = answers[k];
+  });
+  return trimmed;
+}
+
+async function saveToCrm(status) {
+  syncCurrentStepAnswers();
+  let email = (answers.email || getRememberedEmail() || "").trim();
+  if (!EMAIL_PATTERN.test(email)) {
+    email = (prompt("Enter your email to save this lead into your CRM:", email) || "").trim();
+    if (!EMAIL_PATTERN.test(email)) {
+      if (email) alert("That doesn't look like a valid email address, so nothing was saved.");
+      return;
+    }
+  }
+  if (!answers.street && !answers.sellerContactName
+      && !confirm("This lead doesn't have an address or seller contact yet. Save it to your CRM anyway?")) return;
+  rememberEmail(email);
+  if (!answers.email) answers.email = email;
+  let res;
+  try {
+    res = await api("saveCrmEntry", { email, status, crmId: answers._crmId || "", stepIndex, answers: answersForCrm() });
+  } catch (err) {
+    res = { ok: false, error: "Couldn't reach the server." };
+  }
+  if (!res.ok) {
+    alert("Couldn't save to your CRM: " + (res.error || "unknown error"));
+    return;
+  }
+  answers._crmId = res.crmId;
+  alert(`Saved to your CRM as "${status}".\n\nFind it any time under Save My Progress > Open my CRM, using ${email}. Hit Resume there to pick this lead back up where you left off.`);
+}
+
+const saveMenuEl = document.getElementById("save-menu");
+function setSaveMenuOpen(open) {
+  saveMenuEl.hidden = !open;
+  document.getElementById("save-progress-btn").setAttribute("aria-expanded", open ? "true" : "false");
+  if (open) {
+    const email = (answers.email || getRememberedEmail() || "").trim();
+    document.getElementById("save-menu-email").textContent = email ? `(as ${email})` : "(you'll be asked for your email)";
+  }
+}
+document.getElementById("save-progress-btn").onclick = (e) => {
+  e.stopPropagation();
+  setSaveMenuOpen(saveMenuEl.hidden);
+};
+document.addEventListener("click", (e) => {
+  if (!saveMenuEl.hidden && !e.target.closest(".save-menu-wrap")) setSaveMenuOpen(false);
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !saveMenuEl.hidden) setSaveMenuOpen(false);
+});
+document.getElementById("save-link-btn").onclick = () => { setSaveMenuOpen(false); copyResumeLink(); };
+saveMenuEl.querySelectorAll("[data-crm-status]").forEach(btn => {
+  btn.onclick = () => { setSaveMenuOpen(false); saveToCrm(btn.dataset.crmStatus); };
+});
+document.getElementById("open-crm-btn").onclick = () => {
+  setSaveMenuOpen(false);
+  syncCurrentStepAnswers();
+  showStatusView();
+  if (EMAIL_PATTERN.test(document.getElementById("status-email-input").value.trim())) {
+    document.getElementById("status-lookup-btn").click();
   }
 };
 
@@ -5056,7 +5315,11 @@ document.getElementById("status-lookup-btn").onclick = async () => {
   msgEl.textContent = "Looking up your leads...";
   document.getElementById("status-leads-container").innerHTML = "";
 
-  const res = await api("getLeadsByEmail", { email });
+  const [res, crmRes] = await Promise.all([
+    api("getLeadsByEmail", { email }),
+    api("getCrmEntries", { email }).catch(() => ({ ok: false }))
+  ]);
+  renderCrmEntries(email, crmRes.ok ? crmRes.entries : []);
   if (!res.ok) {
     msgEl.className = "banner danger";
     msgEl.textContent = res.error || "Something went wrong.";
@@ -5064,12 +5327,69 @@ document.getElementById("status-lookup-btn").onclick = async () => {
   }
   if (res.leads.length === 0) {
     msgEl.className = "banner info";
-    msgEl.textContent = "No leads found for that email address.";
+    msgEl.textContent = crmRes.ok && crmRes.entries.length
+      ? "No submitted leads for that email address yet. Your saved CRM leads are above."
+      : "No leads found for that email address.";
     return;
   }
   msgEl.hidden = true;
   renderStatusResultsTable(email, res.leads);
 };
+
+/* ---------- Personal CRM list: tabs per status, Resume / Delete ---------- */
+let crmTabStatus = CRM_STATUS_PRELOI;
+function renderCrmEntries(email, entries) {
+  const section = document.getElementById("crm-section");
+  const wrap = document.getElementById("crm-entries");
+  section.hidden = entries.length === 0;
+  if (!entries.length) { wrap.innerHTML = ""; return; }
+  const tabs = CRM_STATUSES.map(s => [s, entries.filter(e => e.status === s).length]);
+  if (!tabs.some(([s, n]) => s === crmTabStatus && n)) {
+    const first = tabs.find(([, n]) => n);
+    crmTabStatus = first ? first[0] : CRM_STATUS_PRELOI;
+  }
+  const shown = entries.filter(e => e.status === crmTabStatus);
+  wrap.innerHTML = `
+    <div style="display:flex; gap:6px; flex-wrap:wrap; margin:10px 0;">
+      ${tabs.map(([s, n]) => `<button type="button" class="btn ${s === crmTabStatus ? "primary" : "secondary"}" data-crm-tab="${escapeHtml(s)}">${escapeHtml(s)} (${n})</button>`).join("")}
+    </div>
+    ${shown.length ? `<table class="crm-table"><thead><tr><th>Updated</th><th>Address</th><th>Asking</th><th>Seller contact</th><th></th></tr></thead><tbody>
+      ${shown.map(e => `<tr style="cursor:default">
+        <td>${formatDate(e.updatedAt)}</td>
+        <td>${escapeHtml(e.street || "")}<br><span class="small-muted">${escapeHtml(e.city || "")}, ${escapeHtml(e.state || "")} ${escapeHtml(e.zip || "")}</span></td>
+        <td>${escapeHtml(String(e.askingPrice || ""))}</td>
+        <td>${escapeHtml(e.sellerContactName || "")}<br><span class="small-muted">${escapeHtml(e.sellerContactPhone || "")}</span></td>
+        <td style="white-space:nowrap">
+          <button type="button" class="btn secondary" data-crm-notes="${escapeHtml(e.crmId)}">Notes</button>
+          <button type="button" class="btn primary" data-crm-resume="${escapeHtml(e.crmId)}">Resume</button>
+          <button type="button" class="link-btn" data-crm-delete="${escapeHtml(e.crmId)}">Delete</button>
+        </td></tr>`).join("")}
+    </tbody></table>` : `<p class="small-muted">Nothing saved under this tab yet.</p>`}
+    <pre id="crm-notes-box" class="small-muted" style="white-space:pre-wrap; margin-top:10px;" hidden></pre>`;
+  wrap.querySelectorAll("[data-crm-tab]").forEach(b => b.onclick = () => { crmTabStatus = b.dataset.crmTab; renderCrmEntries(email, entries); });
+  wrap.querySelectorAll("[data-crm-resume]").forEach(b => b.onclick = async () => {
+    const r = await api("getCrmEntry", { email, crmId: b.dataset.crmResume });
+    if (!r.ok) { alert(r.error || "Couldn't open that lead."); return; }
+    Object.keys(answers).forEach(k => delete answers[k]);
+    Object.assign(answers, r.entry.answers || {});
+    answers._crmId = r.entry.crmId;
+    document.getElementById("status-view").hidden = true;
+    document.getElementById("public-view").hidden = false;
+    goTo(Math.min(Math.max(r.entry.stepIndex || 0, 0), steps.length - 1));
+  });
+  wrap.querySelectorAll("[data-crm-notes]").forEach(b => b.onclick = async () => {
+    const r = await api("getCrmEntry", { email, crmId: b.dataset.crmNotes });
+    const box = document.getElementById("crm-notes-box");
+    box.textContent = r.ok ? (r.entry.answers.preLoiNotes || "No notes saved on this lead.") : (r.error || "Couldn't load notes.");
+    box.hidden = false;
+  });
+  wrap.querySelectorAll("[data-crm-delete]").forEach(b => b.onclick = async () => {
+    if (!confirm("Delete this saved lead from your CRM?")) return;
+    const r = await api("deleteCrmEntry", { email, crmId: b.dataset.crmDelete });
+    if (!r.ok) { alert(r.error || "Couldn't delete."); return; }
+    renderCrmEntries(email, entries.filter(e => e.crmId !== b.dataset.crmDelete));
+  });
+}
 
 function buildLeadFields(lead) {
   const fields = [
@@ -5109,6 +5429,7 @@ function buildLeadFields(lead) {
     fields.push(
       ["Chase Bank Estimated Value", lead["Chase Estimated Value"] || "—"],
       ["Asking Price", lead["Asking Price"] || "—"],
+      ["Days on Market", lead["Days On Market"] || "—"],
       ["ARV", lead["ARV"] || "—"],
       ["As-Is Value", lead["As-Is Value"] || "—"],
       ["Pictures Link", lead["Pictures Link"] || "—"],
@@ -5119,7 +5440,9 @@ function buildLeadFields(lead) {
       ["CMA Screenshots", lead["CMA Screenshot URLs"] || "—"],
       ["ARV Range (AI Comps)", lead["ARV Range"] || "—"],
       ["Bottom Dollar Price", lead["Bottom Dollar Price"] || "—"],
-      ["Notes (Why Sell / Good Lead)", lead["Cash Deal Notes"] || "—"]
+      ["Notes (Why Sell / Good Lead)", lead["Cash Deal Notes"] || "—"],
+      ["Zoning Notes (Redfin)", lead["Zoning Notes"] || "—"],
+      ["Red Flag Investigation Notes", lead["Red Flag Investigation Notes"] || "—"]
     );
     if (lead["Asset Type"] === "Commercial Property") {
       fields.push(
