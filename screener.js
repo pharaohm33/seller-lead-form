@@ -232,30 +232,67 @@ const scrBmHref = code => "javascript:" + encodeURIComponent(code.replace(/\n/g,
 
 function scrNorm(x) { return String(x || "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\b(street|st|drive|dr|avenue|ave|road|rd|lane|ln|court|ct|place|pl|boulevard|blvd|circle|cir|way|terrace|ter)\b/g, "").replace(/\s+/g, " ").trim(); }
 
+const scrSet = (id, v) => { const el = document.getElementById(id); if (el) { el.value = v; el.dispatchEvent(new Event("input", { bubbles: true })); } };
+const scrMsg = (id, t, ok) => { const m = document.getElementById(id); if (m) { m.textContent = t; m.style.color = ok === false ? "#b45309" : ok ? "#166534" : ""; } };
+const scrNumOf = x => Number(String(x || "").replace(/[^0-9.]/g, ""));
+
+// Google AI ARV comps answer -> ARV low/high (the wizard's own parser)
+function scrApplyComps(text, msgId = "scr-msg-comps") {
+  const land = SCR.cfg.asset === "land", r = parseAICompsResponse(text, land, false);
+  if (!(r.arvLow || r.arvHigh || r.arvEstimate)) { scrMsg(msgId, `Couldn't find ${land ? "an As-Is Value range" : "an ARV range"}. Paste the full answer including the ---COMPS SUMMARY--- block.`, false); return false; }
+  scrSet("scr-arv-low", r.arvLow || r.arvEstimate); scrSet("scr-arv-high", r.arvHigh || r.arvEstimate);
+  SCR.sel.comps = { sold: r.soldComps, active: r.activeComps };
+  scrMsg(msgId, `Parsed: ${land ? "as-is value" : "ARV"} $${(r.arvLow || r.arvEstimate).toLocaleString()} to $${(r.arvHigh || r.arvEstimate).toLocaleString()} (${r.soldComps.length} sold, ${r.activeComps.length} active comps). The offer uses the middle.`, true);
+  return true;
+}
+
+// Google AI rehab answer -> rehab low/high (the wizard's own parseRehabText)
+function scrApplyRehab(text, msgId = "scr-msg-rehab") {
+  const r = parseRehabText(text);
+  if (r.low == null) { scrMsg(msgId, "Couldn't find a dollar amount in that answer. Enter rehab low/high manually.", false); return false; }
+  SCR.sel.rehabAiText = text.slice(0, 6000);
+  scrSet("scr-rehab-low", r.low); scrSet("scr-rehab-high", r.high != null ? r.high : r.low);
+  scrMsg(msgId, `Parsed: rehab $${r.low.toLocaleString()} to $${(r.high != null ? r.high : r.low).toLocaleString()}. The offer uses the middle.`, true);
+  return true;
+}
+
+// Propwire: the bookmarklet's JSON, or the raw text of the property page (select all, copy)
+function scrParsePropwireText(t) {
+  const g = r => { const m = t.match(r); return m ? m[1] : ""; };
+  return { src: "propwire", address: g(/^\s*([^\n]+)\n\s*[A-Za-z .]+, [A-Z]{2} \d{5}/m),
+    value: g(/\$([\d,]+)\s*\n\s*Estimated Property Value/), mortgage: g(/\$([\d,]+)\s*\n\s*Est\. Mortgage Balance/),
+    equityAmt: g(/\$([\d,]+)\s*\n\s*Est\. Equity/), equityPct: g(/(\d+(?:\.\d+)?)%\s*\n\s*Equity/),
+    lastSold: g(/Last sold ([A-Za-z]+ \d+, \d{4})/), owner: g(/Owner Name\s*\n\s*([^\n]+)/),
+    tags: ["Free & Clear", "High Equity", "Absentee Owners", "Tired Landlords", "Vacant", "Pre-Foreclosure", "Tax Delinquent", "Out-of-State Owners", "Senior Owner"]
+      .filter(x => t.replace(/Tax Delinquent\?/g, "").indexOf(x) > -1), url: "" };
+}
+
+function scrApplyPropwire(text, msgId = "scr-msg-pw") {
+  let o = null; try { o = JSON.parse(text); } catch (e) {}
+  if (!o || o.src !== "propwire") o = scrParsePropwireText(text);
+  if (o.equityPct === "" && !o.value) { scrMsg(msgId, "Couldn't find Propwire equity or value. Open the property's detail page, then copy with the bookmarklet (or select all and copy) and paste again.", false); return false; }
+  const d = SCR.sel.d, same = !o.address || scrNorm(o.address).includes(scrNorm(d.street).split(" ").slice(0, 2).join(" "));
+  if (o.equityPct !== "") scrSet("scr-pw-eq", scrNumOf(o.equityPct));
+  if (o.value) scrSet("scr-pw-val", scrNumOf(o.value));
+  if (o.mortgage !== "") scrSet("scr-pw-mort", scrNumOf(o.mortgage));
+  if (o.owner) scrSet("scr-owner", o.owner);
+  scrSet("scr-pw-notes", [o.tags && o.tags.length ? o.tags.join(", ") : "", o.lastSold ? "Last sold " + o.lastSold : "", o.url].filter(Boolean).join(" | "));
+  scrMsg(msgId, `Parsed: ${o.equityPct !== "" ? o.equityPct + "% equity" : "value " + o.value}.${same ? "" : " WARNING: Propwire address (" + o.address + ") doesn't look like " + d.street + "."}`, same);
+  return true;
+}
+
+// "Fill from clipboard": works out which kind of data is on the clipboard and drops it in its box + parses it
 async function scrFillFromClipboard() {
-  const msg = t => { const m = document.getElementById("scr-fill-msg"); if (m) m.textContent = t; };
+  const msg = t => scrMsg("scr-fill-msg", t);
   let t = "";
-  try { t = (await navigator.clipboard.readText()).trim(); } catch (e) { msg("Couldn't read the clipboard. Allow clipboard access for this site, or paste into the boxes."); return; }
+  try { t = (await navigator.clipboard.readText()).trim(); } catch (e) { msg("Couldn't read the clipboard. Allow clipboard access, or paste into the boxes below and press Parse."); return; }
   if (!t) { msg("Clipboard is empty."); return; }
-  const set = (id, v) => { const el = document.getElementById(id); if (el) { el.value = v; el.dispatchEvent(new Event("input", { bubbles: true })); } };
+  const into = (id) => { const el = document.getElementById(id); if (el) el.value = t; };
   let o = null; try { o = JSON.parse(t); } catch (e) {}
-  if (o && o.src === "propwire") {
-    const n = x => Number(String(x || "").replace(/[^0-9.]/g, ""));
-    const d = SCR.sel.d, same = scrNorm(o.address).includes(scrNorm(d.street).split(" ").slice(0, 2).join(" "));
-    if (o.equityPct !== "") set("scr-pw-eq", n(o.equityPct));
-    if (o.value) set("scr-pw-val", n(o.value));
-    if (o.mortgage !== "") set("scr-pw-mort", n(o.mortgage));
-    if (o.owner) set("scr-owner", o.owner);
-    set("scr-pw-notes", [o.tags && o.tags.length ? o.tags.join(", ") : "", o.lastSold ? "Last sold " + o.lastSold : "", o.url].filter(Boolean).join(" | "));
-    msg(`Propwire filled: ${o.equityPct || "?"}% equity.${same ? "" : " WARNING: Propwire address (" + o.address + ") doesn't look like " + d.street + ". Check you copied the right property."}`);
-  } else if (/COMPS SUMMARY|ARV (RANGE|ESTIMATE)|AS-IS VALUE/i.test(t)) {
-    set("scr-ai", t); msg("Google AI comps filled (ARV range).");
-  } else if (SCR.cfg.asset !== "land" && /repair|rehab|renovat|cost/i.test(t) && parseRehabText(t).low != null) {
-    const r = parseRehabText(t);
-    SCR.sel.rehabAiText = t.slice(0, 6000);
-    set("scr-rehab-low", r.low); set("scr-rehab-high", r.high != null ? r.high : r.low);
-    msg(`Rehab filled from Google AI: $${r.low.toLocaleString()} to $${(r.high != null ? r.high : r.low).toLocaleString()} (the offer uses the middle).`);
-  } else msg("Clipboard doesn't look like Propwire or Google AI data. Use the bookmarklets on those pages first.");
+  if ((o && o.src === "propwire") || /Estimated Property Value/.test(t)) { into("scr-in-pw"); scrApplyPropwire(t); msg("Clipboard looked like Propwire data."); }
+  else if (/COMPS SUMMARY|ARV (RANGE|ESTIMATE)|AS-IS VALUE/i.test(t)) { into("scr-in-comps"); scrApplyComps(t); msg("Clipboard looked like Google AI comps."); }
+  else if (SCR.cfg.asset !== "land" && parseRehabText(t).low != null) { into("scr-in-rehab"); scrApplyRehab(t); msg("Clipboard looked like a Google AI rehab answer."); }
+  else msg("Clipboard doesn't look like Propwire or Google AI data.");
 }
 
 /* ---------- UI ---------- */
@@ -307,8 +344,25 @@ function scrPrepare(id) {
       <button type="button" class="btn primary" id="scr-fill">Fill from clipboard</button>
     </div>
     <p id="scr-fill-msg" class="small-muted" style="margin:0 0 10px;">Each Ask button copies the prompt and opens Google AI with it. On the answer (and on the Propwire property page) press the matching bookmarklet, then press Fill from clipboard.</p>
-    <label>Paste Google AI response (parses the summary block)</label>
-    <textarea id="scr-ai" rows="4" placeholder="Paste the full response, including ---COMPS SUMMARY---"></textarea>
+    <div style="margin:10px 0;">
+      <label>Google AI: ARV comps answer</label>
+      <textarea id="scr-in-comps" rows="3" placeholder="Paste the full answer, including ---COMPS SUMMARY---"></textarea>
+      <button type="button" class="btn primary" id="scr-in-comps-btn" style="margin-top:6px;">Parse comps → ARV</button>
+      <span id="scr-msg-comps" class="small-muted" style="margin-left:8px;"></span>
+    </div>
+    ${land ? "" : `    <div style="margin:10px 0;">
+      <label>Google AI: rehab answer</label>
+      <textarea id="scr-in-rehab" rows="3" placeholder="Paste the full answer to the rehab prompt"></textarea>
+      <button type="button" class="btn primary" id="scr-in-rehab-btn" style="margin-top:6px;">Parse rehab</button>
+      <span id="scr-msg-rehab" class="small-muted" style="margin-left:8px;"></span>
+    </div>
+`}
+    <div style="margin:10px 0;">
+      <label>Propwire (bookmarklet copy, or select-all text from the property page)</label>
+      <textarea id="scr-in-pw" rows="3" placeholder="Paste Propwire data"></textarea>
+      <button type="button" class="btn primary" id="scr-in-pw-btn" style="margin-top:6px;">Parse Propwire</button>
+      <span id="scr-msg-pw" class="small-muted" style="margin-left:8px;"></span>
+    </div>
     <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; margin:10px 0;">
       <div><label>${land ? "As-is value low" : "ARV low"}</label><input type="number" id="scr-arv-low"></div>
       <div><label>${land ? "As-is value high" : "ARV high"}</label><input type="number" id="scr-arv-high"></div>
@@ -350,16 +404,11 @@ function scrPrepare(id) {
     scrAskGoogleAi(scrRehabPrompt(d, arvMid));
     document.getElementById("scr-fill-msg").textContent = `Rehab prompt (ARV ${scrMoney(arvMid)}) copied and opened in Google AI. Press the bookmarklet on the answer, then Fill from clipboard.`;
   };
-  document.getElementById("scr-ai").addEventListener("input", e => {
-    const t = e.target.value.trim(); if (!t) return;
-    const r = parseAICompsResponse(t, land, false);
-    if (r.arvLow || r.arvHigh) {
-      document.getElementById("scr-arv-low").value = r.arvLow || r.arvEstimate;
-      document.getElementById("scr-arv-high").value = r.arvHigh || r.arvEstimate;
-      SCR.sel.comps = { sold: r.soldComps, active: r.activeComps };
-      read();
-    }
-  });
+  const wire = (box, fn, msgId) => { const btn = document.getElementById(box + "-btn"); if (!btn) return;
+    btn.onclick = () => { const t = document.getElementById(box).value.trim(); if (!t) { scrMsg(msgId, "Paste the answer first.", false); return; } fn(t); }; };
+  wire("scr-in-comps", scrApplyComps, "scr-msg-comps");
+  wire("scr-in-rehab", scrApplyRehab, "scr-msg-rehab");
+  wire("scr-in-pw", scrApplyPropwire, "scr-msg-pw");
   read();
 }
 
