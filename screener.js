@@ -19,6 +19,10 @@ const SCR = {
   // (it came out at 40% on Ashurst; bigger rehab or a different ARV/price mix moves it).
   CARRY_PCT_OF_ARV: 420000 / 600500, CASH_PCT_OF_CARRY: 200000 / 420000, CARRY_DOWN: 128000 / 420000, CASHBACK_PCT: 27548 / 420000,
   LTV_MIN: 0.10, LTV_MAX: 0.70,
+  // Buyer profit at the balloon exit = the generator's "Sale + CF" column: ARV x (1+3%)^yrs less 6% sale costs, less the
+  // seller carry, less the hard money loan, less the interest paid (static CF). Must be at least the greater of
+  // $35,000 per year of the hold or 10% of the carry purchase price, or the carry price steps down until it is.
+  APPRECIATION: 0.03, SALE_COSTS: 0.06, MIN_PROFIT_PER_YEAR: 35000, MIN_PROFIT_PCT_OF_PRICE: 0.10, MIN_CARRY_PCT_OF_ARV: 0.40,
   GEN: { esc1: 0.02, esc2: 0.015, pts: 0.02, agent: 0.03, acq: 0.50, taf: 0.025, sellerClosingShare: 0.5 },
   // Full rehab / gut: cash back to the buyer at closing = the full holding cost (24 months of hard money
   // interest) + the greater of $30,000 or 6% of ARV, so there is room for the assignment fee and extra cash
@@ -114,34 +118,47 @@ function scrPrice(d, f) {
   const months = f.gut ? 24 : 12;
   const suite = computeMaoSuite(arvMid, rehab, land ? "Land" : "Residential Property (1-4 units)", undefined, "On-Market");
   let cashOffer, carryOffer = 0, carryDown = 0, mao, ltv = 0, ltvNote = "";
-  const asIs = arvMid - rehab;
-  let hmLoan = 0, hmMonthly = 0, gutPlan = null, modelCarry = null, modelCash = null;
+  const asIs = arvMid - rehab, years = months / 12;
+  let hmLoan = 0, hmMonthly = 0, gutPlan = null, modelCarry = null, modelCash = null, profit = null, priceNote = "";
   if (land) { mao = suite.maoCash; cashOffer = scrRound(mao); }
   else {
     mao = suite.maoHardMoney20;                                     // reference only
-    const carryRaw = Math.round(SCR.CARRY_PCT_OF_ARV * arvMid / 1000) * 1000;
-    carryOffer = list ? Math.min(list, carryRaw) : carryRaw;
-    cashOffer = scrRound(SCR.CASH_PCT_OF_CARRY * carryOffer);
-    carryDown = scrRound(SCR.CARRY_DOWN * carryOffer);
-    // Solve the hard money LTV so buyer cash back = the target (standard: Ashurst's % of carry; gut: full holding
-    // cost + the greater of $30k or 6% of ARV). cashBack rises with the loan, so bisection is safe.
     const buffer = Math.max(SCR.GUT_BUFFER_MIN, SCR.GUT_BUFFER_PCT * arvMid);
-    const targetFor = loan => f.gut ? loan * SCR.HM_RATE / 100 / 12 * months + buffer : SCR.CASHBACK_PCT * carryOffer;
-    const gap = r => scrModel(carryOffer, carryDown, asIs * r, asIs).cashBack - targetFor(asIs * r);
-    let lo = SCR.LTV_MIN, hi = SCR.LTV_MAX;
-    if (gap(hi) < 0) { ltv = hi; ltvNote = "capped at the max LTV: the loan can't fully fund the target cash back"; }
-    else if (gap(lo) > 0) { ltv = lo; ltvNote = "at the minimum LTV already"; }
-    else { for (let i = 0; i < 40; i++) { const mid = (lo + hi) / 2; if (gap(mid) < 0) lo = mid; else hi = mid; } ltv = Math.round((lo + hi) / 2 * 1000) / 10 / 100; }
-    hmLoan = asIs * ltv; hmMonthly = hmLoan * SCR.HM_RATE / 100 / 12;
+    const profitFor = (carry, down, loan) => arvMid * Math.pow(1 + SCR.APPRECIATION, years) * (1 - SCR.SALE_COSTS) - (carry - down) - loan - loan * SCR.HM_RATE / 100 * years;
+    const build = carry => {
+      const cash = scrRound(SCR.CASH_PCT_OF_CARRY * carry);
+      let down = scrRound(SCR.CARRY_DOWN * carry), note = "";
+      const targetFor = loan => f.gut ? loan * SCR.HM_RATE / 100 / 12 * months + buffer : SCR.CASHBACK_PCT * carry;
+      const gap = (r, cac) => scrModel(carry, cac, asIs * r, asIs).cashBack - targetFor(asIs * r);
+      let lo = SCR.LTV_MIN, hi = SCR.LTV_MAX, r;
+      if (gap(hi, down) < 0) {
+        // Shortfall at the max LTV: cut the seller's cash at closing until the buyer's cash back hits the target.
+        r = hi; let cLo = 0, cHi = down;
+        if (gap(r, 0) < 0) { down = 0; note = "even with $0 to the seller the loan can't fund the target cash back"; }
+        else { for (let i = 0; i < 40; i++) { const m = (cLo + cHi) / 2; if (gap(r, m) < 0) cHi = m; else cLo = m; } down = scrRound((cLo + cHi) / 2); note = "max LTV reached, so the seller's cash at closing was reduced to cover the target cash back"; }
+      } else if (gap(lo, down) > 0) { r = lo; note = "at the minimum LTV already"; }
+      else { for (let i = 0; i < 40; i++) { const m = (lo + hi) / 2; if (gap(m, down) < 0) lo = m; else hi = m; } r = Math.round((lo + hi) / 2 * 1000) / 1000; }
+      const loan = asIs * r;
+      return { carry, cash, down, r, note, loan, profit: profitFor(carry, down, loan), minProfit: Math.max(SCR.MIN_PROFIT_PER_YEAR * years, SCR.MIN_PROFIT_PCT_OF_PRICE * carry) };
+    };
+    const carryRaw = Math.round(SCR.CARRY_PCT_OF_ARV * arvMid / 1000) * 1000;
+    let c = build(list ? Math.min(list, carryRaw) : carryRaw);
+    const startCarry = c.carry;
+    while (c.profit < c.minProfit && c.carry - 1000 >= SCR.MIN_CARRY_PCT_OF_ARV * arvMid) c = build(c.carry - 1000);
+    if (c.carry < startCarry) priceNote = `carry price reduced from ${scrMoney(startCarry)} to ${scrMoney(c.carry)} to keep the buyer's profit at the minimum`;
+    carryOffer = c.carry; cashOffer = c.cash; carryDown = c.down; ltv = c.r; ltvNote = c.note;
+    hmLoan = c.loan; hmMonthly = hmLoan * SCR.HM_RATE / 100 / 12;
     modelCarry = scrModel(carryOffer, carryDown, hmLoan, asIs);
     modelCash = scrModel(cashOffer, cashOffer, hmLoan, asIs);
-    if (f.gut) gutPlan = { holding: hmMonthly * months, buffer, target: targetFor(hmLoan), estClosing: modelCarry.closing, cashBack: modelCarry.cashBack, shortfall: ltvNote.startsWith("capped") ? targetFor(hmLoan) - modelCarry.cashBack : 0 };
+    profit = { sale: c.profit, min: c.minProfit, ok: c.profit >= c.minProfit, years, withCashBack: c.profit + modelCarry.cashBack };
+    if (f.gut) gutPlan = { holding: hmMonthly * months, buffer, target: modelCarry.cashBack, cashBack: modelCarry.cashBack, estClosing: modelCarry.closing, shortfall: 0 };
   }
   const why = [];
   if (d.dom !== null && d.dom < SCR.cfg.minDom) why.push(`${d.dom} days on market`);
+  if (profit && !profit.ok) why.push(`buyer profit ${scrMoney(profit.sale)} is under the ${scrMoney(profit.min)} minimum even at the lowest carry price`);
   if (lowEquity) why.push(`owner equity ${ownerEquityPct.toFixed(0)}% < ${SCR.cfg.minOwnerEquityPct}%`);
   const offerToList = list ? cashOffer / list * 100 : null;   // informational only: low and dual offers are fine
-  return { ready: true, land, arvMid, rehab, rehabSource, asIs, months, suite, mao, cashOffer, carryOffer, carryDown, hmLoan, hmMonthly, ltv, ltvNote,
+  return { ready: true, land, arvMid, rehab, rehabSource, asIs, months, suite, mao, cashOffer, carryOffer, carryDown, hmLoan, hmMonthly, ltv, ltvNote, profit, priceNote,
     reserves: hmMonthly * months, gutPlan, modelCarry, modelCash, ownerEquityPct, offerToList, equityAfterRehab: arvMid - list - rehab, qualifies: why.length === 0, why };
 }
 
@@ -199,6 +216,7 @@ function scrNotes(d, f, p, loi, resume) {
     const g = p.gutPlan;
     L.push(`- GUT cash at closing: buyer gets ${scrMoney(g.cashBack)} back = holding cost ${scrMoney(g.holding)} (${p.months} mo of hard money interest) + cushion ${scrMoney(g.buffer)} (greater of ${scrMoney(SCR.GUT_BUFFER_MIN)} or ${SCR.GUT_BUFFER_PCT * 100}% of ARV) for assignment fee / extra buyer cash. Seller cash at closing ${scrMoney(p.carryDown)}, rest carried. Estimated with the generator's fee structure; confirm in the LOI generator.${g.shortfall ? " NOTE: the loan can't fully fund this; short by " + scrMoney(g.shortfall) + "." : ""}`);
   }
+  if (p.profit) L.push(`- Buyer profit at the ${p.profit.years}-year balloon exit (sale at 3% appreciation less 6% costs, less carry, loan and interest): ${scrMoney(p.profit.sale)}; minimum is the greater of ${scrMoney(SCR.MIN_PROFIT_PER_YEAR * p.profit.years)} or ${SCR.MIN_PROFIT_PCT_OF_PRICE * 100}% of price = ${scrMoney(p.profit.min)} -> ${p.profit.ok ? "OK" : "BELOW MINIMUM"}. With cash back at closing: ${scrMoney(p.profit.withCashBack)}.${p.priceNote ? " " + p.priceNote + "." : ""}`);
   if (p.modelCarry) L.push(`- Estimated (check in the generator): carry offer -> seller nets ${scrMoney(p.modelCarry.sellerNet)} at closing after their half of closing costs, buyer cash back ${scrMoney(p.modelCarry.cashBack)}. Cash offer -> seller nets ${scrMoney(p.modelCash.sellerNet)}, buyer ${p.modelCash.cashBack >= 0 ? "cash back " + scrMoney(p.modelCash.cashBack) : "brings " + scrMoney(-p.modelCash.cashBack)}.`);
   if (!land) L.push(`- Hard money: ${scrMoney(p.hmLoan)} at ${(p.ltv * 100).toFixed(1)}% LTV, ${SCR.HM_RATE}% -> ${scrMoney(p.hmMonthly)}/mo interest; reserves for ${p.months} months: ${scrMoney(p.reserves)}`);
   L.push(`- Owner equity (Propwire): ${p.ownerEquityPct === null ? "n/a" : p.ownerEquityPct.toFixed(0) + "%"}   Offer vs list: ${p.offerToList === null ? "n/a" : p.offerToList.toFixed(0) + "%"}`);
@@ -499,6 +517,8 @@ function scrRenderCalc() {
       ${row(p.land ? "Cash offer (land)" : "Offer A: all cash", scrMoney(p.cashOffer))}
       ${p.land ? "" : row("Offer B: seller carry", `${scrMoney(p.carryOffer)} (${scrMoney(p.carryDown)} down, ${p.months} mo)`) + row("Hard money loan (LTV solved)", `${scrMoney(p.hmLoan)} at ${(p.ltv * 100).toFixed(1)}% LTV → ${scrMoney(p.hmMonthly)}/mo${p.ltvNote ? " (" + escapeHtml(p.ltvNote) + ")" : ""}`) + row(`Reserves (${p.months} mo)`, scrMoney(p.reserves))}
       ${p.gutPlan ? row("Gut: cash back to buyer at close", `${scrMoney(p.gutPlan.cashBack)} = holding ${scrMoney(p.gutPlan.holding)} + cushion ${scrMoney(p.gutPlan.buffer)}`) + row("Gut: cash to seller at close", scrMoney(p.carryDown) + (p.gutPlan.shortfall ? ` (loan short by ${scrMoney(p.gutPlan.shortfall)})` : "")) : ""}
+      ${p.profit ? row(`Buyer profit at ${p.profit.years}-yr balloon exit (Sale + CF)`, `${scrMoney(p.profit.sale)} vs ${scrMoney(p.profit.min)} minimum ${p.profit.ok ? "✓" : "✗"}`) : ""}
+      ${p.priceNote ? row("Price adjusted", escapeHtml(p.priceNote)) : ""}
       ${p.modelCarry ? row("Carry offer: seller nets at close (est.)", scrMoney(p.modelCarry.sellerNet)) + row("Carry offer: buyer cash back (est.)", scrMoney(p.modelCarry.cashBack)) + row("Cash offer: seller nets (est.)", scrMoney(p.modelCash.sellerNet)) : ""}
       ${row("Offer vs list", p.offerToList === null ? "n/a" : p.offerToList.toFixed(0) + "%")}
       ${row("Owner equity", p.ownerEquityPct === null ? "enter Propwire value + mortgage" : p.ownerEquityPct.toFixed(0) + "%")}
