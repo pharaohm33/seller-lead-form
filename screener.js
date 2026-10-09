@@ -87,7 +87,10 @@ function scrPrice(d, f) {
   const lowEquity = ownerEquityPct < SCR.cfg.minOwnerEquityPct;
   const arvMid = f.arvLow && f.arvHigh ? scrRound((f.arvLow + f.arvHigh) / 2) : (f.arvLow || f.arvHigh || 0);
   const tier = f.tier || "moderate";
-  const rehab = land ? 0 : (f.rehab || (d.sqft ? scrRound(d.sqft * SCR.REHAB_PSF[tier]) : 0));
+  // Rehab = manual override, else the MIDDLE of Google AI's range (never the high end), else a per-sq-ft tier guess.
+  const aiRehab = f.rehabLow || f.rehabHigh ? scrRound(((f.rehabLow || f.rehabHigh) + (f.rehabHigh || f.rehabLow)) / 2) : 0;
+  const rehab = land ? 0 : (f.rehab || aiRehab || (d.sqft ? scrRound(d.sqft * SCR.REHAB_PSF[tier]) : 0));
+  const rehabSource = land ? "" : f.rehab ? "manual" : aiRehab ? "Google AI range (middle)" : "per-sq-ft tier guess";
   if (!arvMid) return { ready: false, ownerEquityPct, lowEquity };
   const months = f.gut ? 24 : 12;
   const suite = computeMaoSuite(arvMid, rehab, land ? "Land" : "Residential Property (1-4 units)", undefined, "On-Market");
@@ -114,7 +117,7 @@ function scrPrice(d, f) {
   if (d.dom !== null && d.dom < SCR.cfg.minDom) why.push(`${d.dom} days on market`);
   if (lowEquity) why.push(`owner equity ${ownerEquityPct.toFixed(0)}% < ${SCR.cfg.minOwnerEquityPct}%`);
   const offerToList = list ? cashOffer / list * 100 : null;   // informational only: low and dual offers are fine
-  return { ready: true, land, arvMid, rehab, asIs, months, suite, mao, cashOffer, carryOffer, carryDown, hmLoan, hmMonthly,
+  return { ready: true, land, arvMid, rehab, rehabSource, asIs, months, suite, mao, cashOffer, carryOffer, carryDown, hmLoan, hmMonthly,
     reserves: hmMonthly * months, gutPlan, ownerEquityPct, offerToList, equityAfterRehab: arvMid - list - rehab, qualifies: why.length === 0, why };
 }
 
@@ -147,7 +150,7 @@ function scrAnswers(d, f, p) {
     sqft: String(d.sqft || ""), askingPrice: String(d.price || ""), priceSought: String(d.price || ""), yearBuilt: String(d.year || ""),
     assetType: land ? "Land" : "Residential Property (1-4 units)", units: "1", marketStatus: "On-Market", sourceLink: d.url || "",
     arv: String(p.arvMid), arvRange: f.arvLow && f.arvHigh ? `$${f.arvLow.toLocaleString()} – $${f.arvHigh.toLocaleString()}` : "",
-    rehabEstimate: String(p.rehab), dealType: "Cash Deal", estMortgageBalance: String(f.pwMortgage || 0),
+    rehabEstimate: String(p.rehab), rehabEstimateLow: String(f.rehabLow || ""), rehabEstimateHigh: String(f.rehabHigh || ""), rehabAiText: f.rehabAiText || "", dealType: "Cash Deal", estMortgageBalance: String(f.pwMortgage || 0),
     sellerContactName: f.owner || ""
   };
 }
@@ -184,20 +187,35 @@ function scrGmailLink(d, notes) {
   return "https://mail.google.com/mail/?view=cm&fs=1&su=" + encodeURIComponent(su) + "&body=" + encodeURIComponent(notes);
 }
 
+// The comps and rehab prompts are the wizard's own (compsPromptResidential / compsPromptLand / repairPromptText
+// in app.js), so the machine-read summary block and the comp rules match what the lead form uses.
+const scrNum = v => (v === "" || v === undefined || v === null || isNaN(Number(v))) ? "" : String(Number(v));   // "2.0" -> "2"
+function scrAddressLine(d) { return `${d.street || ""}, ${d.city || ""}, ${d.state || ""} ${d.zip || ""}`.trim(); }
+
 function scrCompsPrompt(d) {
   const land = SCR.cfg.asset === "land";
-  const what = land ? "AS-IS VALUE" : "ARV";
-  return `Act as a professional real estate analyst. For ${d.address}${land ? " (vacant land" + (d.lot ? ", " + d.lot.toLocaleString() + " sq ft lot" : "") + ")" : ` (${d.beds || "?"} bed, ${d.baths || "?"} bath, ${d.sqft || "?"} sq ft, built ${d.year || "?"})`}, list sold comps from the last 6 months within 1 mile${land ? " (similar zoning and size)" : " with similar beds, baths and square footage, fully renovated for ARV"}. For each give address, price, sq ft, price per sq ft, distance and sold date. Anchor on the most recent and closest comps and do not average everything.
+  if (land) {
+    const acres = d.lot ? (d.lot / 43560).toFixed(2).replace(/\.?0+$/, "") : "";
+    const details = acres ? `${acres} acre(s) (${d.lot.toLocaleString()} square feet)` : "[ACREAGE/SQUARE FEET]";
+    return compsPromptLand(scrAddressLine(d), details, "");
+  }
+  const details = d.beds && d.baths
+    ? `${scrNum(d.beds)} bedroom(s), ${scrNum(d.baths)} bathroom(s), ${d.sqft ? d.sqft + " square feet" : "[SQUARE FEET]"}`
+    : (d.sqft ? `${d.sqft} square feet` : "[BEDROOMS/BATHROOMS/SQUARE FEET]");
+  return compsPromptResidential(scrAddressLine(d), details, "");
+}
 
-At the very end output EXACTLY this block (machine-read):
----COMPS SUMMARY---
-SOLD COMPS:
-[ADDRESS | PRICE | SQFT | PRICE/SQFT | BEDS | BATHS | DISTANCE | SOLD DATE]
-ACTIVE COMPS:
-[ADDRESS | PRICE | SQFT | PRICE/SQFT | BEDS | BATHS | DISTANCE | DAYS ON MARKET]
-${what} RANGE: $[low] to $[high]
-${what} ESTIMATE: $[single best estimate]
----END SUMMARY---`;
+function scrRehabPrompt(d, arvMid) {
+  return repairPromptText(scrAddressLine(d), arvMid, scrNum(d.beds), scrNum(d.baths), true,
+    d.url || "https://www.zillow.com/homes/" + encodeURIComponent(d.address.replace(/,/g, "").replace(/\s+/g, "-")) + "_rb/");
+}
+
+// Copies the prompt (always) and opens Google AI with it pre-filled when it fits in a URL.
+function scrAskGoogleAi(prompt) {
+  navigator.clipboard.writeText(prompt).catch(() => {});
+  const q = encodeURIComponent(prompt), url = "https://www.google.com/search?udm=50&q=";
+  window.open(q.length <= 7000 ? url + q : url, "_blank", "noopener");
+  return q.length <= 7000;
 }
 
 /* ---------- one-press helpers: bookmarklets for Propwire / Google AI + "Fill from clipboard" ---------- */
@@ -231,7 +249,12 @@ async function scrFillFromClipboard() {
     set("scr-pw-notes", [o.tags && o.tags.length ? o.tags.join(", ") : "", o.lastSold ? "Last sold " + o.lastSold : "", o.url].filter(Boolean).join(" | "));
     msg(`Propwire filled: ${o.equityPct || "?"}% equity.${same ? "" : " WARNING: Propwire address (" + o.address + ") doesn't look like " + d.street + ". Check you copied the right property."}`);
   } else if (/COMPS SUMMARY|ARV (RANGE|ESTIMATE)|AS-IS VALUE/i.test(t)) {
-    set("scr-ai", t); msg("Google AI response filled.");
+    set("scr-ai", t); msg("Google AI comps filled (ARV range).");
+  } else if (SCR.cfg.asset !== "land" && /repair|rehab|renovat|cost/i.test(t) && parseRehabText(t).low != null) {
+    const r = parseRehabText(t);
+    SCR.sel.rehabAiText = t.slice(0, 6000);
+    set("scr-rehab-low", r.low); set("scr-rehab-high", r.high != null ? r.high : r.low);
+    msg(`Rehab filled from Google AI: $${r.low.toLocaleString()} to $${(r.high != null ? r.high : r.low).toLocaleString()} (the offer uses the middle).`);
   } else msg("Clipboard doesn't look like Propwire or Google AI data. Use the bookmarklets on those pages first.");
 }
 
@@ -278,18 +301,20 @@ function scrPrepare(id) {
     <h3 class="step-title" style="font-size:17px;">${escapeHtml(d.address)}</h3>
     <p class="small-muted">List ${d.price ? scrMoney(d.price) : "?"} · ${d.dom ?? "?"} days on market${d.sqft ? " · " + d.sqft.toLocaleString() + " sq ft" : ""}${d.lot && land ? " · " + d.lot.toLocaleString() + " sq ft lot" : ""}</p>
     <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:6px; align-items:center;">
-      <a class="btn secondary" target="_blank" rel="noopener" href="https://www.google.com/search?udm=50&q=${encodeURIComponent(scrCompsPrompt(d))}">1. Ask Google AI (prompt pre-filled)</a>
-      <a class="btn secondary" target="_blank" rel="noopener" href="https://propwire.com/search">2. Open Propwire</a>
-      <button type="button" class="btn primary" id="scr-fill">3. Fill from clipboard</button>
-      <button type="button" class="link-btn" id="scr-copy-prompt">Copy prompt</button>
+      <button type="button" class="btn secondary" id="scr-ask-comps">1. Ask Google AI: ${land ? "land comps" : "ARV comps"}</button>
+      ${land ? "" : `<button type="button" class="btn secondary" id="scr-ask-rehab">2. Ask Google AI: rehab</button>`}
+      <a class="btn secondary" target="_blank" rel="noopener" href="https://propwire.com/search">${land ? "2" : "3"}. Open Propwire</a>
+      <button type="button" class="btn primary" id="scr-fill">Fill from clipboard</button>
     </div>
-    <p id="scr-fill-msg" class="small-muted" style="margin:0 0 10px;">On the Google AI answer and on the Propwire property page, press the matching bookmarklet, then come back and press 3.</p>
+    <p id="scr-fill-msg" class="small-muted" style="margin:0 0 10px;">Each Ask button copies the prompt and opens Google AI with it. On the answer (and on the Propwire property page) press the matching bookmarklet, then press Fill from clipboard.</p>
     <label>Paste Google AI response (parses the summary block)</label>
     <textarea id="scr-ai" rows="4" placeholder="Paste the full response, including ---COMPS SUMMARY---"></textarea>
     <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; margin:10px 0;">
       <div><label>${land ? "As-is value low" : "ARV low"}</label><input type="number" id="scr-arv-low"></div>
       <div><label>${land ? "As-is value high" : "ARV high"}</label><input type="number" id="scr-arv-high"></div>
-      ${land ? "" : `<div><label>Rehab $ (blank = by tier)</label><input type="number" id="scr-rehab"></div>
+      ${land ? "" : `<div><label>Rehab low (Google AI)</label><input type="number" id="scr-rehab-low"></div>
+      <div><label>Rehab high (Google AI)</label><input type="number" id="scr-rehab-high"></div>
+      <div><label>Rehab $ override (blank = middle of range)</label><input type="number" id="scr-rehab"></div>
       <div><label>Rehab tier</label><select id="scr-tier"><option value="light">Light $25/sf</option><option value="moderate" selected>Moderate $40/sf</option><option value="heavy">Heavy $55/sf</option><option value="gut">Gut $75/sf</option></select></div>`}
       <div><label>Propwire equity % (if shown)</label><input type="number" id="scr-pw-eq"></div>
       <div><label>Propwire est. value</label><input type="number" id="scr-pw-val"></div>
@@ -302,7 +327,8 @@ function scrPrepare(id) {
   panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
   const read = () => {
     const v = i => Number((document.getElementById(i) || {}).value) || 0;
-    SCR.sel.f = { arvLow: v("scr-arv-low"), arvHigh: v("scr-arv-high"), rehab: v("scr-rehab"),
+    SCR.sel.f = { arvLow: v("scr-arv-low"), arvHigh: v("scr-arv-high"), rehab: v("scr-rehab"), rehabLow: v("scr-rehab-low"), rehabHigh: v("scr-rehab-high"),
+      rehabAiText: SCR.sel.rehabAiText || "",
       tier: (document.getElementById("scr-tier") || {}).value, gut: !!(document.getElementById("scr-gut") || {}).checked,
       pwValue: v("scr-pw-val"), pwMortgage: v("scr-pw-mort"),
       pwMortgageSet: document.getElementById("scr-pw-mort").value !== "",
@@ -312,7 +338,18 @@ function scrPrepare(id) {
   };
   panel.querySelectorAll("input,select,textarea").forEach(el => el.addEventListener("input", read));
   document.getElementById("scr-fill").onclick = scrFillFromClipboard;
-  document.getElementById("scr-copy-prompt").onclick = () => navigator.clipboard.writeText(scrCompsPrompt(d)).then(() => { document.getElementById("scr-copy-prompt").textContent = "Copied"; });
+  document.getElementById("scr-ask-comps").onclick = () => {
+    const fit = scrAskGoogleAi(scrCompsPrompt(d));
+    document.getElementById("scr-fill-msg").textContent = fit ? "Comps prompt copied and opened in Google AI. When the answer finishes, press the Google AI bookmarklet, then Fill from clipboard."
+      : "Comps prompt copied. Google AI opened without it (too long for the link): paste it in, then use the bookmarklet and Fill from clipboard.";
+  };
+  const askRehab = document.getElementById("scr-ask-rehab");
+  if (askRehab) askRehab.onclick = () => {
+    const f = SCR.sel.f || {}, arvMid = f.arvLow && f.arvHigh ? scrRound((f.arvLow + f.arvHigh) / 2) : (f.arvLow || f.arvHigh || 0);
+    if (!arvMid) { document.getElementById("scr-fill-msg").textContent = "Fill the ARV from step 1 first: the rehab prompt asks about the repair needed to reach that ARV."; return; }
+    scrAskGoogleAi(scrRehabPrompt(d, arvMid));
+    document.getElementById("scr-fill-msg").textContent = `Rehab prompt (ARV ${scrMoney(arvMid)}) copied and opened in Google AI. Press the bookmarklet on the answer, then Fill from clipboard.`;
+  };
   document.getElementById("scr-ai").addEventListener("input", e => {
     const t = e.target.value.trim(); if (!t) return;
     const r = parseAICompsResponse(t, land, false);
@@ -340,7 +377,7 @@ function scrRenderCalc() {
   box.innerHTML = `<div class="banner ${p.qualifies ? "info" : "warn"}" style="text-align:left;">${p.qualifies ? "Qualifies for an offer (owner equity " + p.ownerEquityPct.toFixed(0) + "%)." : "Does not qualify: " + escapeHtml(p.why.join("; ")) + ". Skip it rather than forcing a tight offer."}</div>
     <dl class="review-grid">
       ${row(p.land ? "As-is value (middle)" : "ARV (middle of range)", scrMoney(p.arvMid))}
-      ${p.land ? "" : row("Rehab", scrMoney(p.rehab)) + row("As-is", scrMoney(p.asIs)) + row("Hard Money Buyer MAO (20% down)", scrMoney(p.mao))}
+      ${p.land ? "" : row("Rehab (" + p.rehabSource + ")", scrMoney(p.rehab)) + row("As-is", scrMoney(p.asIs)) + row("Hard Money Buyer MAO (20% down)", scrMoney(p.mao))}
       ${row(p.land ? "Cash offer (land)" : "Offer A: all cash", scrMoney(p.cashOffer))}
       ${p.land ? "" : row("Offer B: seller carry", `${scrMoney(p.carryOffer)} (${scrMoney(p.carryDown)} down, ${p.months} mo)`) + row("Hard money loan", `${scrMoney(p.hmLoan)} → ${scrMoney(p.hmMonthly)}/mo`) + row(`Reserves (${p.months} mo)`, scrMoney(p.reserves))}
       ${p.gutPlan ? row("Gut: cash back to buyer at close", `${scrMoney(p.gutPlan.cashBack)} = holding ${scrMoney(p.gutPlan.holding)} + cushion ${scrMoney(p.gutPlan.buffer)}`) + row("Gut: cash to seller at close", scrMoney(p.carryDown) + (p.gutPlan.shortfall ? ` (loan short by ${scrMoney(p.gutPlan.shortfall)})` : "")) : ""}

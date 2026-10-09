@@ -1,6 +1,101 @@
 /* Seller Lead Intake — front end. Talks only to the Apps Script backend
    configured in config.js. No other server exists. */
 
+// ── SHARED COMPS PROMPTS ──
+// Single source of truth for the Google AI comps prompts: the wizard's Cash Deal step and the admin
+// Pre-LOI screener both call these, so the machine-read summary block and the comp rules never drift.
+function compsPromptLand(addressLine, detailsPart, zoningLine) {
+  return `Act as a professional real estate data analyst specializing in land valuation. Explain your math simply and avoid real estate jargon — I have no real estate experience.
+
+Find recent comparable land sales (comps) and an estimated As-Is Value (current market value — this is NOT an after-repair or projected value, land doesn't get "fixed up") for this property:
+- Address: ${addressLine || "[SUBJECT ADDRESS]"}
+- Details: ${detailsPart}${zoningLine}
+
+For land, what a comp has in common matters more than how close it is. Search live for up to 3 properties that meet ALL of these rules, prioritizing the most recent and closest qualifying matches first, in this order of importance:
+1. Identical or equivalent zoning to the subject property — never treat a commercially-zoned parcel as comparable to a residentially-zoned one, even if they're next to each other.
+2. Comparable topography and usability — a flat, buildable lot is not comparable to a steep, unusable, or landlocked one without a clear value adjustment. Note each comp's topography and any notable features (wooded, cleared, waterfront, floodplain, etc.).
+3. Comparable access and utilities — road access (paved vs. dirt vs. none) and utility hookups (electric, water, septic/sewer) should be similar, or clearly flagged as different along with how that affects value.
+4. Similar in acreage (or square footage, for small in-town lots) to the subject property — avoid comps that are dramatically larger or smaller.
+
+Only after a comp passes ALL four rules above should distance be weighed — prefer the closest qualifying comps, but a comp farther away that matches on zoning/topography/access beats a closer one that doesn't. Distance tiers as a rough guide: Urban/Dense Suburban — 0.25 to 1 mile; Suburban/Master-Planned — 1 to 2 miles; Rural/Unique Acreage — 3 to 10 miles (up to 30 miles in sparse markets with very few land sales). Always state each comp's straight-line distance and note if you had to go unusually far to find a qualifying match.
+
+Recency: 1 to 2 years is acceptable as a catch-all for land — prefer more recent sales where available. For any comp older than 6 months, apply a reasonable adjustment to its sale price to reflect market movement (appreciation or depreciation) between the sale date and today, show that adjustment explicitly, and use the adjusted price (not the raw historical price) in the calculation below.
+
+If this is a non-disclosure state and you can't find actual sold prices, use active for-sale listings instead that meet the other rules, and clearly label them as asking prices, not confirmed sale prices.
+
+For each comp, list:
+- Full address
+- Sale price (or asking price, if using the non-disclosure fallback), the exact date sold (or listed date for active comps), and for active for-sale listings also include how many days it has been on the market (days on market / DOM)
+- Zoning, topography, and access/utilities
+- Straight-line distance from the subject address, in miles
+- Total acreage (and square footage, if it's a small lot)
+- Price per Acre (or Price per Square Foot for small lots) — show both the raw price and, for comps older than 6 months, the time-adjusted price
+
+After listing the comps, calculate and show your work:
+1. Acreage Difference %: (Average Comp Acreage - Subject Acreage) / Subject Acreage x 100
+2. Estimated As-Is Value: rank the qualifying comps by recency first, then by distance from the subject — anchor on the lowest (time-adjusted) Price per Acre among the most recent and closest ones. Do not dilute that with a straight average across every comp you found, since a farther or older comp overstates what this specific parcel is worth today. State clearly which comp(s) you anchored on. Estimated As-Is Value = that lowest-and-nearest Price per Acre x Subject Acreage — give a final range, plus your single most likely estimate within that range, still favoring the low end unless you have a specific reason not to.
+
+If the value comes out lower than what you might initially expect, say so plainly — that's an important finding, not something to smooth over.
+
+At the very end of your response, after all analysis, output a structured summary block in EXACTLY this format (no deviations — this is machine-read):
+---COMPS SUMMARY---
+SOLD COMPS:
+[For each sold comp: ADDRESS | PRICE | ACRES | PRICE/ACRE | DISTANCE | SOLD DATE (e.g. Jan 2025)]
+ACTIVE COMPS:
+[For each active/for-sale listing used: ADDRESS | PRICE | ACRES | PRICE/ACRE | DISTANCE | DAYS ON MARKET (e.g. 45 days)]
+AS-IS VALUE RANGE: $[low] to $[high]
+AS-IS VALUE ESTIMATE: $[single best estimate]
+---END SUMMARY---`;
+}
+
+function compsPromptResidential(addressLine, detailsPart, zoningLine) {
+  return `Act as a professional real estate data analyst. Explain your math simply and avoid real estate jargon — I have no real estate experience.
+
+Find recent comparable sales (comps) and an estimated After Repair Value (ARV) for this property:
+- Address: ${addressLine || "[SUBJECT ADDRESS]"}
+- Details: ${detailsPart}${zoningLine}
+
+Search live for up to 3 properties that meet ALL of these rules, prioritizing the most recent and closest qualifying matches first:
+1. Sold within the last 12 months — strongly prefer comps sold within the last 6 months if there are enough to choose from. Comps older than 12 months don't count, no exceptions.
+2. Within a MAXIMUM of 1-mile STRAIGHT-LINE distance from the subject address (as the crow flies, not driving distance) — this is a hard limit, not a target, closer is always better. State your estimated straight-line distance for each one explicitly, and flag it clearly if you had to go close to the 1-mile edge because nothing closer was available.
+3. In excellent, fully remodeled, or brand-new condition — skip anything described as a fixer-upper, needing TLC, sold as-is, or a renovation/investment project.
+4. Same bedroom and bathroom count as the subject property (or as close as possible) — no bedroom or bathroom additions or conversions are planned, so a comp with more beds or baths would overstate what this property can actually sell for as-is. Also ideally a small starter home or bungalow, similar in size and character to the subject property.
+
+If this is a non-disclosure state and you can't find actual sold prices, use active for-sale listings instead that meet the other three rules, and clearly label them as asking prices, not confirmed sale prices.
+
+For each comp, list:
+- Full address
+- Exact sale price (or asking price, if using the non-disclosure fallback), the exact date sold (or listed date for active comps), and for active for-sale listings also include how many days it has been on the market (days on market / DOM)
+- Estimated straight-line distance from the subject address, in miles
+- Bedrooms, bathrooms, and total square feet
+- Exact Price per Square Foot (price ÷ square feet)
+
+After listing the comps, calculate and show your work:
+1. Square Footage Difference %: (Average Comp SqFt - Subject SqFt) / Subject SqFt x 100
+2. Estimated ARV: rank the qualifying comps by recency first, then by distance from the subject — anchor on the lowest Price per Square Foot among the most recent and closest ones. Do not dilute that with a straight average across every comp you found, since a farther or older comp overstates what this specific property will actually sell for today. State clearly which comp(s) you anchored on. Estimated ARV = that lowest-and-nearest Price per Square Foot x Subject SqFt — give a final range, plus your single most likely estimate within that range, still favoring the low end unless you have a specific reason not to.
+
+If the ARV comes out lower than what a bank's automated home value estimate would show, say so plainly — that's an important finding, not something to smooth over.
+
+At the very end of your response, after all analysis, output a structured summary block in EXACTLY this format (no deviations — this is machine-read):
+---COMPS SUMMARY---
+SOLD COMPS:
+[For each sold comp: ADDRESS | PRICE | SQFT | PRICE/SQFT | BEDS | BATHS | DISTANCE | SOLD DATE (e.g. Jan 2025)]
+ACTIVE COMPS:
+[For each active/for-sale listing used: ADDRESS | PRICE | SQFT | PRICE/SQFT | BEDS | BATHS | DISTANCE | DAYS ON MARKET (e.g. 45 days)]
+ARV RANGE: $[low] to $[high]
+ARV ESTIMATE: $[single best estimate]
+---END SUMMARY---`;
+}
+
+// Same one-line repair prompt the wizard shows under "Estimated rehab".
+function repairPromptText(addressLine, arv, beds, baths, isResidential, linkOrSearch) {
+  const arvPart = arv ? ` to reach an ARV of $${Number(arv).toLocaleString()}` : "";
+  const bedBathPart = (isResidential && beds && baths)
+    ? ` It's currently ${beds} bed / ${baths} bath -- estimate repair costs for that existing layout (however light or heavy the work actually is), with no bedroom or bathroom additions or conversions planned.`
+    : "";
+  return `how much fix and flip investor repair is needed at ${addressLine}${arvPart}?${bedBathPart} ${linkOrSearch || ""}`;
+}
+
 // ── AI RESPONSE PARSER ──
 // Parses the structured summary block from Google AI Mode comps responses.
 // Expects the ---COMPS SUMMARY--- block the prompt asks AI to output.
@@ -1390,16 +1485,8 @@ const steps = [
       // estimate repairs against an actual target value instead of guessing blind. By the time repair
       // costs matter, that ARV is usually the AI-CMA-refined number (see Step 2 above), not Chase's
       // quick estimate, so it isn't attributed to a specific source here anymore.
-      const buildRepairPrompt = (arv, picturesLink) => {
-        const arvPart = arv ? ` to reach an ARV of $${Number(arv).toLocaleString()}` : "";
-        // This deal doesn't add or convert bedrooms/bathrooms, so tell the AI to price the repair
-        // for the CURRENT bed/bath count, not a hypothetical one -- this doesn't limit the repair
-        // scope itself, which can still run anywhere from light cosmetic to a full gut.
-        const bedBathPart = (isResidential && answers.beds && answers.baths)
-          ? ` It's currently ${answers.beds} bed / ${answers.baths} bath -- estimate repair costs for that existing layout (however light or heavy the work actually is), with no bedroom or bathroom additions or conversions planned.`
-          : "";
-        return `how much fix and flip investor repair is needed at ${addressLine}${arvPart}?${bedBathPart} ${picturesLink || zillowSearchUrl}`;
-      };
+      const buildRepairPrompt = (arv, picturesLink) =>
+        repairPromptText(addressLine, arv, answers.beds, answers.baths, isResidential, picturesLink || zillowSearchUrl);
       // Auction/preforeclosure properties usually have no listing or photos to research condition
       // from, so repair cost gets estimated from purchase year, home age, and reported maintenance
       // spend instead. Assumes neglect starts the moment the seller fell behind on payments -- their
@@ -2252,47 +2339,7 @@ const steps = [
         // time-adjusted comps for land vs. a flat distance cutoff for homes), so weaving them
         // together got harder to read than just writing two prompts.
         root.querySelector("#comps-prompt-text").value = isLand
-? `Act as a professional real estate data analyst specializing in land valuation. Explain your math simply and avoid real estate jargon — I have no real estate experience.
-
-Find recent comparable land sales (comps) and an estimated As-Is Value (current market value — this is NOT an after-repair or projected value, land doesn't get "fixed up") for this property:
-- Address: ${addressLine || "[SUBJECT ADDRESS]"}
-- Details: ${detailsPart}${zoningLine}
-
-For land, what a comp has in common matters more than how close it is. Search live for up to 3 properties that meet ALL of these rules, prioritizing the most recent and closest qualifying matches first, in this order of importance:
-1. Identical or equivalent zoning to the subject property — never treat a commercially-zoned parcel as comparable to a residentially-zoned one, even if they're next to each other.
-2. Comparable topography and usability — a flat, buildable lot is not comparable to a steep, unusable, or landlocked one without a clear value adjustment. Note each comp's topography and any notable features (wooded, cleared, waterfront, floodplain, etc.).
-3. Comparable access and utilities — road access (paved vs. dirt vs. none) and utility hookups (electric, water, septic/sewer) should be similar, or clearly flagged as different along with how that affects value.
-4. Similar in acreage (or square footage, for small in-town lots) to the subject property — avoid comps that are dramatically larger or smaller.
-
-Only after a comp passes ALL four rules above should distance be weighed — prefer the closest qualifying comps, but a comp farther away that matches on zoning/topography/access beats a closer one that doesn't. Distance tiers as a rough guide: Urban/Dense Suburban — 0.25 to 1 mile; Suburban/Master-Planned — 1 to 2 miles; Rural/Unique Acreage — 3 to 10 miles (up to 30 miles in sparse markets with very few land sales). Always state each comp's straight-line distance and note if you had to go unusually far to find a qualifying match.
-
-Recency: 1 to 2 years is acceptable as a catch-all for land — prefer more recent sales where available. For any comp older than 6 months, apply a reasonable adjustment to its sale price to reflect market movement (appreciation or depreciation) between the sale date and today, show that adjustment explicitly, and use the adjusted price (not the raw historical price) in the calculation below.
-
-If this is a non-disclosure state and you can't find actual sold prices, use active for-sale listings instead that meet the other rules, and clearly label them as asking prices, not confirmed sale prices.
-
-For each comp, list:
-- Full address
-- Sale price (or asking price, if using the non-disclosure fallback), the exact date sold (or listed date for active comps), and for active for-sale listings also include how many days it has been on the market (days on market / DOM)
-- Zoning, topography, and access/utilities
-- Straight-line distance from the subject address, in miles
-- Total acreage (and square footage, if it's a small lot)
-- Price per Acre (or Price per Square Foot for small lots) — show both the raw price and, for comps older than 6 months, the time-adjusted price
-
-After listing the comps, calculate and show your work:
-1. Acreage Difference %: (Average Comp Acreage - Subject Acreage) / Subject Acreage x 100
-2. Estimated As-Is Value: rank the qualifying comps by recency first, then by distance from the subject — anchor on the lowest (time-adjusted) Price per Acre among the most recent and closest ones. Do not dilute that with a straight average across every comp you found, since a farther or older comp overstates what this specific parcel is worth today. State clearly which comp(s) you anchored on. Estimated As-Is Value = that lowest-and-nearest Price per Acre x Subject Acreage — give a final range, plus your single most likely estimate within that range, still favoring the low end unless you have a specific reason not to.
-
-If the value comes out lower than what you might initially expect, say so plainly — that's an important finding, not something to smooth over.
-
-At the very end of your response, after all analysis, output a structured summary block in EXACTLY this format (no deviations — this is machine-read):
----COMPS SUMMARY---
-SOLD COMPS:
-[For each sold comp: ADDRESS | PRICE | ACRES | PRICE/ACRE | DISTANCE | SOLD DATE (e.g. Jan 2025)]
-ACTIVE COMPS:
-[For each active/for-sale listing used: ADDRESS | PRICE | ACRES | PRICE/ACRE | DISTANCE | DAYS ON MARKET (e.g. 45 days)]
-AS-IS VALUE RANGE: $[low] to $[high]
-AS-IS VALUE ESTIMATE: $[single best estimate]
----END SUMMARY---`
+? compsPromptLand(addressLine, detailsPart, zoningLine)
 : isCommercial
 ? `Act as a professional commercial real estate underwriter. Explain your math simply and avoid real estate jargon — I have no real estate experience.
 
@@ -2367,42 +2414,7 @@ BUSINESS COMPS:
 ARV RANGE: $[low] to $[high]
 ARV ESTIMATE: $[single best estimate]
 ---END SUMMARY---`
-: `Act as a professional real estate data analyst. Explain your math simply and avoid real estate jargon — I have no real estate experience.
-
-Find recent comparable sales (comps) and an estimated After Repair Value (ARV) for this property:
-- Address: ${addressLine || "[SUBJECT ADDRESS]"}
-- Details: ${detailsPart}${zoningLine}
-
-Search live for up to 3 properties that meet ALL of these rules, prioritizing the most recent and closest qualifying matches first:
-1. Sold within the last 12 months — strongly prefer comps sold within the last 6 months if there are enough to choose from. Comps older than 12 months don't count, no exceptions.
-2. Within a MAXIMUM of 1-mile STRAIGHT-LINE distance from the subject address (as the crow flies, not driving distance) — this is a hard limit, not a target, closer is always better. State your estimated straight-line distance for each one explicitly, and flag it clearly if you had to go close to the 1-mile edge because nothing closer was available.
-3. In excellent, fully remodeled, or brand-new condition — skip anything described as a fixer-upper, needing TLC, sold as-is, or a renovation/investment project.
-4. Same bedroom and bathroom count as the subject property (or as close as possible) — no bedroom or bathroom additions or conversions are planned, so a comp with more beds or baths would overstate what this property can actually sell for as-is. Also ideally a small starter home or bungalow, similar in size and character to the subject property.
-
-If this is a non-disclosure state and you can't find actual sold prices, use active for-sale listings instead that meet the other three rules, and clearly label them as asking prices, not confirmed sale prices.
-
-For each comp, list:
-- Full address
-- Exact sale price (or asking price, if using the non-disclosure fallback), the exact date sold (or listed date for active comps), and for active for-sale listings also include how many days it has been on the market (days on market / DOM)
-- Estimated straight-line distance from the subject address, in miles
-- Bedrooms, bathrooms, and total square feet
-- Exact Price per Square Foot (price ÷ square feet)
-
-After listing the comps, calculate and show your work:
-1. Square Footage Difference %: (Average Comp SqFt - Subject SqFt) / Subject SqFt x 100
-2. Estimated ARV: rank the qualifying comps by recency first, then by distance from the subject — anchor on the lowest Price per Square Foot among the most recent and closest ones. Do not dilute that with a straight average across every comp you found, since a farther or older comp overstates what this specific property will actually sell for today. State clearly which comp(s) you anchored on. Estimated ARV = that lowest-and-nearest Price per Square Foot x Subject SqFt — give a final range, plus your single most likely estimate within that range, still favoring the low end unless you have a specific reason not to.
-
-If the ARV comes out lower than what a bank's automated home value estimate would show, say so plainly — that's an important finding, not something to smooth over.
-
-At the very end of your response, after all analysis, output a structured summary block in EXACTLY this format (no deviations — this is machine-read):
----COMPS SUMMARY---
-SOLD COMPS:
-[For each sold comp: ADDRESS | PRICE | SQFT | PRICE/SQFT | BEDS | BATHS | DISTANCE | SOLD DATE (e.g. Jan 2025)]
-ACTIVE COMPS:
-[For each active/for-sale listing used: ADDRESS | PRICE | SQFT | PRICE/SQFT | BEDS | BATHS | DISTANCE | DAYS ON MARKET (e.g. 45 days)]
-ARV RANGE: $[low] to $[high]
-ARV ESTIMATE: $[single best estimate]
----END SUMMARY---`;
+: compsPromptResidential(addressLine, detailsPart, zoningLine);
 
         if (matchByUnitsOnly) {
           const cityState = `${answers.city || "[CITY]"}, ${answers.state || "[STATE]"}`;
