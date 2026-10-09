@@ -200,6 +200,41 @@ ${what} ESTIMATE: $[single best estimate]
 ---END SUMMARY---`;
 }
 
+/* ---------- one-press helpers: bookmarklets for Propwire / Google AI + "Fill from clipboard" ---------- */
+const SCR_BM_PROPWIRE = `(function(){var t=document.body.innerText,g=function(r){var m=t.match(r);return m?m[1]:''};
+var o={src:'propwire',url:location.href,address:decodeURIComponent(location.pathname.split('/')[2]||'').replace(/-/g,' '),
+value:g(/\\$([\\d,]+)\\s*\\n\\s*Estimated Property Value/),mortgage:g(/\\$([\\d,]+)\\s*\\n\\s*Est\\. Mortgage Balance/),
+equityAmt:g(/\\$([\\d,]+)\\s*\\n\\s*Est\\. Equity/),equityPct:g(/(\\d+(?:\\.\\d+)?)%\\s*\\n\\s*Equity/),
+lastSold:g(/Last sold ([A-Za-z]+ \\d+, \\d{4})/),owner:g(/Owner Name\\s*\\n\\s*([^\\n]+)/),
+tags:['Free & Clear','High Equity','Absentee Owners','Tired Landlords','Vacant','Pre-Foreclosure','Tax Delinquent','Out-of-State Owners','Senior Owner'].filter(function(x){return t.replace(/Tax Delinquent\\?/g,'').indexOf(x)>-1})};
+var s=JSON.stringify(o);(navigator.clipboard?navigator.clipboard.writeText(s):Promise.reject()).then(function(){alert('Propwire copied: '+(o.equityPct||'?')+'% equity for '+o.address+'. Now press Fill from clipboard in SendMySeller.')},function(){prompt('Copy this:',s)})})();`;
+const SCR_BM_GOOGLE = `(function(){var t=document.body.innerText,m=t.match(/---COMPS SUMMARY---[\\s\\S]*?---END SUMMARY---/i),out=m?m[0]:t.slice(0,20000);
+(navigator.clipboard?navigator.clipboard.writeText(out):Promise.reject()).then(function(){alert(m?'Comps summary copied. Now press Fill from clipboard in SendMySeller.':'No summary block found; copied page text instead.')},function(){prompt('Copy this:',out.slice(0,3000))})})();`;
+const scrBmHref = code => "javascript:" + encodeURIComponent(code.replace(/\n/g, ""));
+
+function scrNorm(x) { return String(x || "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\b(street|st|drive|dr|avenue|ave|road|rd|lane|ln|court|ct|place|pl|boulevard|blvd|circle|cir|way|terrace|ter)\b/g, "").replace(/\s+/g, " ").trim(); }
+
+async function scrFillFromClipboard() {
+  const msg = t => { const m = document.getElementById("scr-fill-msg"); if (m) m.textContent = t; };
+  let t = "";
+  try { t = (await navigator.clipboard.readText()).trim(); } catch (e) { msg("Couldn't read the clipboard. Allow clipboard access for this site, or paste into the boxes."); return; }
+  if (!t) { msg("Clipboard is empty."); return; }
+  const set = (id, v) => { const el = document.getElementById(id); if (el) { el.value = v; el.dispatchEvent(new Event("input", { bubbles: true })); } };
+  let o = null; try { o = JSON.parse(t); } catch (e) {}
+  if (o && o.src === "propwire") {
+    const n = x => Number(String(x || "").replace(/[^0-9.]/g, ""));
+    const d = SCR.sel.d, same = scrNorm(o.address).includes(scrNorm(d.street).split(" ").slice(0, 2).join(" "));
+    if (o.equityPct !== "") set("scr-pw-eq", n(o.equityPct));
+    if (o.value) set("scr-pw-val", n(o.value));
+    if (o.mortgage !== "") set("scr-pw-mort", n(o.mortgage));
+    if (o.owner) set("scr-owner", o.owner);
+    set("scr-pw-notes", [o.tags && o.tags.length ? o.tags.join(", ") : "", o.lastSold ? "Last sold " + o.lastSold : "", o.url].filter(Boolean).join(" | "));
+    msg(`Propwire filled: ${o.equityPct || "?"}% equity.${same ? "" : " WARNING: Propwire address (" + o.address + ") doesn't look like " + d.street + ". Check you copied the right property."}`);
+  } else if (/COMPS SUMMARY|ARV (RANGE|ESTIMATE)|AS-IS VALUE/i.test(t)) {
+    set("scr-ai", t); msg("Google AI response filled.");
+  } else msg("Clipboard doesn't look like Propwire or Google AI data. Use the bookmarklets on those pages first.");
+}
+
 /* ---------- UI ---------- */
 function scrOrder() {
   return SCR.rows.map(d => ({ d, s: scrStage1(d) })).sort((a, b) => (b.s.ok - a.s.ok) || ((b.d.dom || 0) - (a.d.dom || 0)));
@@ -242,11 +277,13 @@ function scrPrepare(id) {
   panel.innerHTML = `<div class="card" style="margin-top:14px;">
     <h3 class="step-title" style="font-size:17px;">${escapeHtml(d.address)}</h3>
     <p class="small-muted">List ${d.price ? scrMoney(d.price) : "?"} · ${d.dom ?? "?"} days on market${d.sqft ? " · " + d.sqft.toLocaleString() + " sq ft" : ""}${d.lot && land ? " · " + d.lot.toLocaleString() + " sq ft lot" : ""}</p>
-    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
-      <button type="button" class="btn secondary" id="scr-copy-prompt">Copy Google AI comps prompt</button>
-      <a class="link-btn" target="_blank" rel="noopener" href="https://www.google.com/search?udm=50&q=${encodeURIComponent(d.address)}">Open Google AI</a>
-      <a class="link-btn" target="_blank" rel="noopener" href="https://propwire.com/search?q=${encodeURIComponent(d.address)}">Open Propwire</a>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:6px; align-items:center;">
+      <a class="btn secondary" target="_blank" rel="noopener" href="https://www.google.com/search?udm=50&q=${encodeURIComponent(scrCompsPrompt(d))}">1. Ask Google AI (prompt pre-filled)</a>
+      <a class="btn secondary" target="_blank" rel="noopener" href="https://propwire.com/search">2. Open Propwire</a>
+      <button type="button" class="btn primary" id="scr-fill">3. Fill from clipboard</button>
+      <button type="button" class="link-btn" id="scr-copy-prompt">Copy prompt</button>
     </div>
+    <p id="scr-fill-msg" class="small-muted" style="margin:0 0 10px;">On the Google AI answer and on the Propwire property page, press the matching bookmarklet, then come back and press 3.</p>
     <label>Paste Google AI response (parses the summary block)</label>
     <textarea id="scr-ai" rows="4" placeholder="Paste the full response, including ---COMPS SUMMARY---"></textarea>
     <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; margin:10px 0;">
@@ -274,6 +311,7 @@ function scrPrepare(id) {
     scrRenderCalc();
   };
   panel.querySelectorAll("input,select,textarea").forEach(el => el.addEventListener("input", read));
+  document.getElementById("scr-fill").onclick = scrFillFromClipboard;
   document.getElementById("scr-copy-prompt").onclick = () => navigator.clipboard.writeText(scrCompsPrompt(d)).then(() => { document.getElementById("scr-copy-prompt").textContent = "Copied"; });
   document.getElementById("scr-ai").addEventListener("input", e => {
     const t = e.target.value.trim(); if (!t) return;
@@ -352,9 +390,17 @@ function scrMount() {
       <div><label>Min days on market</label><input type="number" id="scr-min-dom" value="180"></div>
       <div><label>Min owner equity %</label><input type="number" id="scr-min-eq" value="90"></div>
     </div>
+    <p class="small-muted" style="margin:10px 0 0;">One-press helpers: drag these to your bookmarks bar, then press them on the matching page.
+      <a class="btn secondary" id="scr-bm-pw" style="cursor:grab;padding:4px 10px;">Copy Propwire equity</a>
+      <a class="btn secondary" id="scr-bm-g" style="cursor:grab;padding:4px 10px;">Copy Google AI comps</a></p>
     <input type="file" id="scr-file" accept=".csv,.txt" style="margin-top:10px;">
     <div id="scr-results" style="margin-top:10px;"></div><div id="scr-prepare" hidden></div>`;
   host.insertBefore(card, host.firstChild);
+  document.getElementById("scr-bm-pw").setAttribute("href", scrBmHref(SCR_BM_PROPWIRE));
+  document.getElementById("scr-bm-g").setAttribute("href", scrBmHref(SCR_BM_GOOGLE));
+  [["scr-bm-pw", "Copy Propwire equity"], ["scr-bm-g", "Copy Google AI comps"]].forEach(([id, label]) => {
+    document.getElementById(id).addEventListener("click", e => { e.preventDefault(); alert("Drag \"" + label + "\" up to your bookmarks bar instead of clicking it here."); });
+  });
   const sync = () => {
     SCR.cfg.asset = document.getElementById("scr-asset").value;
     SCR.cfg.minDom = Number(document.getElementById("scr-min-dom").value) || 0;
