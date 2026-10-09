@@ -6,7 +6,7 @@
 
 const SCR = {
   rows: [], sel: null,
-  cfg: { asset: "sf", minDom: 180, minOwnerEquityPct: 25, minOfferToListPct: 70 },
+  cfg: { asset: "sf", minDom: 180, minOwnerEquityPct: 25 },   // qualification = days on market + Propwire owner equity only
   AGENT_EMAIL: "montanoemmanuel@gmail.com", AGENT_NAME: "Emmanuel's LOI Helper Agent", PHONE: "5206336437",
   LOI_URL: "https://pharaohm33.github.io/loi-generator/",
   REHAB_PSF: { light: 25, moderate: 40, heavy: 55, gut: 75 },   // quick estimate when no rehab number is entered
@@ -107,10 +107,10 @@ function scrPrice(d, f) {
   const why = [];
   if (d.dom !== null && d.dom < SCR.cfg.minDom) why.push(`${d.dom} days on market`);
   if (ownerEquityPct !== null && ownerEquityPct < SCR.cfg.minOwnerEquityPct) why.push(`owner equity ${ownerEquityPct.toFixed(0)}% < ${SCR.cfg.minOwnerEquityPct}%`);
-  const offerToList = list ? cashOffer / list * 100 : null;
-  if (offerToList !== null && offerToList < SCR.cfg.minOfferToListPct) why.push(`cash offer is ${offerToList.toFixed(0)}% of list (min ${SCR.cfg.minOfferToListPct}%)`);
+  const offerToList = list ? cashOffer / list * 100 : null;   // informational only: low and dual offers are fine
+  const pending = ownerEquityPct === null;
   return { ready: true, land, arvMid, rehab, asIs, months, suite, mao, cashOffer, carryOffer, carryDown, hmLoan, hmMonthly,
-    reserves: hmMonthly * months, gutPlan, ownerEquityPct, offerToList, equityAfterRehab: arvMid - list - rehab, qualifies: why.length === 0, why };
+    reserves: hmMonthly * months, gutPlan, ownerEquityPct, offerToList, equityAfterRehab: arvMid - list - rehab, pending, qualifies: why.length === 0 && !pending, why };
 }
 
 /* ---------- links + notes ---------- */
@@ -169,7 +169,7 @@ function scrNotes(d, f, p, loi, resume) {
   }
   if (!land) L.push(`- Hard money: ${scrMoney(p.hmLoan)} at ${SCR.HM_LTV}% LTV, ${SCR.HM_RATE}% -> ${scrMoney(p.hmMonthly)}/mo interest; reserves for ${p.months} months: ${scrMoney(p.reserves)}`);
   L.push(`- Owner equity (Propwire): ${p.ownerEquityPct === null ? "n/a" : p.ownerEquityPct.toFixed(0) + "%"}   Offer vs list: ${p.offerToList === null ? "n/a" : p.offerToList.toFixed(0) + "%"}`);
-  L.push(`- Screen: ${p.qualifies ? "QUALIFIES" : "DOES NOT QUALIFY (" + p.why.join("; ") + ")"}`);
+  L.push(`- Screen: ${p.qualifies ? "QUALIFIES" : p.pending ? "PENDING (needs Propwire equity)" : "DOES NOT QUALIFY (" + p.why.join("; ") + ")"}`);
   if (f.owner || f.pwNotes) L.push(`- Propwire notes: ${[f.owner, f.pwNotes].filter(Boolean).join(" | ")}`);
   return L.join("\n");
 }
@@ -270,7 +270,7 @@ function scrRenderCalc() {
   const p = scrPrice(d, f); SCR.sel.p = p;
   if (!p.ready) { box.innerHTML = `<p class="small-muted">Enter an ARV range (or paste the Google AI response) to price the offers.</p>`; return; }
   const row = (k, v) => `<div><dt>${k}</dt><dd>${v}</dd></div>`;
-  box.innerHTML = `<div class="banner ${p.qualifies ? "info" : "warn"}" style="text-align:left;">${p.qualifies ? "Qualifies for an offer." : "Does not qualify: " + escapeHtml(p.why.join("; ")) + "."}</div>
+  box.innerHTML = `<div class="banner ${p.qualifies || p.pending ? "info" : "warn"}" style="text-align:left;">${p.qualifies ? "Qualifies for an offer (owner equity " + p.ownerEquityPct.toFixed(0) + "%)." : p.pending && !p.why.length ? "Enter the Propwire value and mortgage balance to check owner equity." : "Does not qualify: " + escapeHtml(p.why.join("; ")) + "."}</div>
     <dl class="review-grid">
       ${row(p.land ? "As-is value (middle)" : "ARV (middle of range)", scrMoney(p.arvMid))}
       ${p.land ? "" : row("Rehab", scrMoney(p.rehab)) + row("As-is", scrMoney(p.asIs)) + row("Hard Money Buyer MAO (20% down)", scrMoney(p.mao))}
@@ -315,12 +315,11 @@ function scrMount() {
   const card = document.createElement("div");
   card.className = "card"; card.id = "scr-card"; card.style.marginBottom = "16px";
   card.innerHTML = `<h3 class="step-title" style="font-size:18px;">Screen a list of active MLS deals</h3>
-    <p class="small-muted">Upload a Redfin "Download All" CSV (or a plain list of addresses). Deals are screened on days on market and property type, then you add Propwire and Google AI info to check equity and price the offers.</p>
+    <p class="small-muted">Upload a Redfin "Download All" CSV (or a plain list of addresses). Deals are screened on days on market and property type, then you add Propwire and Google AI info. Equity from Propwire is the only qualifier; offer price vs list doesn't matter.</p>
     <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px;">
       <div><label>Asset class</label><select id="scr-asset"><option value="sf">Single family (dual offer)</option><option value="land">Land (cash offer)</option></select></div>
       <div><label>Min days on market</label><input type="number" id="scr-min-dom" value="180"></div>
       <div><label>Min owner equity %</label><input type="number" id="scr-min-eq" value="25"></div>
-      <div><label>Min cash offer % of list</label><input type="number" id="scr-min-ratio" value="70"></div>
     </div>
     <input type="file" id="scr-file" accept=".csv,.txt" style="margin-top:10px;">
     <div id="scr-results" style="margin-top:10px;"></div><div id="scr-prepare" hidden></div>`;
@@ -329,7 +328,6 @@ function scrMount() {
     SCR.cfg.asset = document.getElementById("scr-asset").value;
     SCR.cfg.minDom = Number(document.getElementById("scr-min-dom").value) || 0;
     SCR.cfg.minOwnerEquityPct = Number(document.getElementById("scr-min-eq").value) || 0;
-    SCR.cfg.minOfferToListPct = Number(document.getElementById("scr-min-ratio").value) || 0;
     document.getElementById("scr-prepare").hidden = true; scrRenderTable();
   };
   card.querySelectorAll("select,input[type=number]").forEach(el => el.addEventListener("change", sync));
