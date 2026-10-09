@@ -26,7 +26,7 @@ const SCR = {
   // Offers should be attractive enough to be accepted but leave room to go up: the seller gets at least 10% of the carry
   // price in cash at closing, and the structure must still meet the buyer profit minimum if the offers are raised by
   // NEGOTIATION_ROOM (so the numbers we send can be countered up without breaking the deal). That can force offers lower.
-  MIN_SELLER_CASH_PCT: 0.10, NEGOTIATION_ROOM: 0.10,
+  MIN_SELLER_CASH_PCT: 0.10, NEGOTIATION_ROOM: 0.15,
   GEN: { esc1: 0.02, esc2: 0.015, pts: 0.02, agent: 0.03, acq: 0.50, taf: 0.025, sellerClosingShare: 0.5 },
   // Full rehab / gut: cash back to the buyer at closing = the full holding cost (24 months of hard money
   // interest) + the greater of $30,000 or 6% of ARV, so there is room for the assignment fee and extra cash
