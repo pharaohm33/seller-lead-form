@@ -246,13 +246,40 @@ function scrApplyComps(text, msgId = "scr-msg-comps") {
   return true;
 }
 
-// Google AI rehab answer -> rehab low/high (the wizard's own parseRehabText)
+// Google AI rehab answers are long: the page echoes the question ("...to reach an ARV of $540,000"), then lists
+// per-sq-ft rates, tiers and finally a total. parseRehabText (the wizard's parser) takes the FIRST dollar figure,
+// which here is the ARV or a $/sq ft rate. So pick the most likely total-repair range first, then hand just that
+// snippet to the same parser.
+function scrBestRehab(text) {
+  const t = text.replace(/how much fix and flip investor repair[^\n]*/gi, " ");    // the echoed question
+  const re = /\$\s*[\d,]+(?:\.\d+)?\s*[KkMm]?\s*(?:to|and|–|-|—)\s*\$?\s*[\d,]+(?:\.\d+)?\s*[KkMm]?/g;
+  let m, best = null;
+  while ((m = re.exec(t))) {
+    const snip = m[0], r = parseRehabText(snip);
+    if (r.low == null || r.low < 3000) continue;                                   // $15 to $25 per sq ft
+    const before = t.slice(Math.max(0, m.index - 140), m.index), after = t.slice(m.index + snip.length, m.index + snip.length + 30);
+    if (/^\s*(?:\/|per)\s*(?:sq|square)/i.test(after)) continue;                    // a rate, not a total
+    let score = 0;
+    if (/total|overall|estimated|budget|all[- ]in|recommend|bottom line|realistic|expect/i.test(before)) score += 3;
+    if (/repair|rehab|renovat|cost/i.test(before)) score += 1;
+    if (/contingency|including/i.test(after)) score += 1;
+    if (!best || score >= best.score) best = { score, low: r.low, high: r.high != null ? r.high : r.low, ctx: (before.slice(-60) + snip).replace(/\s+/g, " ").trim() };
+  }
+  if (best) return best;
+  const single = t.match(/(?:total|estimated|budget|repair)[^$\n]{0,60}\$\s*([\d,]+)/i);
+  if (single && Number(single[1].replace(/,/g, "")) >= 3000) { const v = Number(single[1].replace(/,/g, "")); return { low: v, high: v, ctx: single[0] }; }
+  return null;
+}
+
+// Google AI rehab answer -> rehab low/high
 function scrApplyRehab(text, msgId = "scr-msg-rehab") {
-  const r = parseRehabText(text);
-  if (r.low == null) { scrMsg(msgId, "Couldn't find a dollar amount in that answer. Enter rehab low/high manually.", false); return false; }
+  const r = scrBestRehab(text);
+  if (!r) { scrMsg(msgId, "Couldn't find a total repair amount in that answer. Enter rehab low/high manually.", false); return false; }
   SCR.sel.rehabAiText = text.slice(0, 6000);
-  scrSet("scr-rehab-low", r.low); scrSet("scr-rehab-high", r.high != null ? r.high : r.low);
-  scrMsg(msgId, `Parsed: rehab $${r.low.toLocaleString()} to $${(r.high != null ? r.high : r.low).toLocaleString()}. The offer uses the middle.`, true);
+  scrSet("scr-rehab-low", r.low); scrSet("scr-rehab-high", r.high);
+  const arvMid = SCR.sel.f && SCR.sel.f.arvLow && SCR.sel.f.arvHigh ? (SCR.sel.f.arvLow + SCR.sel.f.arvHigh) / 2 : 0;
+  const mid = (r.low + r.high) / 2, high = arvMid && mid > arvMid * 0.5;
+  scrMsg(msgId, `Parsed rehab $${r.low.toLocaleString()} to $${r.high.toLocaleString()} from "…${r.ctx}". The offer uses the middle.${high ? " WARNING: that is over half the ARV, so check it's the total repair figure." : ""}`, !high);
   return true;
 }
 
@@ -291,7 +318,7 @@ async function scrFillFromClipboard() {
   let o = null; try { o = JSON.parse(t); } catch (e) {}
   if ((o && o.src === "propwire") || /Estimated Property Value/.test(t)) { into("scr-in-pw"); scrApplyPropwire(t); msg("Clipboard looked like Propwire data."); }
   else if (/COMPS SUMMARY|ARV (RANGE|ESTIMATE)|AS-IS VALUE/i.test(t)) { into("scr-in-comps"); scrApplyComps(t); msg("Clipboard looked like Google AI comps."); }
-  else if (SCR.cfg.asset !== "land" && parseRehabText(t).low != null) { into("scr-in-rehab"); scrApplyRehab(t); msg("Clipboard looked like a Google AI rehab answer."); }
+  else if (SCR.cfg.asset !== "land" && scrBestRehab(t)) { into("scr-in-rehab"); scrApplyRehab(t); msg("Clipboard looked like a Google AI rehab answer."); }
   else msg("Clipboard doesn't look like Propwire or Google AI data.");
 }
 
@@ -343,6 +370,14 @@ function scrPrepare(id) {
       <a class="btn secondary" target="_blank" rel="noopener" href="https://propwire.com/search">${land ? "2" : "3"}. Open Propwire</a>
       <button type="button" class="btn primary" id="scr-fill">Fill from clipboard</button>
     </div>
+    <div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:6px;">
+      <button type="button" class="link-btn" id="scr-copy-comps">Copy comps prompt</button>
+      ${land ? "" : `<button type="button" class="link-btn" id="scr-copy-rehab">Copy rehab prompt</button>`}
+    </div>
+    <details style="margin-bottom:8px;"><summary class="small-muted" style="cursor:pointer;">Show the exact prompts</summary>
+      <p class="small-muted" style="margin:6px 0 2px;"><strong>Comps</strong></p><pre id="scr-show-comps" class="small-muted" style="white-space:pre-wrap;max-height:160px;overflow:auto;"></pre>
+      ${land ? "" : `<p class="small-muted" style="margin:6px 0 2px;"><strong>Rehab</strong> (uses the middle of the ARV range once it is filled in)</p><pre id="scr-show-rehab" class="small-muted" style="white-space:pre-wrap;"></pre>`}
+    </details>
     <p id="scr-fill-msg" class="small-muted" style="margin:0 0 10px;">Each Ask button copies the prompt and opens Google AI with it. On the answer (and on the Propwire property page) press the matching bookmarklet, then press Fill from clipboard.</p>
     <div style="margin:10px 0;">
       <label>Google AI: ARV comps answer</label>
@@ -397,6 +432,15 @@ function scrPrepare(id) {
     document.getElementById("scr-fill-msg").textContent = fit ? "Comps prompt copied and opened in Google AI. When the answer finishes, press the Google AI bookmarklet, then Fill from clipboard."
       : "Comps prompt copied. Google AI opened without it (too long for the link): paste it in, then use the bookmarklet and Fill from clipboard.";
   };
+  const curArvMid = () => { const f = SCR.sel.f || {}; return f.arvLow && f.arvHigh ? scrRound((f.arvLow + f.arvHigh) / 2) : (f.arvLow || f.arvHigh || 0); };
+  const showPrompts = () => {
+    document.getElementById("scr-show-comps").textContent = scrCompsPrompt(d);
+    const sr = document.getElementById("scr-show-rehab"); if (sr) sr.textContent = scrRehabPrompt(d, curArvMid());
+  };
+  showPrompts(); panel.addEventListener("input", showPrompts);
+  document.getElementById("scr-copy-comps").onclick = () => navigator.clipboard.writeText(scrCompsPrompt(d)).then(() => scrMsg("scr-fill-msg", "Comps prompt copied.", true));
+  const copyRehab = document.getElementById("scr-copy-rehab");
+  if (copyRehab) copyRehab.onclick = () => navigator.clipboard.writeText(scrRehabPrompt(d, curArvMid())).then(() => scrMsg("scr-fill-msg", curArvMid() ? "Rehab prompt copied (ARV " + scrMoney(curArvMid()) + ")." : "Rehab prompt copied without an ARV yet. Parse the comps first so it can include the ARV.", true));
   const askRehab = document.getElementById("scr-ask-rehab");
   if (askRehab) askRehab.onclick = () => {
     const f = SCR.sel.f || {}, arvMid = f.arvLow && f.arvHigh ? scrRound((f.arvLow + f.arvHigh) / 2) : (f.arvLow || f.arvHigh || 0);
