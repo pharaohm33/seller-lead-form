@@ -6,7 +6,7 @@
 
 const SCR = {
   rows: [], sel: null,
-  cfg: { asset: "sf", minDom: 180, minOwnerEquityPct: 25 },   // qualification = days on market + Propwire owner equity only
+  cfg: { asset: "sf", minDom: 180, minOwnerEquityPct: 90 },   // qualification = days on market + Propwire owner equity only
   AGENT_EMAIL: "montanoemmanuel@gmail.com", AGENT_NAME: "Emmanuel's LOI Helper Agent", PHONE: "5206336437",
   LOI_URL: "https://pharaohm33.github.io/loi-generator/",
   REHAB_PSF: { light: 25, moderate: 40, heavy: 55, gut: 75 },   // quick estimate when no rehab number is entered
@@ -63,6 +63,7 @@ function scrLoad(text) {
 
 /* ---------- stage 1: days on market + property type ---------- */
 function scrStage1(d) {
+  if (d.skipped) return { ok: false, why: d.skipped };
   const c = SCR.cfg, want = c.asset === "land" ? "Vacant Land" : "Single Family Residential";
   if (d.status && d.status !== "Active") return { ok: false, why: "Not active (" + d.status + ")" };
   if (d.type && d.type !== want) return { ok: false, why: d.type };
@@ -78,10 +79,16 @@ const scrMoney = n => (n < 0 ? "-$" : "$") + Math.round(Math.abs(n)).toLocaleStr
 function scrPrice(d, f) {
   const land = SCR.cfg.asset === "land";
   const list = d.price || 0;
+  const val = f.pwValue || 0, mort = f.pwMortgage || 0;
+  let ownerEquityPct = null;   // only known when Propwire equity is actually shown
+  if (f.pwEquityPct !== null && f.pwEquityPct !== undefined) ownerEquityPct = f.pwEquityPct;
+  else if (val && f.pwMortgageSet) ownerEquityPct = (val - mort) / val * 100;
+  if (ownerEquityPct === null) return { ready: false, noEquity: true };
+  const lowEquity = ownerEquityPct < SCR.cfg.minOwnerEquityPct;
   const arvMid = f.arvLow && f.arvHigh ? scrRound((f.arvLow + f.arvHigh) / 2) : (f.arvLow || f.arvHigh || 0);
   const tier = f.tier || "moderate";
   const rehab = land ? 0 : (f.rehab || (d.sqft ? scrRound(d.sqft * SCR.REHAB_PSF[tier]) : 0));
-  if (!arvMid) return { ready: false };
+  if (!arvMid) return { ready: false, ownerEquityPct, lowEquity };
   const months = f.gut ? 24 : 12;
   const suite = computeMaoSuite(arvMid, rehab, land ? "Land" : "Residential Property (1-4 units)", undefined, "On-Market");
   let cashOffer, carryOffer = 0, carryDown = 0, mao;
@@ -94,8 +101,7 @@ function scrPrice(d, f) {
   }
   const asIs = arvMid - rehab;
   const hmLoan = land ? 0 : asIs * SCR.HM_LTV / 100, hmMonthly = hmLoan * SCR.HM_RATE / 100 / 12;
-  const val = f.pwValue || 0, mort = f.pwMortgage || 0;
-  const ownerEquityPct = val ? (val - mort) / val * 100 : null;
+
   let gutPlan = null;
   if (!land && f.gut) {
     const holding = hmMonthly * months, buffer = Math.max(SCR.GUT_BUFFER_MIN, SCR.GUT_BUFFER_PCT * arvMid);
@@ -106,11 +112,10 @@ function scrPrice(d, f) {
   }
   const why = [];
   if (d.dom !== null && d.dom < SCR.cfg.minDom) why.push(`${d.dom} days on market`);
-  if (ownerEquityPct !== null && ownerEquityPct < SCR.cfg.minOwnerEquityPct) why.push(`owner equity ${ownerEquityPct.toFixed(0)}% < ${SCR.cfg.minOwnerEquityPct}%`);
+  if (lowEquity) why.push(`owner equity ${ownerEquityPct.toFixed(0)}% < ${SCR.cfg.minOwnerEquityPct}%`);
   const offerToList = list ? cashOffer / list * 100 : null;   // informational only: low and dual offers are fine
-  const pending = ownerEquityPct === null;
   return { ready: true, land, arvMid, rehab, asIs, months, suite, mao, cashOffer, carryOffer, carryDown, hmLoan, hmMonthly,
-    reserves: hmMonthly * months, gutPlan, ownerEquityPct, offerToList, equityAfterRehab: arvMid - list - rehab, pending, qualifies: why.length === 0 && !pending, why };
+    reserves: hmMonthly * months, gutPlan, ownerEquityPct, offerToList, equityAfterRehab: arvMid - list - rehab, qualifies: why.length === 0, why };
 }
 
 /* ---------- links + notes ---------- */
@@ -169,7 +174,7 @@ function scrNotes(d, f, p, loi, resume) {
   }
   if (!land) L.push(`- Hard money: ${scrMoney(p.hmLoan)} at ${SCR.HM_LTV}% LTV, ${SCR.HM_RATE}% -> ${scrMoney(p.hmMonthly)}/mo interest; reserves for ${p.months} months: ${scrMoney(p.reserves)}`);
   L.push(`- Owner equity (Propwire): ${p.ownerEquityPct === null ? "n/a" : p.ownerEquityPct.toFixed(0) + "%"}   Offer vs list: ${p.offerToList === null ? "n/a" : p.offerToList.toFixed(0) + "%"}`);
-  L.push(`- Screen: ${p.qualifies ? "QUALIFIES" : p.pending ? "PENDING (needs Propwire equity)" : "DOES NOT QUALIFY (" + p.why.join("; ") + ")"}`);
+  L.push(`- Screen: ${p.qualifies ? "QUALIFIES" : "DOES NOT QUALIFY (" + p.why.join("; ") + ")"}`);
   if (f.owner || f.pwNotes) L.push(`- Propwire notes: ${[f.owner, f.pwNotes].filter(Boolean).join(" | ")}`);
   return L.join("\n");
 }
@@ -196,12 +201,27 @@ ${what} ESTIMATE: $[single best estimate]
 }
 
 /* ---------- UI ---------- */
+function scrOrder() {
+  return SCR.rows.map(d => ({ d, s: scrStage1(d) })).sort((a, b) => (b.s.ok - a.s.ok) || ((b.d.dom || 0) - (a.d.dom || 0)));
+}
+
+// No Propwire equity shown (or not enough equity): mark the deal skipped and open the next one in line.
+function scrSkipToNext(reason) {
+  const cur = SCR.sel && SCR.sel.d;
+  if (cur) cur.skipped = reason;
+  const next = scrOrder().find(x => x.s.ok);
+  scrRenderTable();
+  const panel = document.getElementById("scr-prepare");
+  if (next) scrPrepare(next.d.id);
+  else { panel.hidden = false; panel.innerHTML = `<p class="small-muted">No more deals to review in this list.</p>`; }
+}
+
 function scrRenderTable() {
   const box = document.getElementById("scr-results");
   if (!SCR.rows.length) { box.innerHTML = ""; return; }
   const st = SCR.rows.map(d => ({ d, s: scrStage1(d) }));
   const pass = st.filter(x => x.s.ok), skip = st.length - pass.length;
-  const sorted = [...st].sort((a, b) => (b.s.ok - a.s.ok) || ((b.d.dom || 0) - (a.d.dom || 0)));
+  const sorted = scrOrder();
   box.innerHTML = `<p class="small-muted"><strong>${pass.length}</strong> of ${st.length} pass days on market + property type; ${skip} skipped.</p>
     <table class="crm-table"><thead><tr><th>Address</th><th>Type</th><th>List</th><th>Days</th><th>$/sf</th><th>Screen</th><th></th></tr></thead><tbody>
     ${sorted.map(({ d, s }) => `<tr style="cursor:default; ${s.ok ? "" : "opacity:.5"}">
@@ -234,8 +254,9 @@ function scrPrepare(id) {
       <div><label>${land ? "As-is value high" : "ARV high"}</label><input type="number" id="scr-arv-high"></div>
       ${land ? "" : `<div><label>Rehab $ (blank = by tier)</label><input type="number" id="scr-rehab"></div>
       <div><label>Rehab tier</label><select id="scr-tier"><option value="light">Light $25/sf</option><option value="moderate" selected>Moderate $40/sf</option><option value="heavy">Heavy $55/sf</option><option value="gut">Gut $75/sf</option></select></div>`}
+      <div><label>Propwire equity % (if shown)</label><input type="number" id="scr-pw-eq"></div>
       <div><label>Propwire est. value</label><input type="number" id="scr-pw-val"></div>
-      <div><label>Open mortgage balance</label><input type="number" id="scr-pw-mort"></div>
+      <div><label>Open mortgage balance (0 = free &amp; clear)</label><input type="number" id="scr-pw-mort"></div>
       <div><label>Owner name</label><input type="text" id="scr-owner"></div>
     </div>
     ${land ? "" : `<label style="display:flex;gap:6px;align-items:center;"><input type="checkbox" id="scr-gut" style="width:auto;margin:0"> Full rehab / gut (24-month reserves and carry)</label>`}
@@ -246,7 +267,9 @@ function scrPrepare(id) {
     const v = i => Number((document.getElementById(i) || {}).value) || 0;
     SCR.sel.f = { arvLow: v("scr-arv-low"), arvHigh: v("scr-arv-high"), rehab: v("scr-rehab"),
       tier: (document.getElementById("scr-tier") || {}).value, gut: !!(document.getElementById("scr-gut") || {}).checked,
-      pwValue: v("scr-pw-val"), pwMortgage: v("scr-pw-mort"), owner: document.getElementById("scr-owner").value.trim(),
+      pwValue: v("scr-pw-val"), pwMortgage: v("scr-pw-mort"),
+      pwMortgageSet: document.getElementById("scr-pw-mort").value !== "",
+      pwEquityPct: document.getElementById("scr-pw-eq").value !== "" ? Number(document.getElementById("scr-pw-eq").value) : null, owner: document.getElementById("scr-owner").value.trim(),
       pwNotes: document.getElementById("scr-pw-notes").value.trim() };
     scrRenderCalc();
   };
@@ -268,9 +291,15 @@ function scrPrepare(id) {
 function scrRenderCalc() {
   const { d, f } = SCR.sel, box = document.getElementById("scr-calc");
   const p = scrPrice(d, f); SCR.sel.p = p;
-  if (!p.ready) { box.innerHTML = `<p class="small-muted">Enter an ARV range (or paste the Google AI response) to price the offers.</p>`; return; }
+  const skipBtn = (label) => `<button type="button" class="btn secondary" id="scr-skip">${label}</button>`;
+  const wireSkip = (reason) => { const b = document.getElementById("scr-skip"); if (b) b.onclick = () => scrSkipToNext(reason); };
+  if (p.noEquity) {
+    box.innerHTML = `<div class="banner warn" style="text-align:left;">No Propwire equity shown. Enter the equity %, or the value and mortgage balance. If Propwire doesn't show equity, skip this one.</div>${skipBtn("Skip to next deal")}`;
+    wireSkip("No Propwire equity shown"); return;
+  }
+  if (!p.ready) { box.innerHTML = `<p class="small-muted">Enter an ARV range (or paste the Google AI response) to price the offers.</p>${skipBtn("Skip to next deal")}`; wireSkip("Skipped"); return; }
   const row = (k, v) => `<div><dt>${k}</dt><dd>${v}</dd></div>`;
-  box.innerHTML = `<div class="banner ${p.qualifies || p.pending ? "info" : "warn"}" style="text-align:left;">${p.qualifies ? "Qualifies for an offer (owner equity " + p.ownerEquityPct.toFixed(0) + "%)." : p.pending && !p.why.length ? "Enter the Propwire value and mortgage balance to check owner equity." : "Does not qualify: " + escapeHtml(p.why.join("; ")) + "."}</div>
+  box.innerHTML = `<div class="banner ${p.qualifies ? "info" : "warn"}" style="text-align:left;">${p.qualifies ? "Qualifies for an offer (owner equity " + p.ownerEquityPct.toFixed(0) + "%)." : "Does not qualify: " + escapeHtml(p.why.join("; ")) + ". Skip it rather than forcing a tight offer."}</div>
     <dl class="review-grid">
       ${row(p.land ? "As-is value (middle)" : "ARV (middle of range)", scrMoney(p.arvMid))}
       ${p.land ? "" : row("Rehab", scrMoney(p.rehab)) + row("As-is", scrMoney(p.asIs)) + row("Hard Money Buyer MAO (20% down)", scrMoney(p.mao))}
@@ -285,12 +314,14 @@ function scrRenderCalc() {
       <button type="button" class="btn secondary" id="scr-open-loi">Open LOI generator</button>
       <button type="button" class="btn secondary" id="scr-gmail">Draft in Gmail</button>
       <button type="button" class="btn secondary" id="scr-copy-notes">Copy notes</button>
+      <button type="button" class="btn secondary" id="scr-skip">Skip to next deal</button>
     </div><p id="scr-msg" class="small-muted"></p>`;
   const build = () => {
     const a = scrAnswers(d, f, p), loi = scrLoiLink(d, p), resume = scrResumeLink(a);
     return { a, loi, resume, notes: scrNotes(d, f, p, loi, resume) };
   };
   const msg = t => { document.getElementById("scr-msg").textContent = t; };
+  document.getElementById("scr-skip").onclick = () => scrSkipToNext(p.lowEquity ? `Owner equity ${p.ownerEquityPct.toFixed(0)}% < ${SCR.cfg.minOwnerEquityPct}%` : "Skipped");
   document.getElementById("scr-open-loi").onclick = () => window.open(build().loi, "_blank", "noopener");
   document.getElementById("scr-gmail").onclick = () => {
     const b = build(); let link = scrGmailLink(d, b.notes);
@@ -315,11 +346,11 @@ function scrMount() {
   const card = document.createElement("div");
   card.className = "card"; card.id = "scr-card"; card.style.marginBottom = "16px";
   card.innerHTML = `<h3 class="step-title" style="font-size:18px;">Screen a list of active MLS deals</h3>
-    <p class="small-muted">Upload a Redfin "Download All" CSV (or a plain list of addresses). Deals are screened on days on market and property type, then you add Propwire and Google AI info. Equity from Propwire is the only qualifier; offer price vs list doesn't matter.</p>
+    <p class="small-muted">Upload a Redfin "Download All" CSV (or a plain list of addresses). Deals are screened on days on market and property type, then you add Propwire and Google AI info. Propwire owner equity (90%+ by default) is the only qualifier; no equity shown means skip. Offer price vs list doesn't matter.</p>
     <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px;">
       <div><label>Asset class</label><select id="scr-asset"><option value="sf">Single family (dual offer)</option><option value="land">Land (cash offer)</option></select></div>
       <div><label>Min days on market</label><input type="number" id="scr-min-dom" value="180"></div>
-      <div><label>Min owner equity %</label><input type="number" id="scr-min-eq" value="25"></div>
+      <div><label>Min owner equity %</label><input type="number" id="scr-min-eq" value="90"></div>
     </div>
     <input type="file" id="scr-file" accept=".csv,.txt" style="margin-top:10px;">
     <div id="scr-results" style="margin-top:10px;"></div><div id="scr-prepare" hidden></div>`;
