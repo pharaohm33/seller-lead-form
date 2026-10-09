@@ -10,9 +10,16 @@ const SCR = {
   AGENT_EMAIL: "montanoemmanuel@gmail.com", AGENT_NAME: "Emmanuel's LOI Helper Agent", PHONE: "5206336437",
   LOI_URL: "https://pharaohm33.github.io/loi-generator/",
   REHAB_PSF: { light: 25, moderate: 40, heavy: 55, gut: 75 },   // quick estimate when no rehab number is entered
-  HM_LTV: 60, HM_RATE: 9.5,
-  CASH_DISCOUNT: 0.20,      // flip cash offer = Hard Money Buyer MAO (20% Down) less this
-  CARRY_PREMIUM: 0.10, CARRY_DOWN: 0.40,
+  HM_RATE: 9.5,
+  // "Seller-friendly" flip structure, copied from the 257 E Ashurst Dr link using its ACTUAL ratios (not rounded):
+  //   carry price $420,000 / ARV $600,500;  cash offer $200,000 / carry;  seller cash at closing $128,000 / carry;
+  //   buyer cash back at closing $27,548 / carry.
+  // The generator's acquisition fee is 50% of the buyer's net cash and the seller bears half of closing costs, so the
+  // hard money loan is the lever: each deal's LTV is SOLVED so buyer cash back hits that same % of the carry price
+  // (it came out at 40% on Ashurst; bigger rehab or a different ARV/price mix moves it).
+  CARRY_PCT_OF_ARV: 420000 / 600500, CASH_PCT_OF_CARRY: 200000 / 420000, CARRY_DOWN: 128000 / 420000, CASHBACK_PCT: 27548 / 420000,
+  LTV_MIN: 0.10, LTV_MAX: 0.70,
+  GEN: { esc1: 0.02, esc2: 0.015, pts: 0.02, agent: 0.03, acq: 0.50, taf: 0.025, sellerClosingShare: 0.5 },
   // Full rehab / gut: cash back to the buyer at closing = the full holding cost (24 months of hard money
   // interest) + the greater of $30,000 or 6% of ARV, so there is room for the assignment fee and extra cash
   // for the buyer. Seller cash at closing is whatever is left of the loan after that and closing costs.
@@ -76,6 +83,18 @@ function scrStage1(d) {
 const scrRound = n => Math.round(n / 500) * 500;
 const scrMoney = n => (n < 0 ? "-$" : "$") + Math.round(Math.abs(n)).toLocaleString();
 
+// Estimate of the LOI generator's "Cash at Close" math (cash template: acquisition fee = 50% of net cash,
+// escrow 2% + 1.5%, 2 points, 3% agent fee, TAF 2.5%, closing costs split). Close, not exact: check the generator.
+function scrModel(pp, cac, loan, asIs) {
+  const g = SCR.GEN, esc2 = Math.max(pp - cac, 0) * g.esc2;      // 2nd escrow is on the seller carry, not the price
+  const noAcq = pp * (g.esc1 + g.agent) + esc2 + loan * g.pts;
+  const tafPrinNoAcq = Math.max(0, (asIs - loan) + (noAcq - esc2)), tafNo = tafPrinNoAcq * g.taf;
+  const B0 = loan - cac - noAcq - tafNo, t = tafPrinNoAcq > 0 ? g.taf : 0;
+  const acq = Math.max(0, B0) * g.acq / (1 + g.acq * t), closing = noAcq + acq;
+  const taf = Math.max(0, (asIs - loan) + (closing - esc2)) * g.taf;
+  return { closing, acq, taf, cashBack: loan - cac - closing - taf, sellerNet: cac - closing * g.sellerClosingShare };
+}
+
 function scrPrice(d, f) {
   const land = SCR.cfg.asset === "land";
   const list = d.price || 0;
@@ -94,31 +113,36 @@ function scrPrice(d, f) {
   if (!arvMid) return { ready: false, ownerEquityPct, lowEquity };
   const months = f.gut ? 24 : 12;
   const suite = computeMaoSuite(arvMid, rehab, land ? "Land" : "Residential Property (1-4 units)", undefined, "On-Market");
-  let cashOffer, carryOffer = 0, carryDown = 0, mao;
+  let cashOffer, carryOffer = 0, carryDown = 0, mao, ltv = 0, ltvNote = "";
+  const asIs = arvMid - rehab;
+  let hmLoan = 0, hmMonthly = 0, gutPlan = null, modelCarry = null, modelCash = null;
   if (land) { mao = suite.maoCash; cashOffer = scrRound(mao); }
   else {
-    mao = suite.maoHardMoney20;
-    cashOffer = scrRound(mao * (1 - SCR.CASH_DISCOUNT));
-    carryOffer = scrRound(cashOffer * (1 + SCR.CARRY_PREMIUM));
-    carryDown = scrRound(carryOffer * SCR.CARRY_DOWN);
-  }
-  const asIs = arvMid - rehab;
-  const hmLoan = land ? 0 : asIs * SCR.HM_LTV / 100, hmMonthly = hmLoan * SCR.HM_RATE / 100 / 12;
-
-  let gutPlan = null;
-  if (!land && f.gut) {
-    const holding = hmMonthly * months, buffer = Math.max(SCR.GUT_BUFFER_MIN, SCR.GUT_BUFFER_PCT * arvMid);
-    const target = holding + buffer, estClosing = SCR.EST_CLOSING_PCT * carryOffer;
-    const raw = hmLoan - estClosing - target;           // cash to seller that still leaves `target` for the buyer
-    carryDown = scrRound(Math.max(raw, 0));
-    gutPlan = { holding, buffer, target, estClosing, cashBack: hmLoan - estClosing - carryDown, shortfall: raw < 0 ? -raw : 0 };
+    mao = suite.maoHardMoney20;                                     // reference only
+    const carryRaw = Math.round(SCR.CARRY_PCT_OF_ARV * arvMid / 1000) * 1000;
+    carryOffer = list ? Math.min(list, carryRaw) : carryRaw;
+    cashOffer = scrRound(SCR.CASH_PCT_OF_CARRY * carryOffer);
+    carryDown = scrRound(SCR.CARRY_DOWN * carryOffer);
+    // Solve the hard money LTV so buyer cash back = the target (standard: Ashurst's % of carry; gut: full holding
+    // cost + the greater of $30k or 6% of ARV). cashBack rises with the loan, so bisection is safe.
+    const buffer = Math.max(SCR.GUT_BUFFER_MIN, SCR.GUT_BUFFER_PCT * arvMid);
+    const targetFor = loan => f.gut ? loan * SCR.HM_RATE / 100 / 12 * months + buffer : SCR.CASHBACK_PCT * carryOffer;
+    const gap = r => scrModel(carryOffer, carryDown, asIs * r, asIs).cashBack - targetFor(asIs * r);
+    let lo = SCR.LTV_MIN, hi = SCR.LTV_MAX;
+    if (gap(hi) < 0) { ltv = hi; ltvNote = "capped at the max LTV: the loan can't fully fund the target cash back"; }
+    else if (gap(lo) > 0) { ltv = lo; ltvNote = "at the minimum LTV already"; }
+    else { for (let i = 0; i < 40; i++) { const mid = (lo + hi) / 2; if (gap(mid) < 0) lo = mid; else hi = mid; } ltv = Math.round((lo + hi) / 2 * 1000) / 10 / 100; }
+    hmLoan = asIs * ltv; hmMonthly = hmLoan * SCR.HM_RATE / 100 / 12;
+    modelCarry = scrModel(carryOffer, carryDown, hmLoan, asIs);
+    modelCash = scrModel(cashOffer, cashOffer, hmLoan, asIs);
+    if (f.gut) gutPlan = { holding: hmMonthly * months, buffer, target: targetFor(hmLoan), estClosing: modelCarry.closing, cashBack: modelCarry.cashBack, shortfall: ltvNote.startsWith("capped") ? targetFor(hmLoan) - modelCarry.cashBack : 0 };
   }
   const why = [];
   if (d.dom !== null && d.dom < SCR.cfg.minDom) why.push(`${d.dom} days on market`);
   if (lowEquity) why.push(`owner equity ${ownerEquityPct.toFixed(0)}% < ${SCR.cfg.minOwnerEquityPct}%`);
   const offerToList = list ? cashOffer / list * 100 : null;   // informational only: low and dual offers are fine
-  return { ready: true, land, arvMid, rehab, rehabSource, asIs, months, suite, mao, cashOffer, carryOffer, carryDown, hmLoan, hmMonthly,
-    reserves: hmMonthly * months, gutPlan, ownerEquityPct, offerToList, equityAfterRehab: arvMid - list - rehab, qualifies: why.length === 0, why };
+  return { ready: true, land, arvMid, rehab, rehabSource, asIs, months, suite, mao, cashOffer, carryOffer, carryDown, hmLoan, hmMonthly, ltv, ltvNote,
+    reserves: hmMonthly * months, gutPlan, modelCarry, modelCash, ownerEquityPct, offerToList, equityAfterRehab: arvMid - list - rehab, qualifies: why.length === 0, why };
 }
 
 /* ---------- links + notes ---------- */
@@ -128,7 +152,7 @@ function scrLoiLink(d, p) {
     address: d.address, units: 1, prop_type: p.land ? "land" : "residential", sqft: d.sqft || "", appreciation: 3, noi_growth: 2,
     purchase_price: p.land ? p.cashOffer : p.carryOffer, cash_at_closing: p.land ? p.cashOffer : p.carryDown,
     dual_cash_price: p.land ? "" : p.cashOffer, as_is_value: p.asIs, arv: p.arvMid, rehab: p.rehab,
-    sr_rate: SCR.HM_RATE, sr_amort: 30, sr_term: 12, sr_ltv: SCR.HM_LTV, sr_dscr: 1.25, sr_points: 2,
+    sr_rate: SCR.HM_RATE, sr_amort: 30, sr_term: 12, sr_ltv: Math.round(p.ltv * 1000) / 10, sr_dscr: 1.25, sr_points: 2,
     hm_ltc: 90, hm_arv_pct: 75, hm_rehab_pct: 100, hm_rehab_months: p.months, sc_rate: 0, sc_term: p.months / 12, monthly_principal: 0,
     esc1_pct: 2, esc2_pct: 1.5, acq_pct: 50, broker_pct: 0, taf_pct: 2.5, park_escrow: "N", exit_type: "sale", exit_sale_costs: 6,
     exit_refi_ltv: 75, exit_refi_rate: 7.5, exit_dscr_req: 1.25, exit_amort: 30, exit_refi_costs: 2.5, exit_refi_fees: 15000,
@@ -169,13 +193,14 @@ function scrNotes(d, f, p, loi, resume) {
     `- sendmyseller.com resume link (do NOT submit): ${resume}`, "", "UNDERWRITING",
     land ? `- As-is value (middle of range): ${scrMoney(p.arvMid)}` : `- ARV (middle of comp range): ${scrMoney(p.arvMid)}   Rehab: ${scrMoney(p.rehab)}   As-is: ${scrMoney(p.asIs)}`,
     land ? `- Cash offer (land): ${scrMoney(p.cashOffer)}   [site MAO: ${scrMoney(p.mao)}]`
-         : `- Hard Money Buyer MAO (20% down): ${scrMoney(p.mao)}\n- Offer A, all cash (MAO less ${SCR.CASH_DISCOUNT * 100}%): ${scrMoney(p.cashOffer)}\n- Offer B, seller carry: ${scrMoney(p.carryOffer)} (${scrMoney(p.carryDown)} at closing, balance carried ${p.months} months at 0%)`,
+         : `- Hard Money Buyer MAO (20% down): ${scrMoney(p.mao)}\n- Offer A, all cash (${(SCR.CASH_PCT_OF_CARRY * 100).toFixed(1)}% of the carry price): ${scrMoney(p.cashOffer)}\n- Offer B, seller carry (${(SCR.CARRY_PCT_OF_ARV * 100).toFixed(1)}% of ARV, capped at list): ${scrMoney(p.carryOffer)} (${scrMoney(p.carryDown)} at closing, balance carried ${p.months} months at 0%)`,
   ];
   if (p.gutPlan) {
     const g = p.gutPlan;
-    L.push(`- GUT cash at closing: buyer gets ${scrMoney(g.cashBack)} back = holding cost ${scrMoney(g.holding)} (${p.months} mo of hard money interest) + cushion ${scrMoney(g.buffer)} (greater of ${scrMoney(SCR.GUT_BUFFER_MIN)} or ${SCR.GUT_BUFFER_PCT * 100}% of ARV) for assignment fee / extra buyer cash. Seller cash at closing ${scrMoney(p.carryDown)}, rest carried. Closing costs estimated at ${SCR.EST_CLOSING_PCT * 100}% of price; confirm in the LOI generator.${g.shortfall ? " NOTE: the loan can't fully fund this; short by " + scrMoney(g.shortfall) + "." : ""}`);
+    L.push(`- GUT cash at closing: buyer gets ${scrMoney(g.cashBack)} back = holding cost ${scrMoney(g.holding)} (${p.months} mo of hard money interest) + cushion ${scrMoney(g.buffer)} (greater of ${scrMoney(SCR.GUT_BUFFER_MIN)} or ${SCR.GUT_BUFFER_PCT * 100}% of ARV) for assignment fee / extra buyer cash. Seller cash at closing ${scrMoney(p.carryDown)}, rest carried. Estimated with the generator's fee structure; confirm in the LOI generator.${g.shortfall ? " NOTE: the loan can't fully fund this; short by " + scrMoney(g.shortfall) + "." : ""}`);
   }
-  if (!land) L.push(`- Hard money: ${scrMoney(p.hmLoan)} at ${SCR.HM_LTV}% LTV, ${SCR.HM_RATE}% -> ${scrMoney(p.hmMonthly)}/mo interest; reserves for ${p.months} months: ${scrMoney(p.reserves)}`);
+  if (p.modelCarry) L.push(`- Estimated (check in the generator): carry offer -> seller nets ${scrMoney(p.modelCarry.sellerNet)} at closing after their half of closing costs, buyer cash back ${scrMoney(p.modelCarry.cashBack)}. Cash offer -> seller nets ${scrMoney(p.modelCash.sellerNet)}, buyer ${p.modelCash.cashBack >= 0 ? "cash back " + scrMoney(p.modelCash.cashBack) : "brings " + scrMoney(-p.modelCash.cashBack)}.`);
+  if (!land) L.push(`- Hard money: ${scrMoney(p.hmLoan)} at ${(p.ltv * 100).toFixed(1)}% LTV, ${SCR.HM_RATE}% -> ${scrMoney(p.hmMonthly)}/mo interest; reserves for ${p.months} months: ${scrMoney(p.reserves)}`);
   L.push(`- Owner equity (Propwire): ${p.ownerEquityPct === null ? "n/a" : p.ownerEquityPct.toFixed(0) + "%"}   Offer vs list: ${p.offerToList === null ? "n/a" : p.offerToList.toFixed(0) + "%"}`);
   L.push(`- Screen: ${p.qualifies ? "QUALIFIES" : "DOES NOT QUALIFY (" + p.why.join("; ") + ")"}`);
   if (f.owner || f.pwNotes) L.push(`- Propwire notes: ${[f.owner, f.pwNotes].filter(Boolean).join(" | ")}`);
@@ -472,8 +497,9 @@ function scrRenderCalc() {
       ${row(p.land ? "As-is value (middle)" : "ARV (middle of range)", scrMoney(p.arvMid))}
       ${p.land ? "" : row("Rehab (" + p.rehabSource + ")", scrMoney(p.rehab)) + row("As-is", scrMoney(p.asIs)) + row("Hard Money Buyer MAO (20% down)", scrMoney(p.mao))}
       ${row(p.land ? "Cash offer (land)" : "Offer A: all cash", scrMoney(p.cashOffer))}
-      ${p.land ? "" : row("Offer B: seller carry", `${scrMoney(p.carryOffer)} (${scrMoney(p.carryDown)} down, ${p.months} mo)`) + row("Hard money loan", `${scrMoney(p.hmLoan)} → ${scrMoney(p.hmMonthly)}/mo`) + row(`Reserves (${p.months} mo)`, scrMoney(p.reserves))}
+      ${p.land ? "" : row("Offer B: seller carry", `${scrMoney(p.carryOffer)} (${scrMoney(p.carryDown)} down, ${p.months} mo)`) + row("Hard money loan (LTV solved)", `${scrMoney(p.hmLoan)} at ${(p.ltv * 100).toFixed(1)}% LTV → ${scrMoney(p.hmMonthly)}/mo${p.ltvNote ? " (" + escapeHtml(p.ltvNote) + ")" : ""}`) + row(`Reserves (${p.months} mo)`, scrMoney(p.reserves))}
       ${p.gutPlan ? row("Gut: cash back to buyer at close", `${scrMoney(p.gutPlan.cashBack)} = holding ${scrMoney(p.gutPlan.holding)} + cushion ${scrMoney(p.gutPlan.buffer)}`) + row("Gut: cash to seller at close", scrMoney(p.carryDown) + (p.gutPlan.shortfall ? ` (loan short by ${scrMoney(p.gutPlan.shortfall)})` : "")) : ""}
+      ${p.modelCarry ? row("Carry offer: seller nets at close (est.)", scrMoney(p.modelCarry.sellerNet)) + row("Carry offer: buyer cash back (est.)", scrMoney(p.modelCarry.cashBack)) + row("Cash offer: seller nets (est.)", scrMoney(p.modelCash.sellerNet)) : ""}
       ${row("Offer vs list", p.offerToList === null ? "n/a" : p.offerToList.toFixed(0) + "%")}
       ${row("Owner equity", p.ownerEquityPct === null ? "enter Propwire value + mortgage" : p.ownerEquityPct.toFixed(0) + "%")}
     </dl>
