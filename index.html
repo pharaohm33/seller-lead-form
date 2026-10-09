@@ -262,8 +262,6 @@
           <span>You've texted or called, and they haven't responded or countered yet.</span></button>
         <button type="button" class="save-menu-item" data-crm-status="Offer sent to cold lead">Offer sent to cold lead
           <span>A text or written offer is out. Waiting on their response.</span></button>
-        <button type="button" class="save-menu-item" data-crm-status="Auto Pre-LOI Before Contact">Auto Pre-LOI Before Contact
-          <span>Offer prepared before any contact. Nothing is submitted and no one is emailed.</span></button>
         <div class="save-menu-divider"></div>
         <button type="button" class="save-menu-item link-style" id="open-crm-btn">Open my CRM &rarr;</button>
       </div>
@@ -358,6 +356,15 @@
     </div>
   </div>
   <div id="admin-message" class="banner info" hidden></div>
+  <div style="display:flex; gap:6px; margin-bottom:14px;">
+    <button type="button" class="btn primary" id="admin-tab-leads">Leads</button>
+    <button type="button" class="btn secondary" id="admin-tab-preloi">Auto Pre-LOI Before Contact</button>
+  </div>
+  <div id="preloi-panel" hidden>
+    <div class="banner info" style="text-align:left;">Offers prepared before any contact. Nothing here was submitted and no notification email was sent.
+      <strong>Notes</strong> holds the underwriting plus both labeled links (LOI generator and sendmyseller resume link).</div>
+    <div id="preloi-entries"></div>
+  </div>
   <div style="display:flex; gap:8px; margin-bottom:16px;">
     <input type="text" id="crm-search-input" placeholder="Search by address, city, zip, name, or email..." style="flex:1; width:auto; margin-bottom:0;">
     <select id="crm-sort-select" style="flex:0 0 auto; width:auto;">

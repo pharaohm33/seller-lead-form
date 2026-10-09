@@ -155,6 +155,14 @@ function doPost(e) {
         return jsonOut(deletePublicNote(body));
       case 'fetchListing':
         return jsonOut(fetchListing(body));
+      case 'adminSavePreLoi':
+        return jsonOut(withSession(body, adminSavePreLoi));
+      case 'adminGetPreLoi':
+        return jsonOut(withSession(body, adminGetPreLoi));
+      case 'adminGetPreLoiEntry':
+        return jsonOut(withSession(body, adminGetPreLoiEntry));
+      case 'adminDeletePreLoi':
+        return jsonOut(withSession(body, adminDeletePreLoi));
       case 'saveCrmEntry':
         return jsonOut(saveCrmEntry(body));
       case 'getCrmEntries':
@@ -528,7 +536,10 @@ function earlyCaptureLead(body) {
 // still the only way a lead reaches admin.
 
 const CRM_SHEET = 'CRM';
-const CRM_STATUSES = ['Contact Initiated on Cold Lead', 'Offer sent to cold lead', 'Auto Pre-LOI Before Contact'];
+const CRM_STATUSES = ['Contact Initiated on Cold Lead', 'Offer sent to cold lead'];
+// Offers prepared before any contact. Admin-session only (the bot logs in with ADMIN_PASSWORD, like the
+// admin does) and never visible through the public, email-keyed CRM routes below.
+const PRELOI_STATUS = 'Auto Pre-LOI Before Contact';
 // Sheets caps a single cell at 50,000 characters, so the answers JSON is split across a few columns.
 const CRM_ANSWER_CHUNK_SIZE = 45000;
 const CRM_ANSWER_COLUMNS = ['Answers 1', 'Answers 2', 'Answers 3', 'Answers 4'];
@@ -578,9 +589,13 @@ function writeCrmRow(sheet, rowNum, fields) {
 }
 
 function saveCrmEntry(body) {
+  return saveCrmEntryCore(body, CRM_STATUSES);
+}
+
+function saveCrmEntryCore(body, allowedStatuses) {
   const email = normalizeCrmEmail(body.email);
   if (!email) return { ok: false, error: 'A valid email is required.' };
-  if (CRM_STATUSES.indexOf(body.status) === -1) return { ok: false, error: 'Unknown CRM status.' };
+  if (allowedStatuses.indexOf(body.status) === -1) return { ok: false, error: 'Unknown CRM status.' };
   const answers = body.answers;
   if (!answers || typeof answers !== 'object') return { ok: false, error: 'Nothing to save.' };
   const json = JSON.stringify(answers);
@@ -632,7 +647,7 @@ function getCrmEntries(body) {
   if (!email) return { ok: false, error: 'A valid email is required.' };
   const sheet = getSheet(CRM_SHEET, CRM_COLUMNS);
   const entries = sheetToObjects(sheet)
-    .filter(function (r) { return normalizeCrmEmail(r['Owner Email']) === email; })
+    .filter(function (r) { return normalizeCrmEmail(r['Owner Email']) === email && r['Status'] !== PRELOI_STATUS; })
     .map(crmSummary);
   entries.sort(function (a, b) { return String(b.updatedAt).localeCompare(String(a.updatedAt)); });
   return { ok: true, entries: entries };
@@ -645,7 +660,7 @@ function getCrmEntry(body) {
   if (!email || !body.crmId) return { ok: false, error: 'Missing information.' };
   const sheet = getSheet(CRM_SHEET, CRM_COLUMNS);
   const row = findCrmRow(sheet, String(body.crmId));
-  if (!row || normalizeCrmEmail(row['Owner Email']) !== email) {
+  if (!row || row['Status'] === PRELOI_STATUS || normalizeCrmEmail(row['Owner Email']) !== email) {
     return { ok: false, error: 'No saved lead found for that email address.' };
   }
   const json = CRM_ANSWER_COLUMNS.map(function (c) { return row[c] || ''; }).join('');
@@ -667,7 +682,7 @@ function updateCrmStatus(body) {
   try {
     const sheet = getSheet(CRM_SHEET, CRM_COLUMNS);
     const row = findCrmRow(sheet, String(body.crmId));
-    if (!row || normalizeCrmEmail(row['Owner Email']) !== email) {
+    if (!row || row['Status'] === PRELOI_STATUS || normalizeCrmEmail(row['Owner Email']) !== email) {
       return { ok: false, error: 'No saved lead found for that email address.' };
     }
     writeCrmRow(sheet, row._row, { 'Status': body.status, 'Updated At': new Date().toISOString() });
@@ -685,9 +700,55 @@ function deleteCrmEntry(body) {
   try {
     const sheet = getSheet(CRM_SHEET, CRM_COLUMNS);
     const row = findCrmRow(sheet, String(body.crmId));
-    if (!row || normalizeCrmEmail(row['Owner Email']) !== email) {
+    if (!row || row['Status'] === PRELOI_STATUS || normalizeCrmEmail(row['Owner Email']) !== email) {
       return { ok: false, error: 'No saved lead found for that email address.' };
     }
+    sheet.deleteRow(row._row);
+    return { ok: true };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// ---------- Admin: Auto Pre-LOI Before Contact ----------
+// Never calls submitLead / MailApp, so saving here sends no notification email.
+
+function adminSavePreLoi(body) {
+  body.status = PRELOI_STATUS;
+  if (!normalizeCrmEmail(body.email)) body.email = PropertiesService.getScriptProperties().getProperty('ADMIN_EMAIL') || '';
+  // An existing crmId is only updated if it is itself a Pre-LOI row.
+  if (body.crmId) {
+    const row = findCrmRow(getSheet(CRM_SHEET, CRM_COLUMNS), String(body.crmId));
+    if (row && row['Status'] !== PRELOI_STATUS) body.crmId = '';
+  }
+  return saveCrmEntryCore(body, [PRELOI_STATUS]);
+}
+
+function adminGetPreLoi(body) {
+  const entries = sheetToObjects(getSheet(CRM_SHEET, CRM_COLUMNS))
+    .filter(function (r) { return r['Status'] === PRELOI_STATUS; })
+    .map(crmSummary);
+  entries.sort(function (a, b) { return String(b.updatedAt).localeCompare(String(a.updatedAt)); });
+  return { ok: true, entries: entries };
+}
+
+function adminGetPreLoiEntry(body) {
+  const row = findCrmRow(getSheet(CRM_SHEET, CRM_COLUMNS), String(body.crmId || ''));
+  if (!row || row['Status'] !== PRELOI_STATUS) return { ok: false, error: 'Not found.' };
+  let answers = {};
+  try { answers = JSON.parse(CRM_ANSWER_COLUMNS.map(function (c) { return row[c] || ''; }).join('')); } catch (e) {}
+  const entry = crmSummary(row);
+  entry.answers = answers;
+  return { ok: true, entry: entry };
+}
+
+function adminDeletePreLoi(body) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const sheet = getSheet(CRM_SHEET, CRM_COLUMNS);
+    const row = findCrmRow(sheet, String(body.crmId || ''));
+    if (!row || row['Status'] !== PRELOI_STATUS) return { ok: false, error: 'Not found.' };
     sheet.deleteRow(row._row);
     return { ok: true };
   } finally {

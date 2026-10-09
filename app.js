@@ -5175,8 +5175,7 @@ function copyResumeLink() {
 
 const CRM_STATUS_CONTACT = "Contact Initiated on Cold Lead";
 const CRM_STATUS_OFFER = "Offer sent to cold lead";
-const CRM_STATUS_PRELOI = "Auto Pre-LOI Before Contact"; // offers prepared before any contact; never emails admin
-const CRM_STATUSES = [CRM_STATUS_CONTACT, CRM_STATUS_OFFER, CRM_STATUS_PRELOI];
+const CRM_STATUSES = [CRM_STATUS_CONTACT, CRM_STATUS_OFFER];
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function answersForCrm() {
@@ -5337,7 +5336,7 @@ document.getElementById("status-lookup-btn").onclick = async () => {
 };
 
 /* ---------- Personal CRM list: tabs per status, Resume / Delete ---------- */
-let crmTabStatus = CRM_STATUS_PRELOI;
+let crmTabStatus = CRM_STATUS_CONTACT;
 function renderCrmEntries(email, entries) {
   const section = document.getElementById("crm-section");
   const wrap = document.getElementById("crm-entries");
@@ -5346,7 +5345,7 @@ function renderCrmEntries(email, entries) {
   const tabs = CRM_STATUSES.map(s => [s, entries.filter(e => e.status === s).length]);
   if (!tabs.some(([s, n]) => s === crmTabStatus && n)) {
     const first = tabs.find(([, n]) => n);
-    crmTabStatus = first ? first[0] : CRM_STATUS_PRELOI;
+    crmTabStatus = first ? first[0] : CRM_STATUS_CONTACT;
   }
   const shown = entries.filter(e => e.status === crmTabStatus);
   wrap.innerHTML = `
@@ -5872,6 +5871,60 @@ async function showAdminView() {
   document.getElementById("public-view").hidden = true;
   document.getElementById("admin-view").hidden = false;
   await loadLeads();
+}
+
+/* ---------- Admin: Auto Pre-LOI Before Contact tab (admin session only) ---------- */
+function showAdminTab(which) {
+  const pre = which === "preloi";
+  document.getElementById("preloi-panel").hidden = !pre;
+  document.getElementById("crm-table-wrap").hidden = pre;
+  document.getElementById("admin-tab-leads").className = "btn " + (pre ? "secondary" : "primary");
+  document.getElementById("admin-tab-preloi").className = "btn " + (pre ? "primary" : "secondary");
+  if (pre) loadPreLoi();
+}
+document.getElementById("admin-tab-leads").onclick = () => showAdminTab("leads");
+document.getElementById("admin-tab-preloi").onclick = () => showAdminTab("preloi");
+
+async function loadPreLoi() {
+  const wrap = document.getElementById("preloi-entries");
+  wrap.innerHTML = `<p class="small-muted">Loading...</p>`;
+  const res = await api("adminGetPreLoi", { token: sessionToken });
+  if (!res.ok) { wrap.innerHTML = `<p class="small-muted">${escapeHtml(res.error || "Couldn't load.")}</p>`; return; }
+  if (!res.entries.length) { wrap.innerHTML = `<p class="small-muted" style="padding:12px;">No pre-LOI deals yet.</p>`; return; }
+  wrap.innerHTML = `<table class="crm-table"><thead><tr><th>Updated</th><th>Address</th><th>Asking</th><th>Seller contact</th><th></th></tr></thead><tbody>
+    ${res.entries.map(e => `<tr style="cursor:default">
+      <td>${formatDate(e.updatedAt)}</td>
+      <td>${escapeHtml(e.street || "")}<br><span class="small-muted">${escapeHtml(e.city || "")}, ${escapeHtml(e.state || "")} ${escapeHtml(e.zip || "")}</span></td>
+      <td>${escapeHtml(String(e.askingPrice || ""))}</td>
+      <td>${escapeHtml(e.sellerContactName || "")}<br><span class="small-muted">${escapeHtml(e.sellerContactPhone || "")}</span></td>
+      <td style="white-space:nowrap">
+        <button type="button" class="btn secondary" data-pl-notes="${escapeHtml(e.crmId)}">Notes</button>
+        <button type="button" class="btn primary" data-pl-resume="${escapeHtml(e.crmId)}">Resume</button>
+        <button type="button" class="link-btn" data-pl-delete="${escapeHtml(e.crmId)}">Delete</button>
+      </td></tr>`).join("")}
+  </tbody></table><pre id="preloi-notes-box" class="small-muted" style="white-space:pre-wrap; margin-top:10px; user-select:text;" hidden></pre>`;
+  wrap.querySelectorAll("[data-pl-notes]").forEach(b => b.onclick = async () => {
+    const r = await api("adminGetPreLoiEntry", { token: sessionToken, crmId: b.dataset.plNotes });
+    const box = document.getElementById("preloi-notes-box");
+    box.textContent = r.ok ? (r.entry.answers.preLoiNotes || "No notes saved on this lead.") : (r.error || "Couldn't load notes.");
+    box.hidden = false;
+  });
+  wrap.querySelectorAll("[data-pl-resume]").forEach(b => b.onclick = async () => {
+    const r = await api("adminGetPreLoiEntry", { token: sessionToken, crmId: b.dataset.plResume });
+    if (!r.ok) { alert(r.error || "Couldn't open that lead."); return; }
+    Object.keys(answers).forEach(k => delete answers[k]);
+    Object.assign(answers, r.entry.answers || {});
+    delete answers._crmId; // resuming never overwrites the saved Pre-LOI row; submit/save creates a new one
+    document.getElementById("admin-view").hidden = true;
+    document.getElementById("public-view").hidden = false;
+    goTo(Math.min(Math.max(r.entry.stepIndex || 0, 0), steps.length - 1));
+  });
+  wrap.querySelectorAll("[data-pl-delete]").forEach(b => b.onclick = async () => {
+    if (!confirm("Delete this pre-LOI deal?")) return;
+    const r = await api("adminDeletePreLoi", { token: sessionToken, crmId: b.dataset.plDelete });
+    if (!r.ok) { alert(r.error || "Couldn't delete."); return; }
+    loadPreLoi();
+  });
 }
 
 function adminMessage(text, type) {
