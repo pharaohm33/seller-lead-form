@@ -126,20 +126,40 @@ function scrPrice(d, f) {
     const buffer = Math.max(SCR.GUT_BUFFER_MIN, SCR.GUT_BUFFER_PCT * arvMid);
     const profitFor = (carry, down, loan) => arvMid * Math.pow(1 + SCR.APPRECIATION, years) * (1 - SCR.SALE_COSTS) - (carry - down) - loan - loan * SCR.HM_RATE / 100 * years;
     const build = carry => {
-      const cash = scrRound(SCR.CASH_PCT_OF_CARRY * carry);
-      let down = scrRound(SCR.CARRY_DOWN * carry), note = "";
+      const cash = scrRound(SCR.CASH_PCT_OF_CARRY * carry), baseDown = scrRound(SCR.CARRY_DOWN * carry);
       const targetFor = loan => f.gut ? loan * SCR.HM_RATE / 100 / 12 * months + buffer : SCR.CASHBACK_PCT * carry;
       const gap = (r, cac) => scrModel(carry, cac, asIs * r, asIs).cashBack - targetFor(asIs * r);
-      let lo = SCR.LTV_MIN, hi = SCR.LTV_MAX, r;
-      if (gap(hi, down) < 0) {
+      const minProfit = Math.max(SCR.MIN_PROFIT_PER_YEAR * years, SCR.MIN_PROFIT_PCT_OF_PRICE * carry);
+      // Smallest LTV at which buyer cash back reaches its target for a given seller cash at closing (null = even the max LTV can't).
+      const solveR = cac => {
+        if (gap(SCR.LTV_MAX, cac) < 0) return null;
+        if (gap(SCR.LTV_MIN, cac) > 0) return SCR.LTV_MIN;
+        let lo = SCR.LTV_MIN, hi = SCR.LTV_MAX;
+        for (let i = 0; i < 40; i++) { const m = (lo + hi) / 2; if (gap(m, cac) < 0) lo = m; else hi = m; }
+        return Math.round((lo + hi) / 2 * 1000) / 1000;
+      };
+      const profitAt = (cac, r) => profitFor(carry, cac, asIs * r);
+      const notes = [];
+      let down = baseDown, r = solveR(down);
+      if (r === null) {
         // Shortfall at the max LTV: cut the seller's cash at closing until the buyer's cash back hits the target.
-        r = hi; let cLo = 0, cHi = down;
-        if (gap(r, 0) < 0) { down = 0; note = "even with $0 to the seller the loan can't fund the target cash back"; }
-        else { for (let i = 0; i < 40; i++) { const m = (cLo + cHi) / 2; if (gap(r, m) < 0) cHi = m; else cLo = m; } down = scrRound((cLo + cHi) / 2); note = "max LTV reached, so the seller's cash at closing was reduced to cover the target cash back"; }
-      } else if (gap(lo, down) > 0) { r = lo; note = "at the minimum LTV already"; }
-      else { for (let i = 0; i < 40; i++) { const m = (lo + hi) / 2; if (gap(m, down) < 0) lo = m; else hi = m; } r = Math.round((lo + hi) / 2 * 1000) / 1000; }
-      const loan = asIs * r;
-      return { carry, cash, down, r, note, loan, profit: profitFor(carry, down, loan), minProfit: Math.max(SCR.MIN_PROFIT_PER_YEAR * years, SCR.MIN_PROFIT_PCT_OF_PRICE * carry) };
+        r = SCR.LTV_MAX;
+        if (gap(r, 0) < 0) { down = 0; notes.push("even with $0 to the seller the loan can't fund the target cash back"); }
+        else { let cLo = 0, cHi = down; for (let i = 0; i < 40; i++) { const m = (cLo + cHi) / 2; if (gap(r, m) < 0) cHi = m; else cLo = m; } down = scrRound((cLo + cHi) / 2); notes.push(`max LTV reached, so the seller's cash at closing was cut from ${scrMoney(baseDown)} to ${scrMoney(down)} to cover the target cash back`); }
+      }
+      let profit = profitAt(down, r);
+      if (profit < minProfit) {
+        // Not enough buyer profit at the Ashurst ratios: trade seller cash at closing for a smaller loan (less
+        // interest and payoff at exit) until the minimum is met, keeping the buyer's cash back on target.
+        const startDown = down, startR = r;
+        for (let d = down - 500; d >= 0; d -= 500) {
+          const rr = solveR(d); if (rr === null) continue;
+          if (profitAt(d, rr) >= minProfit) { down = d; r = rr; profit = profitAt(d, rr); break; }
+          if (d - 500 < 0) { down = d; r = rr; profit = profitAt(d, rr); }       // best effort at $0 down
+        }
+        if (down !== startDown) notes.push(`to meet the buyer profit minimum, the seller's cash at closing went from ${scrMoney(startDown)} to ${scrMoney(down)} and LTV from ${(startR * 100).toFixed(1)}% to ${(r * 100).toFixed(1)}%`);
+      }
+      return { carry, cash, down, r, note: notes.join("; "), loan: asIs * r, profit, minProfit };
     };
     const carryRaw = Math.round(SCR.CARRY_PCT_OF_ARV * arvMid / 1000) * 1000;
     let c = build(list ? Math.min(list, carryRaw) : carryRaw);
