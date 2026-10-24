@@ -428,7 +428,7 @@ function scrRenderTable() {
   const st = SCR.rows.map(d => ({ d, s: scrStage1(d) }));
   const pass = st.filter(x => x.s.ok), skip = st.length - pass.length;
   const sorted = scrOrder();
-  box.innerHTML = `<p class="small-muted"><strong>${pass.length}</strong> of ${st.length} pass days on market + property type; ${skip} skipped.${(n => n ? ` ${n} have no year built in the list: Propwire fills it in when you prepare each one.` : "")(pass.filter(x => !x.d.year).length)}</p>
+  box.innerHTML = `${SCR.flash ? `<p class="small-muted" style="color:#166534;">${escapeHtml(SCR.flash)}</p>` : ""}<p class="small-muted"><strong>${pass.length}</strong> of ${st.length} pass days on market + property type; ${skip} skipped.${(n => n ? ` ${n} have no year built in the list: Propwire fills it in when you prepare each one.` : "")(pass.filter(x => !x.d.year).length)}</p>
     <table class="crm-table"><thead><tr><th>Address</th><th>Type</th><th>List</th><th>Days</th><th>Built</th><th>$/sf</th><th>Screen</th><th></th></tr></thead><tbody>
     ${sorted.map(({ d, s }) => `<tr style="cursor:default; ${s.ok ? "" : "opacity:.5"}">
       <td>${escapeHtml(d.street)}<br><span class="small-muted">${escapeHtml(d.city)}, ${escapeHtml(d.state)} ${escapeHtml(d.zip)}</span></td>
@@ -587,7 +587,8 @@ function scrRenderCalc() {
       ${row("Owner equity", p.ownerEquityPct === null ? "enter Propwire value + mortgage" : p.ownerEquityPct.toFixed(0) + "%")}
     </dl>
     <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;">
-      <button type="button" class="btn primary" id="scr-save">Save to Auto Pre-LOI Before Contact</button>
+      <button type="button" class="btn primary" id="scr-sent" title="Saves it, moves it into your CRM as Offer sent to cold lead, and opens the next deal. No email is sent.">LOI sent → CRM</button>
+      <button type="button" class="btn secondary" id="scr-save">Save to Auto Pre-LOI Before Contact</button>
       <button type="button" class="btn secondary" id="scr-open-loi">Open LOI generator</button>
       <button type="button" class="btn secondary" id="scr-gmail">Draft in Gmail</button>
       <button type="button" class="btn secondary" id="scr-copy-notes">Copy notes</button>
@@ -606,14 +607,27 @@ function scrRenderCalc() {
     window.open(link, "_blank", "noopener");
   };
   document.getElementById("scr-copy-notes").onclick = () => navigator.clipboard.writeText(build().notes).then(() => msg("Notes copied."));
-  document.getElementById("scr-save").onclick = async () => {
+  const savePreLoi = async () => {
     const b = build(); b.a.preLoiNotes = b.notes;
     if (SCR.sel.comps) { b.a.soldCompsJson = JSON.stringify(SCR.sel.comps.sold || []); b.a.activeCompsJson = JSON.stringify(SCR.sel.comps.active || []); }
     msg("Saving...");
     const r = await api("adminSavePreLoi", { token: sessionToken, email: SCR.AGENT_EMAIL, crmId: SCR.sel.crmId || "", stepIndex: 19, answers: b.a });
-    if (!r.ok) { msg("Couldn't save: " + (r.error || "unknown error")); return; }
+    if (!r.ok) { msg("Couldn't save: " + (r.error || "unknown error")); return false; }
     SCR.sel.crmId = r.crmId; msg("Saved to Auto Pre-LOI Before Contact. Nothing was submitted and no email was sent.");
     if (typeof loadPreLoi === "function") loadPreLoi();
+    return true;
+  };
+  document.getElementById("scr-save").onclick = savePreLoi;
+  // Press this after you have actually sent the LOI: it files the deal in your CRM as "Offer sent to cold lead" (no email) and opens the next deal.
+  document.getElementById("scr-sent").onclick = async () => {
+    const btn = document.getElementById("scr-sent"); btn.disabled = true;
+    if (!(await savePreLoi())) { btn.disabled = false; return; }
+    const r = await markPreLoiSent(SCR.sel.crmId);
+    if (!r.ok) { btn.disabled = false; msg("Saved, but couldn't move it to your CRM: " + (r.error || "unknown error")); return; }
+    SCR.sel.crmId = "";
+    SCR.flash = `Moved to your CRM as "Offer sent to cold lead" (no email sent): ${d.address}`;
+    if (typeof loadPreLoi === "function") loadPreLoi();
+    scrSkipToNext("LOI sent");
   };
 }
 
@@ -649,7 +663,7 @@ function scrMount() {
   card.querySelectorAll("select,input[type=number]").forEach(el => el.addEventListener("change", sync));
   document.getElementById("scr-file").onchange = async e => {
     const f = e.target.files[0]; if (!f) return;
-    SCR.rows = scrLoad(await f.text()); sync();
+    SCR.flash = ""; SCR.rows = scrLoad(await f.text()); sync();
   };
 }
 scrMount();

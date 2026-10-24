@@ -5897,6 +5897,18 @@ function showAdminTab(which) {
 document.getElementById("admin-tab-leads").onclick = () => showAdminTab("leads");
 document.getElementById("admin-tab-preloi").onclick = () => showAdminTab("preloi");
 
+// "LOI sent": the deal moves out of Auto Pre-LOI into your CRM as "Offer sent to cold lead". It goes through the same
+// saveCrmEntry route as Save My Progress, which never sends an email, so doing this in volume sends you nothing.
+async function markPreLoiSent(crmId) {
+  const r = await api("adminGetPreLoiEntry", { token: sessionToken, crmId });
+  if (!r.ok) return r;
+  const a = r.entry.answers || {};
+  const email = (a.email || getRememberedEmail() || "").trim();
+  if (!EMAIL_PATTERN.test(email)) return { ok: false, error: "This deal has no email address to file it under." };
+  a.loiSentAt = new Date().toISOString();
+  return api("saveCrmEntry", { email, status: CRM_STATUS_OFFER, crmId, stepIndex: r.entry.stepIndex || 19, answers: a });
+}
+
 async function loadPreLoi() {
   const wrap = document.getElementById("preloi-entries");
   wrap.innerHTML = `<p class="small-muted">Loading...</p>`;
@@ -5911,7 +5923,8 @@ async function loadPreLoi() {
       <td>${escapeHtml(e.sellerContactName || "")}<br><span class="small-muted">${escapeHtml(e.sellerContactPhone || "")}</span></td>
       <td style="white-space:nowrap">
         <button type="button" class="btn secondary" data-pl-notes="${escapeHtml(e.crmId)}">Notes</button>
-        <button type="button" class="btn primary" data-pl-resume="${escapeHtml(e.crmId)}">Resume</button>
+        <button type="button" class="btn primary" data-pl-sent="${escapeHtml(e.crmId)}" title="Moves it into your CRM as Offer sent to cold lead. No email is sent.">LOI sent</button>
+        <button type="button" class="btn secondary" data-pl-resume="${escapeHtml(e.crmId)}">Resume</button>
         <button type="button" class="link-btn" data-pl-delete="${escapeHtml(e.crmId)}">Delete</button>
       </td></tr>`).join("")}
   </tbody></table><pre id="preloi-notes-box" class="small-muted" style="white-space:pre-wrap; margin-top:10px; user-select:text;" hidden></pre>`;
@@ -5920,6 +5933,12 @@ async function loadPreLoi() {
     const box = document.getElementById("preloi-notes-box");
     box.textContent = r.ok ? (r.entry.answers.preLoiNotes || "No notes saved on this lead.") : (r.error || "Couldn't load notes.");
     box.hidden = false;
+  });
+  wrap.querySelectorAll("[data-pl-sent]").forEach(b => b.onclick = async () => {
+    b.disabled = true;
+    const r = await markPreLoiSent(b.dataset.plSent);
+    if (!r.ok) { b.disabled = false; alert("Couldn't move it to your CRM: " + (r.error || "unknown error")); return; }
+    loadPreLoi();
   });
   wrap.querySelectorAll("[data-pl-resume]").forEach(b => b.onclick = async () => {
     const r = await api("adminGetPreLoiEntry", { token: sessionToken, crmId: b.dataset.plResume });
