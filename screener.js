@@ -49,13 +49,16 @@ function scrParseCsv(text) {
   return rows.filter(r => r.some(x => x.trim()));
 }
 
+// A usable year built is four digits (1800 to 2099); blanks, "--" and "0" mean unknown, to be filled from Propwire.
+const scrYear = v => { const m = String(v || "").match(/\b(1[89]\d\d|20\d\d)\b/); return m ? m[1] : ""; };
+
 function scrLoad(text) {
   const grid = scrParseCsv(text);
   const hdr = grid[0].map(h => h.trim().toUpperCase());
   const col = (...names) => hdr.findIndex(h => names.some(n => h === n || h.startsWith(n)));
   const ix = { type: col("PROPERTY TYPE"), addr: col("ADDRESS"), city: col("CITY"), st: col("STATE"), zip: col("ZIP"),
     price: col("PRICE"), beds: col("BEDS"), baths: col("BATHS"), sqft: col("SQUARE FEET", "SQFT"), lot: col("LOT SIZE"),
-    yr: col("YEAR BUILT"), dom: col("DAYS ON MARKET", "DAYS ON REDFIN", "ON REDFIN", "DOM"), url: col("URL"), mls: col("MLS#"), status: col("STATUS") };
+    yr: col("YEAR BUILT", "YR BUILT", "BUILT"), dom: col("DAYS ON MARKET", "DAYS ON REDFIN", "ON REDFIN", "DOM"), url: col("URL"), mls: col("MLS#"), status: col("STATUS") };
   const num = v => Number(String(v || "").replace(/[^0-9.]/g, "")) || 0;
   const out = [];
   if (ix.addr < 0) {   // plain address list: one per line, no header
@@ -66,7 +69,7 @@ function scrLoad(text) {
       out.push({
         type: (r[ix.type] || "").trim(), street: r[ix.addr].trim(), city: (r[ix.city] || "").trim(),
         state: (r[ix.st] || "").trim(), zip: (r[ix.zip] || "").trim(), price: num(r[ix.price]), beds: r[ix.beds] || "",
-        baths: r[ix.baths] || "", sqft: num(r[ix.sqft]), lot: num(r[ix.lot]), year: r[ix.yr] || "",
+        baths: r[ix.baths] || "", sqft: num(r[ix.sqft]), lot: num(r[ix.lot]), year: scrYear(r[ix.yr]),
         dom: ix.dom >= 0 && r[ix.dom] !== "" ? num(r[ix.dom]) : null, url: (r[ix.url] || "").trim(),
         mls: (r[ix.mls] || "").trim(), status: (r[ix.status] || "").trim()
       });
@@ -103,13 +106,18 @@ function scrModel(pp, cac, loan, asIs) {
   return { closing, acq, taf, cashBack: loan - cac - closing - taf, sellerNet: cac - closing * g.sellerClosingShare };
 }
 
+// Owner equity % is only known when Propwire equity is actually shown (or value and mortgage balance are both entered).
+function scrEquityPct(f) {
+  if (f.pwEquityPct !== null && f.pwEquityPct !== undefined) return f.pwEquityPct;
+  if (f.pwValue && f.pwMortgageSet) return (f.pwValue - (f.pwMortgage || 0)) / f.pwValue * 100;
+  return null;
+}
+
 function scrPrice(d, f) {
   const land = SCR.cfg.asset === "land";
   const list = d.price || 0;
   const val = f.pwValue || 0, mort = f.pwMortgage || 0;
-  let ownerEquityPct = null;   // only known when Propwire equity is actually shown
-  if (f.pwEquityPct !== null && f.pwEquityPct !== undefined) ownerEquityPct = f.pwEquityPct;
-  else if (val && f.pwMortgageSet) ownerEquityPct = (val - mort) / val * 100;
+  const ownerEquityPct = scrEquityPct(f);
   if (ownerEquityPct === null) return { ready: false, noEquity: true };
   const lowEquity = ownerEquityPct < SCR.cfg.minOwnerEquityPct;
   const arvMid = f.arvLow && f.arvHigh ? scrRound((f.arvLow + f.arvHigh) / 2) : (f.arvLow || f.arvHigh || 0);
@@ -232,7 +240,7 @@ function scrNotes(d, f, p, loi, resume) {
   const land = p.land;
   const L = [
     `PRE-LOI (not contacted, not submitted): ${d.address}`,
-    `Source: ${d.url || "uploaded list"}${d.mls ? "  MLS# " + d.mls : ""}   List: ${scrMoney(d.price)}   Days on market: ${d.dom ?? "?"}`,
+    `Source: ${d.url || "uploaded list"}${d.mls ? "  MLS# " + d.mls : ""}   List: ${scrMoney(d.price)}   Days on market: ${d.dom ?? "?"}   Year built: ${d.year || "?"}`,
     "", "PICK UP WHERE WE LEFT OFF",
     `- LOI Generator (${land ? "cash template, land" : "cash template + dual offer"}, pre-filled): ${loi}`,
     `- sendmyseller.com resume link (do NOT submit): ${resume}`, "", "UNDERWRITING",
@@ -295,7 +303,7 @@ const SCR_BM_PROPWIRE = `(function(){var t=document.body.innerText,g=function(r)
 var o={src:'propwire',url:location.href,address:decodeURIComponent(location.pathname.split('/')[2]||'').replace(/-/g,' '),
 value:g(/\\$([\\d,]+)\\s*\\n\\s*Estimated Property Value/),mortgage:g(/\\$([\\d,]+)\\s*\\n\\s*Est\\. Mortgage Balance/),
 equityAmt:g(/\\$([\\d,]+)\\s*\\n\\s*Est\\. Equity/),equityPct:g(/(\\d+(?:\\.\\d+)?)%\\s*\\n\\s*Equity/),
-lastSold:g(/Last sold ([A-Za-z]+ \\d+, \\d{4})/),owner:g(/Owner Name\\s*\\n\\s*([^\\n]+)/),
+lastSold:g(/Last sold ([A-Za-z]+ \\d+, \\d{4})/),yearBuilt:g(/Year Built\\s*[:\\n]?\\s*(1[89]\\d\\d|20\\d\\d)/i)||g(/(1[89]\\d\\d|20\\d\\d)\\s*\\n\\s*Year Built/i),owner:g(/Owner Name\\s*\\n\\s*([^\\n]+)/),
 tags:['Free & Clear','High Equity','Absentee Owners','Tired Landlords','Vacant','Pre-Foreclosure','Tax Delinquent','Out-of-State Owners','Senior Owner'].filter(function(x){return t.replace(/Tax Delinquent\\?/g,'').indexOf(x)>-1})};
 var s=JSON.stringify(o);(navigator.clipboard?navigator.clipboard.writeText(s):Promise.reject()).then(function(){alert('Propwire copied: '+(o.equityPct||'?')+'% equity for '+o.address+'. Now press Fill from clipboard in SendMySeller.')},function(){prompt('Copy this:',s)})})();`;
 const SCR_BM_GOOGLE = `(function(){var t=document.body.innerText,m=t.match(/---COMPS SUMMARY---[\\s\\S]*?---END SUMMARY---/i),out=m?m[0]:t.slice(0,20000);
@@ -362,6 +370,7 @@ function scrParsePropwireText(t) {
     value: g(/\$([\d,]+)\s*\n\s*Estimated Property Value/), mortgage: g(/\$([\d,]+)\s*\n\s*Est\. Mortgage Balance/),
     equityAmt: g(/\$([\d,]+)\s*\n\s*Est\. Equity/), equityPct: g(/(\d+(?:\.\d+)?)%\s*\n\s*Equity/),
     lastSold: g(/Last sold ([A-Za-z]+ \d+, \d{4})/), owner: g(/Owner Name\s*\n\s*([^\n]+)/),
+    yearBuilt: g(/Year Built\s*[:\n]?\s*(1[89]\d\d|20\d\d)/i) || g(/(1[89]\d\d|20\d\d)\s*\n\s*Year Built/i),
     tags: ["Free & Clear", "High Equity", "Absentee Owners", "Tired Landlords", "Vacant", "Pre-Foreclosure", "Tax Delinquent", "Out-of-State Owners", "Senior Owner"]
       .filter(x => t.replace(/Tax Delinquent\?/g, "").indexOf(x) > -1), url: "" };
 }
@@ -375,8 +384,11 @@ function scrApplyPropwire(text, msgId = "scr-msg-pw") {
   if (o.value) scrSet("scr-pw-val", scrNumOf(o.value));
   if (o.mortgage !== "") scrSet("scr-pw-mort", scrNumOf(o.mortgage));
   if (o.owner) scrSet("scr-owner", o.owner);
+  const yr = scrYear(o.yearBuilt);
+  if (yr && !d.year) { scrSet("scr-year", yr); scrRenderTable(); }        // the CSV had no year built: Propwire fills it in
+  else if (yr && d.year !== yr) scrMsg("scr-msg-year", `Propwire says ${yr}; the list says ${d.year}. Kept ${d.year}.`, false);
   scrSet("scr-pw-notes", [o.tags && o.tags.length ? o.tags.join(", ") : "", o.lastSold ? "Last sold " + o.lastSold : "", o.url].filter(Boolean).join(" | "));
-  scrMsg(msgId, `Parsed: ${o.equityPct !== "" ? o.equityPct + "% equity" : "value " + o.value}.${same ? "" : " WARNING: Propwire address (" + o.address + ") doesn't look like " + d.street + "."}`, same);
+  scrMsg(msgId, `Parsed: ${o.equityPct !== "" ? o.equityPct + "% equity" : "value " + o.value}${yr ? ", built " + yr : ", year built not found"}.${same ? "" : " WARNING: Propwire address (" + o.address + ") doesn't look like " + d.street + "."}`, same);
   return true;
 }
 
@@ -416,11 +428,11 @@ function scrRenderTable() {
   const st = SCR.rows.map(d => ({ d, s: scrStage1(d) }));
   const pass = st.filter(x => x.s.ok), skip = st.length - pass.length;
   const sorted = scrOrder();
-  box.innerHTML = `<p class="small-muted"><strong>${pass.length}</strong> of ${st.length} pass days on market + property type; ${skip} skipped.</p>
-    <table class="crm-table"><thead><tr><th>Address</th><th>Type</th><th>List</th><th>Days</th><th>$/sf</th><th>Screen</th><th></th></tr></thead><tbody>
+  box.innerHTML = `<p class="small-muted"><strong>${pass.length}</strong> of ${st.length} pass days on market + property type; ${skip} skipped.${(n => n ? ` ${n} have no year built in the list: Propwire fills it in when you prepare each one.` : "")(pass.filter(x => !x.d.year).length)}</p>
+    <table class="crm-table"><thead><tr><th>Address</th><th>Type</th><th>List</th><th>Days</th><th>Built</th><th>$/sf</th><th>Screen</th><th></th></tr></thead><tbody>
     ${sorted.map(({ d, s }) => `<tr style="cursor:default; ${s.ok ? "" : "opacity:.5"}">
       <td>${escapeHtml(d.street)}<br><span class="small-muted">${escapeHtml(d.city)}, ${escapeHtml(d.state)} ${escapeHtml(d.zip)}</span></td>
-      <td>${escapeHtml(d.type || "")}</td><td>${d.price ? scrMoney(d.price) : "—"}</td><td>${d.dom ?? "?"}</td>
+      <td>${escapeHtml(d.type || "")}</td><td>${d.price ? scrMoney(d.price) : "—"}</td><td>${d.dom ?? "?"}</td><td>${d.year || "?"}</td>
       <td>${d.price && d.sqft ? "$" + Math.round(d.price / d.sqft) : "—"}</td>
       <td>${s.ok ? `<span style="color:#065f46">Pass${s.note ? " — " + s.note : ""}</span>` : `<span class="small-muted">${escapeHtml(s.why)}</span>`}</td>
       <td>${s.ok ? `<button type="button" class="btn primary" data-scr-prep="${d.id}">Prepare</button>` : ""}</td></tr>`).join("")}
@@ -435,12 +447,33 @@ function scrPrepare(id) {
   panel.hidden = false;
   panel.innerHTML = `<div class="card" style="margin-top:14px;">
     <h3 class="step-title" style="font-size:17px;">${escapeHtml(d.address)}</h3>
-    <p class="small-muted">List ${d.price ? scrMoney(d.price) : "?"} · ${d.dom ?? "?"} days on market${d.sqft ? " · " + d.sqft.toLocaleString() + " sq ft" : ""}${d.lot && land ? " · " + d.lot.toLocaleString() + " sq ft lot" : ""}</p>
+    <p class="small-muted">List ${d.price ? scrMoney(d.price) : "?"} · ${d.dom ?? "?"} days on market · built ${d.year || "?"}${d.sqft ? " · " + d.sqft.toLocaleString() + " sq ft" : ""}${d.lot && land ? " · " + d.lot.toLocaleString() + " sq ft lot" : ""}</p>
+    <p class="small-muted" style="margin:0 0 6px;"><strong>Step 1: Propwire equity and year built.</strong> Comps and rehab only come after the equity check passes.</p>
     <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:6px; align-items:center;">
-      <button type="button" class="btn secondary" id="scr-ask-comps">1. Ask Google AI: ${land ? "land comps" : "ARV comps"}</button>
-      ${land ? "" : `<button type="button" class="btn secondary" id="scr-ask-rehab">2. Ask Google AI: rehab</button>`}
-      <a class="btn secondary" target="_blank" rel="noopener" href="https://propwire.com/search">${land ? "2" : "3"}. Open Propwire</a>
+      <a class="btn secondary" target="_blank" rel="noopener" href="https://propwire.com/search">1. Open Propwire</a>
       <button type="button" class="btn primary" id="scr-fill">Fill from clipboard</button>
+    </div>
+    <p id="scr-fill-msg" class="small-muted" style="margin:0 0 10px;">Open the property on Propwire, press the Propwire bookmarklet, then press Fill from clipboard.</p>
+    <div style="margin:10px 0;">
+      <label>Propwire (bookmarklet copy, or select-all text from the property page)</label>
+      <textarea id="scr-in-pw" rows="3" placeholder="Paste Propwire data"></textarea>
+      <button type="button" class="btn primary" id="scr-in-pw-btn" style="margin-top:6px;">Parse Propwire</button>
+      <span id="scr-msg-pw" class="small-muted" style="margin-left:8px;"></span>
+    </div>
+    <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; margin:10px 0;">
+      <div><label>Propwire equity % (if shown)</label><input type="number" id="scr-pw-eq"></div>
+      <div><label>Propwire est. value</label><input type="number" id="scr-pw-val"></div>
+      <div><label>Open mortgage balance (0 = free &amp; clear)</label><input type="number" id="scr-pw-mort"></div>
+      <div><label>Year built${d.year ? "" : " (not in the list)"}</label><input type="number" id="scr-year" value="${escapeHtml(d.year || "")}" placeholder="from Propwire"><span id="scr-msg-year" class="small-muted"></span></div>
+      <div><label>Owner name</label><input type="text" id="scr-owner"></div>
+    </div>
+    <label>Propwire / other notes</label><textarea id="scr-pw-notes" rows="2"></textarea>
+    <div id="scr-gate" style="margin:10px 0;"></div>
+    <div id="scr-after" hidden>
+    <p class="small-muted" style="margin:0 0 6px;"><strong>Step 2: comps${land ? "" : " and rehab"}.</strong></p>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:6px; align-items:center;">
+      <button type="button" class="btn secondary" id="scr-ask-comps">2. Ask Google AI: ${land ? "land comps" : "ARV comps"}</button>
+      ${land ? "" : `<button type="button" class="btn secondary" id="scr-ask-rehab">3. Ask Google AI: rehab</button>`}
     </div>
     <div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:6px;">
       <button type="button" class="link-btn" id="scr-copy-comps">Copy comps prompt</button>
@@ -450,7 +483,6 @@ function scrPrepare(id) {
       <p class="small-muted" style="margin:6px 0 2px;"><strong>Comps</strong></p><pre id="scr-show-comps" class="small-muted" style="white-space:pre-wrap;max-height:160px;overflow:auto;"></pre>
       ${land ? "" : `<p class="small-muted" style="margin:6px 0 2px;"><strong>Rehab</strong> (uses the middle of the ARV range once it is filled in)</p><pre id="scr-show-rehab" class="small-muted" style="white-space:pre-wrap;"></pre>`}
     </details>
-    <p id="scr-fill-msg" class="small-muted" style="margin:0 0 10px;">Each Ask button copies the prompt and opens Google AI with it. On the answer (and on the Propwire property page) press the matching bookmarklet, then press Fill from clipboard.</p>
     <div style="margin:10px 0;">
       <label>Google AI: ARV comps answer</label>
       <textarea id="scr-in-comps" rows="3" placeholder="Paste the full answer, including ---COMPS SUMMARY---"></textarea>
@@ -464,12 +496,6 @@ function scrPrepare(id) {
       <span id="scr-msg-rehab" class="small-muted" style="margin-left:8px;"></span>
     </div>
 `}
-    <div style="margin:10px 0;">
-      <label>Propwire (bookmarklet copy, or select-all text from the property page)</label>
-      <textarea id="scr-in-pw" rows="3" placeholder="Paste Propwire data"></textarea>
-      <button type="button" class="btn primary" id="scr-in-pw-btn" style="margin-top:6px;">Parse Propwire</button>
-      <span id="scr-msg-pw" class="small-muted" style="margin-left:8px;"></span>
-    </div>
     <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; margin:10px 0;">
       <div><label>${land ? "As-is value low" : "ARV low"}</label><input type="number" id="scr-arv-low"></div>
       <div><label>${land ? "As-is value high" : "ARV high"}</label><input type="number" id="scr-arv-high"></div>
@@ -477,13 +503,9 @@ function scrPrepare(id) {
       <div><label>Rehab high (Google AI)</label><input type="number" id="scr-rehab-high"></div>
       <div><label>Rehab $ override (blank = middle of range)</label><input type="number" id="scr-rehab"></div>
       <div><label>Rehab tier</label><select id="scr-tier"><option value="light">Light $25/sf</option><option value="moderate" selected>Moderate $40/sf</option><option value="heavy">Heavy $55/sf</option><option value="gut">Gut $75/sf</option></select></div>`}
-      <div><label>Propwire equity % (if shown)</label><input type="number" id="scr-pw-eq"></div>
-      <div><label>Propwire est. value</label><input type="number" id="scr-pw-val"></div>
-      <div><label>Open mortgage balance (0 = free &amp; clear)</label><input type="number" id="scr-pw-mort"></div>
-      <div><label>Owner name</label><input type="text" id="scr-owner"></div>
     </div>
     ${land ? "" : `<label style="display:flex;gap:6px;align-items:center;"><input type="checkbox" id="scr-gut" style="width:auto;margin:0"> Full rehab / gut (24-month reserves and carry)</label>`}
-    <label>Propwire / other notes</label><textarea id="scr-pw-notes" rows="2"></textarea>
+    </div>
     <div id="scr-calc" style="margin-top:12px;"></div></div>`;
   panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
   const read = () => {
@@ -495,6 +517,9 @@ function scrPrepare(id) {
       pwMortgageSet: document.getElementById("scr-pw-mort").value !== "",
       pwEquityPct: document.getElementById("scr-pw-eq").value !== "" ? Number(document.getElementById("scr-pw-eq").value) : null, owner: document.getElementById("scr-owner").value.trim(),
       pwNotes: document.getElementById("scr-pw-notes").value.trim() };
+    const yr = scrYear(document.getElementById("scr-year").value);
+    if (yr !== d.year) { d.year = yr; scrRenderTable(); }
+    scrRenderGate();
     scrRenderCalc();
   };
   panel.querySelectorAll("input,select,textarea").forEach(el => el.addEventListener("input", read));
@@ -516,7 +541,7 @@ function scrPrepare(id) {
   const askRehab = document.getElementById("scr-ask-rehab");
   if (askRehab) askRehab.onclick = () => {
     const f = SCR.sel.f || {}, arvMid = f.arvLow && f.arvHigh ? scrRound((f.arvLow + f.arvHigh) / 2) : (f.arvLow || f.arvHigh || 0);
-    if (!arvMid) { document.getElementById("scr-fill-msg").textContent = "Fill the ARV from step 1 first: the rehab prompt asks about the repair needed to reach that ARV."; return; }
+    if (!arvMid) { document.getElementById("scr-fill-msg").textContent = "Fill the ARV from step 2 first: the rehab prompt asks about the repair needed to reach that ARV."; return; }
     scrAskGoogleAi(scrRehabPrompt(d, arvMid));
     document.getElementById("scr-fill-msg").textContent = `Rehab prompt (ARV ${scrMoney(arvMid)}) copied and opened in Google AI. Press the bookmarklet on the answer, then Fill from clipboard.`;
   };
@@ -528,15 +553,23 @@ function scrPrepare(id) {
   read();
 }
 
+// Step 1 gate: Propwire equity decides whether comps and rehab are worth doing at all.
+function scrRenderGate() {
+  const f = SCR.sel.f, gate = document.getElementById("scr-gate"), after = document.getElementById("scr-after");
+  if (!gate || !after) return;
+  const eq = scrEquityPct(f), min = SCR.cfg.minOwnerEquityPct;
+  if (eq === null) { after.hidden = true; gate.innerHTML = `<div class="banner warn" style="text-align:left;">No Propwire equity yet. Enter the equity %, or the value and mortgage balance. If Propwire doesn't show equity, skip this one.</div><button type="button" class="btn secondary" id="scr-skip-gate" style="margin-top:6px;">Skip to next deal</button>`; document.getElementById("scr-skip-gate").onclick = () => scrSkipToNext("No Propwire equity shown"); return; }
+  if (eq < min) { after.hidden = true; gate.innerHTML = `<div class="banner warn" style="text-align:left;">Owner equity ${eq.toFixed(0)}% is under ${min}%. No comps or rehab needed: skip it.</div><button type="button" class="btn primary" id="scr-skip-gate" style="margin-top:6px;">Skip to next deal</button>`; document.getElementById("scr-skip-gate").onclick = () => scrSkipToNext(`Owner equity ${eq.toFixed(0)}% < ${min}%`); return; }
+  after.hidden = false;
+  gate.innerHTML = `<div class="banner info" style="text-align:left;">Owner equity ${eq.toFixed(0)}% passes (${min}% minimum). Now comps${SCR.cfg.asset === "land" ? "" : " and rehab"}.</div>`;
+}
+
 function scrRenderCalc() {
   const { d, f } = SCR.sel, box = document.getElementById("scr-calc");
   const p = scrPrice(d, f); SCR.sel.p = p;
   const skipBtn = (label) => `<button type="button" class="btn secondary" id="scr-skip">${label}</button>`;
   const wireSkip = (reason) => { const b = document.getElementById("scr-skip"); if (b) b.onclick = () => scrSkipToNext(reason); };
-  if (p.noEquity) {
-    box.innerHTML = `<div class="banner warn" style="text-align:left;">No Propwire equity shown. Enter the equity %, or the value and mortgage balance. If Propwire doesn't show equity, skip this one.</div>${skipBtn("Skip to next deal")}`;
-    wireSkip("No Propwire equity shown"); return;
-  }
+  if (p.noEquity || (p.lowEquity && !p.ready)) { box.innerHTML = ""; return; }      // the step 1 gate above says why
   if (!p.ready) { box.innerHTML = `<p class="small-muted">Enter an ARV range (or paste the Google AI response) to price the offers.</p>${skipBtn("Skip to next deal")}`; wireSkip("Skipped"); return; }
   const row = (k, v) => `<div><dt>${k}</dt><dd>${v}</dd></div>`;
   box.innerHTML = `<div class="banner ${p.qualifies ? "info" : "warn"}" style="text-align:left;">${p.qualifies ? "Qualifies for an offer (owner equity " + p.ownerEquityPct.toFixed(0) + "%)." : "Does not qualify: " + escapeHtml(p.why.join("; ")) + ". Skip it rather than forcing a tight offer."}</div>
@@ -590,7 +623,7 @@ function scrMount() {
   const card = document.createElement("div");
   card.className = "card"; card.id = "scr-card"; card.style.marginBottom = "16px";
   card.innerHTML = `<h3 class="step-title" style="font-size:18px;">Screen a list of active MLS deals</h3>
-    <p class="small-muted">Upload a Redfin "Download All" CSV (or a plain list of addresses). Deals are screened on days on market and property type, then you add Propwire and Google AI info. Propwire owner equity (90%+ by default) is the only qualifier; no equity shown means skip. Offer price vs list doesn't matter.</p>
+    <p class="small-muted">Upload a Redfin "Download All" CSV (or a plain list of addresses). Deals are screened on days on market and property type. For each one you check Propwire first (owner equity, 90%+ by default, is the only qualifier; no equity shown means skip) and Propwire also fills in any year built the list is missing. Only deals that pass the equity check get comps and rehab. Offer price vs list doesn't matter.</p>
     <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px;">
       <div><label>Asset class</label><select id="scr-asset"><option value="sf">Single family (dual offer)</option><option value="land">Land (cash offer)</option></select></div>
       <div><label>Min days on market</label><input type="number" id="scr-min-dom" value="180"></div>
