@@ -1,4 +1,4 @@
-/* Pre-LOI Screener (admin only). Upload a CSV of active MLS listings (Redfin "Download All" export, or just
+/* Pre-LOI Screener (admin only). Upload a CSV of active MLS listings (Redfin "Download All" export, a scraped list with a "Days on Redfin" column, or just
    addresses), screen on days on market + property type, then enrich each survivor with Propwire / Google AI
    info to check equity and price the offers. Nothing here submits a lead or sends email: results are saved
    to the admin-only "Auto Pre-LOI Before Contact" tab through adminSavePreLoi.
@@ -54,8 +54,8 @@ function scrLoad(text) {
   const hdr = grid[0].map(h => h.trim().toUpperCase());
   const col = (...names) => hdr.findIndex(h => names.some(n => h === n || h.startsWith(n)));
   const ix = { type: col("PROPERTY TYPE"), addr: col("ADDRESS"), city: col("CITY"), st: col("STATE"), zip: col("ZIP"),
-    price: col("PRICE"), beds: col("BEDS"), baths: col("BATHS"), sqft: col("SQUARE FEET"), lot: col("LOT SIZE"),
-    yr: col("YEAR BUILT"), dom: col("DAYS ON MARKET"), url: col("URL"), mls: col("MLS#"), status: col("STATUS") };
+    price: col("PRICE"), beds: col("BEDS"), baths: col("BATHS"), sqft: col("SQUARE FEET", "SQFT"), lot: col("LOT SIZE"),
+    yr: col("YEAR BUILT"), dom: col("DAYS ON MARKET", "DAYS ON REDFIN", "ON REDFIN", "DOM"), url: col("URL"), mls: col("MLS#"), status: col("STATUS") };
   const num = v => Number(String(v || "").replace(/[^0-9.]/g, "")) || 0;
   const out = [];
   if (ix.addr < 0) {   // plain address list: one per line, no header
