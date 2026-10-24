@@ -6,7 +6,7 @@
 
 const SCR = {
   rows: [], sel: null,
-  cfg: { asset: "sf", minDom: 180, minOwnerEquityPct: 90 },   // qualification = days on market + Propwire owner equity only
+  cfg: { asset: "sf", strategy: "flip", minDom: 180, minOwnerEquityPct: 90 },   // strategy: sf = flip | hold, land = cash | dev   // qualification = days on market + Propwire owner equity only
   AGENT_EMAIL: "montanoemmanuel@gmail.com", AGENT_NAME: "Emmanuel's LOI Helper Agent", PHONE: "5206336437",
   LOI_URL: "https://pharaohm33.github.io/loi-generator/",
   REHAB_PSF: { light: 25, moderate: 40, heavy: 55, gut: 75 },   // quick estimate when no rehab number is entered
@@ -31,7 +31,14 @@ const SCR = {
   // Full rehab / gut: cash back to the buyer at closing = the full holding cost (24 months of hard money
   // interest) + the greater of $30,000 or 6% of ARV, so there is room for the assignment fee and extra cash
   // for the buyer. Seller cash at closing is whatever is left of the loan after that and closing costs.
-  GUT_BUFFER_MIN: 30000, GUT_BUFFER_PCT: 0.06, EST_CLOSING_PCT: 0.085
+  GUT_BUFFER_MIN: 30000, GUT_BUFFER_PCT: 0.06, EST_CLOSING_PCT: 0.085,
+  // Buy & hold (rehab $0): same carry/cash ratios and hard money solver as the flip, but the balloon is the SOONEST term that meets
+  // the buyer profit minimum. Seller note first at 3% interest-only; if rent can't carry that payment plus the hard money interest,
+  // fall back to a principal-only (0%) note and raise the carry price 10% over asking. Rent is entered per deal (long-term and/or
+  // short-term); operating expenses are a % of gross rent.
+  HOLD_TERMS: [12, 18, 24, 36, 48, 60], HOLD_IO_RATE: 0.03, HOLD_PRICE_BUMP: 0.10, OPEX_LTR: 0.35, OPEX_STR: 0.50,
+  // New development (land): dual offer = cash, or the full asking price paid at sale/refinance within 24 months with $0 at closing.
+  DEV_MONTHS: 24
 };
 
 /* ---------- CSV ---------- */
@@ -114,88 +121,142 @@ function scrEquityPct(f) {
 }
 
 function scrPrice(d, f) {
-  const land = SCR.cfg.asset === "land";
+  const land = SCR.cfg.asset === "land", strat = SCR.cfg.strategy;
+  const hold = !land && strat === "hold", dev = land && strat === "dev";
   const list = d.price || 0;
-  const val = f.pwValue || 0, mort = f.pwMortgage || 0;
   const ownerEquityPct = scrEquityPct(f);
   if (ownerEquityPct === null) return { ready: false, noEquity: true };
   const lowEquity = ownerEquityPct < SCR.cfg.minOwnerEquityPct;
   const arvMid = f.arvLow && f.arvHigh ? scrRound((f.arvLow + f.arvHigh) / 2) : (f.arvLow || f.arvHigh || 0);
   const tier = f.tier || "moderate";
-  // Rehab = manual override, else the MIDDLE of Google AI's range (never the high end), else a per-sq-ft tier guess.
+  // Rehab = manual override (0 means no rehab), else the MIDDLE of Google AI's range (never the high end), else a per-sq-ft tier guess.
+  // Land and buy & hold have no rehab.
   const aiRehab = f.rehabLow || f.rehabHigh ? scrRound(((f.rehabLow || f.rehabHigh) + (f.rehabHigh || f.rehabLow)) / 2) : 0;
-  const rehab = land ? 0 : (f.rehab || aiRehab || (d.sqft ? scrRound(d.sqft * SCR.REHAB_PSF[tier]) : 0));
-  const rehabSource = land ? "" : f.rehab ? "manual" : aiRehab ? "Google AI range (middle)" : "per-sq-ft tier guess";
+  const manualRehab = f.rehab !== null && f.rehab !== undefined;
+  const rehab = (land || hold) ? 0 : manualRehab ? f.rehab : (aiRehab || (d.sqft ? scrRound(d.sqft * SCR.REHAB_PSF[tier]) : 0));
+  const rehabSource = land ? "" : hold ? "none (buy & hold)" : manualRehab ? (f.rehab === 0 ? "none ($0 entered)" : "manual") : aiRehab ? "Google AI range (middle)" : "per-sq-ft tier guess";
   if (!arvMid) return { ready: false, ownerEquityPct, lowEquity };
-  const months = f.gut ? 24 : 12;
   const suite = computeMaoSuite(arvMid, rehab, land ? "Land" : "Residential Property (1-4 units)", undefined, "On-Market");
   let cashOffer, carryOffer = 0, carryDown = 0, mao, ltv = 0, ltvNote = "";
-  const asIs = arvMid - rehab, years = months / 12;
+  const asIs = arvMid - rehab;
+  let months = f.gut && !hold ? 24 : 12;
   let hmLoan = 0, hmMonthly = 0, gutPlan = null, modelCarry = null, modelCash = null, profit = null, priceNote = "", ceiling = null;
-  if (land) { mao = suite.maoCash; cashOffer = scrRound(mao); }
-  else {
+  let holdPlan = null, noteRate = 0, monthlyPrincipal = 0, devNote = "";
+  if (land) {
+    mao = suite.maoCash; cashOffer = scrRound(mao);
+    if (dev) {
+      months = SCR.DEV_MONTHS; carryDown = 0; carryOffer = list || arvMid;
+      devNote = list ? `asking price is ${(list / arvMid * 100).toFixed(0)}% of the as-is value` : "no list price in the file, so the as-is value was used";
+    }
+  } else {
     mao = suite.maoHardMoney20;                                     // reference only
     const buffer = Math.max(SCR.GUT_BUFFER_MIN, SCR.GUT_BUFFER_PCT * arvMid);
-    const profitFor = (carry, down, loan) => arvMid * Math.pow(1 + SCR.APPRECIATION, years) * (1 - SCR.SALE_COSTS) - (carry - down) - loan - loan * SCR.HM_RATE / 100 * years;
-    const build = carry => {
-      const cash = scrRound(SCR.CASH_PCT_OF_CARRY * carry), baseDown = scrRound(SCR.CARRY_DOWN * carry), dMin = scrRound(SCR.MIN_SELLER_CASH_PCT * carry);
-      const targetFor = loan => f.gut ? loan * SCR.HM_RATE / 100 / 12 * months + buffer : SCR.CASHBACK_PCT * carry;
-      const gap = (r, cac) => scrModel(carry, cac, asIs * r, asIs).cashBack - targetFor(asIs * r);
-      const minProfit = Math.max(SCR.MIN_PROFIT_PER_YEAR * years, SCR.MIN_PROFIT_PCT_OF_PRICE * carry);
-      // Smallest LTV at which buyer cash back reaches its target for a given seller cash at closing (null = even the max LTV can't).
-      const solveR = cac => {
-        if (gap(SCR.LTV_MAX, cac) < 0) return null;
-        if (gap(SCR.LTV_MIN, cac) > 0) return SCR.LTV_MIN;
-        let lo = SCR.LTV_MIN, hi = SCR.LTV_MAX;
-        for (let i = 0; i < 40; i++) { const m = (lo + hi) / 2; if (gap(m, cac) < 0) lo = m; else hi = m; }
-        return Math.round((lo + hi) / 2 * 1000) / 1000;
-      };
-      const profitAt = (cac, r) => profitFor(carry, cac, asIs * r);
-      const notes = []; let capFail = false;
-      let down = baseDown, r = solveR(down);
-      if (r === null) {
-        // Shortfall at the max LTV: cut the seller's cash at closing until the buyer's cash back hits the target.
-        r = SCR.LTV_MAX;
-        if (gap(r, dMin) < 0) { down = dMin; capFail = true; notes.push(`even at the ${SCR.MIN_SELLER_CASH_PCT * 100}% seller-cash floor the loan can't fund the target cash back`); }
-        else { let cLo = dMin, cHi = down; for (let i = 0; i < 40; i++) { const m = (cLo + cHi) / 2; if (gap(r, m) < 0) cHi = m; else cLo = m; } down = scrRound((cLo + cHi) / 2); notes.push(`max LTV reached, so the seller's cash at closing was cut from ${scrMoney(baseDown)} to ${scrMoney(down)} to cover the target cash back`); }
-      }
-      let profit = profitAt(down, r);
-      if (profit < minProfit) {
-        // Not enough buyer profit at the Ashurst ratios: trade seller cash at closing for a smaller loan (less
-        // interest and payoff at exit) until the minimum is met, keeping the buyer's cash back on target.
-        const startDown = down, startR = r;
-        for (let d = down - 500; d >= dMin; d -= 500) {
-          const rr = solveR(d); if (rr === null) continue;
-          if (profitAt(d, rr) >= minProfit) { down = d; r = rr; profit = profitAt(d, rr); break; }
-          if (d - 500 < dMin) { down = d; r = rr; profit = profitAt(d, rr); }       // best effort at the floor
-        }
-        if (down !== startDown) notes.push(`to meet the buyer profit minimum, the seller's cash at closing went from ${scrMoney(startDown)} to ${scrMoney(down)} and LTV from ${(startR * 100).toFixed(1)}% to ${(r * 100).toFixed(1)}%`);
-      }
-      return { carry, cash, down, r, note: notes.join("; "), loan: asIs * r, profit, minProfit, feasible: profit >= minProfit && !capFail };
-    };
     const carryRaw = Math.round(SCR.CARRY_PCT_OF_ARV * arvMid / 1000) * 1000;
-    const ceilOf = carry => Math.round(Math.min(list || Infinity, carry * (1 + SCR.NEGOTIATION_ROOM)) / 1000) * 1000;
-    let c = build(list ? Math.min(list, carryRaw) : carryRaw);
-    const startCarry = c.carry;
-    // The offer we send must be feasible AND stay feasible if we raise it by the negotiation room.
-    while (!(c.feasible && build(ceilOf(c.carry)).feasible) && c.carry - 1000 >= SCR.MIN_CARRY_PCT_OF_ARV * arvMid) c = build(c.carry - 1000);
-    if (c.carry < startCarry) priceNote = `carry price reduced from ${scrMoney(startCarry)} to ${scrMoney(c.carry)} so the seller gets at least ${SCR.MIN_SELLER_CASH_PCT * 100}% cash at closing, the buyer profit minimum is met, and there is ${SCR.NEGOTIATION_ROOM * 100}% room to go up`;
-    const ceil = build(ceilOf(c.carry));
+    // Solves the whole structure for one balloon term. st = { noteRate, noi (monthly rent after expenses), fixedCarry (carry price that may not step down) }.
+    const solve = (termMonths, st) => {
+      const years = termMonths / 12;
+      const profitFor = (carry, down, loan) => arvMid * Math.pow(1 + SCR.APPRECIATION, years) * (1 - SCR.SALE_COSTS) - (carry - down) - loan - loan * SCR.HM_RATE / 100 * years
+        - (carry - down) * st.noteRate * years + st.noi * termMonths;
+      const build = carry => {
+        const cash = scrRound(SCR.CASH_PCT_OF_CARRY * carry), baseDown = scrRound(SCR.CARRY_DOWN * carry), dMin = scrRound(SCR.MIN_SELLER_CASH_PCT * carry);
+        const targetFor = loan => f.gut && !hold ? loan * SCR.HM_RATE / 100 / 12 * termMonths + buffer : SCR.CASHBACK_PCT * carry;
+        const gap = (r, cac) => scrModel(carry, cac, asIs * r, asIs).cashBack - targetFor(asIs * r);
+        const minProfit = Math.max(SCR.MIN_PROFIT_PER_YEAR * years, SCR.MIN_PROFIT_PCT_OF_PRICE * carry);
+        // Smallest LTV at which buyer cash back reaches its target for a given seller cash at closing (null = even the max LTV can't).
+        const solveR = cac => {
+          if (gap(SCR.LTV_MAX, cac) < 0) return null;
+          if (gap(SCR.LTV_MIN, cac) > 0) return SCR.LTV_MIN;
+          let lo = SCR.LTV_MIN, hi = SCR.LTV_MAX;
+          for (let i = 0; i < 40; i++) { const m = (lo + hi) / 2; if (gap(m, cac) < 0) lo = m; else hi = m; }
+          return Math.round((lo + hi) / 2 * 1000) / 1000;
+        };
+        const profitAt = (cac, r) => profitFor(carry, cac, asIs * r);
+        const notes = []; let capFail = false;
+        let down = baseDown, r = solveR(down);
+        if (r === null) {
+          // Shortfall at the max LTV: cut the seller's cash at closing until the buyer's cash back hits the target.
+          r = SCR.LTV_MAX;
+          if (gap(r, dMin) < 0) { down = dMin; capFail = true; notes.push(`even at the ${SCR.MIN_SELLER_CASH_PCT * 100}% seller-cash floor the loan can't fund the target cash back`); }
+          else { let cLo = dMin, cHi = down; for (let i = 0; i < 40; i++) { const m = (cLo + cHi) / 2; if (gap(r, m) < 0) cHi = m; else cLo = m; } down = scrRound((cLo + cHi) / 2); notes.push(`max LTV reached, so the seller's cash at closing was cut from ${scrMoney(baseDown)} to ${scrMoney(down)} to cover the target cash back`); }
+        }
+        let profit = profitAt(down, r);
+        if (profit < minProfit) {
+          // Not enough buyer profit at the Ashurst ratios: trade seller cash at closing for a smaller loan (less
+          // interest and payoff at exit) until the minimum is met, keeping the buyer's cash back on target.
+          const startDown = down, startR = r;
+          for (let dn = down - 500; dn >= dMin; dn -= 500) {
+            const rr = solveR(dn); if (rr === null) continue;
+            if (profitAt(dn, rr) >= minProfit) { down = dn; r = rr; profit = profitAt(dn, rr); break; }
+            if (dn - 500 < dMin) { down = dn; r = rr; profit = profitAt(dn, rr); }       // best effort at the floor
+          }
+          if (down !== startDown) notes.push(`to meet the buyer profit minimum, the seller's cash at closing went from ${scrMoney(startDown)} to ${scrMoney(down)} and LTV from ${(startR * 100).toFixed(1)}% to ${(r * 100).toFixed(1)}%`);
+        }
+        return { carry, cash, down, r, note: notes.join("; "), loan: asIs * r, profit, minProfit, feasible: profit >= minProfit && !capFail };
+      };
+      let c, ceilOf, pn = "";
+      if (st.fixedCarry) {
+        ceilOf = carry => Math.round(carry * (1 + SCR.NEGOTIATION_ROOM) / 1000) * 1000;
+        c = build(st.fixedCarry);
+      } else {
+        ceilOf = carry => Math.round(Math.min(list || Infinity, carry * (1 + SCR.NEGOTIATION_ROOM)) / 1000) * 1000;
+        c = build(list ? Math.min(list, carryRaw) : carryRaw);
+        const startCarry = c.carry;
+        // The offer we send must be feasible AND stay feasible if we raise it by the negotiation room.
+        while (!(c.feasible && build(ceilOf(c.carry)).feasible) && c.carry - 1000 >= SCR.MIN_CARRY_PCT_OF_ARV * arvMid) c = build(c.carry - 1000);
+        if (c.carry < startCarry) pn = `carry price reduced from ${scrMoney(startCarry)} to ${scrMoney(c.carry)} so the seller gets at least ${SCR.MIN_SELLER_CASH_PCT * 100}% cash at closing, the buyer profit minimum is met, and there is ${SCR.NEGOTIATION_ROOM * 100}% room to go up`;
+      }
+      const ceil = build(ceilOf(c.carry));
+      return { months: termMonths, c, ceil, priceNote: pn, feasible: c.feasible && ceil.feasible };
+    };
+    let pick;
+    if (!hold) pick = solve(months, { noteRate: 0, noi: 0 });
+    else {
+      const noiL = (f.rentLtr || 0) * (1 - SCR.OPEX_LTR), noiS = (f.rentStr || 0) * (1 - SCR.OPEX_STR), noi = Math.max(noiL, noiS), rentKnown = noi > 0;
+      const soonest = st => { let first = null; for (const m of SCR.HOLD_TERMS) { const r = solve(m, st); first = first || r; if (r.feasible) return r; } return first; };
+      const hmInt = r => r.c.loan * SCR.HM_RATE / 100 / 12;
+      const io = soonest({ noteRate: SCR.HOLD_IO_RATE, noi });
+      const ioPmt = (io.c.carry - io.c.down) * SCR.HOLD_IO_RATE / 12, cfIo = noi - hmInt(io) - ioPmt, basis = noiS > noiL ? "short-term" : "long-term";
+      if (!rentKnown || cfIo >= 0) {
+        pick = io; noteRate = SCR.HOLD_IO_RATE;
+        holdPlan = { structure: "io", feasible: pick.feasible, rentKnown, noi, basis, cashflow: cfIo, ioPmt, hmInt: hmInt(io) };
+      } else {
+        const fixed = Math.round((list || carryRaw) * (1 + SCR.HOLD_PRICE_BUMP) / 1000) * 1000;
+        pick = soonest({ noteRate: 0, noi, fixedCarry: fixed });
+        const avail = noi - hmInt(pick);
+        monthlyPrincipal = Math.max(0, Math.floor(Math.min(avail, (pick.c.carry - pick.c.down) / pick.months) / 50) * 50);
+        holdPlan = { structure: "principal", feasible: pick.feasible, rentKnown, noi, basis, cashflow: avail - monthlyPrincipal, ioCashflow: cfIo, ioPmt, hmInt: hmInt(pick) };
+      }
+    }
+    months = pick.months;
+    const years = months / 12, c = pick.c, ceil = pick.ceil;
+    priceNote = pick.priceNote;
     ceiling = { carry: ceil.carry, cash: ceil.cash, down: ceil.down, ltv: ceil.r, profit: ceil.profit, ok: ceil.feasible };
     carryOffer = c.carry; cashOffer = c.cash; carryDown = c.down; ltv = c.r; ltvNote = c.note;
     hmLoan = c.loan; hmMonthly = hmLoan * SCR.HM_RATE / 100 / 12;
     modelCarry = scrModel(carryOffer, carryDown, hmLoan, asIs);
     modelCash = scrModel(cashOffer, cashOffer, hmLoan, asIs);
     profit = { sale: c.profit, min: c.minProfit, ok: c.feasible, years, withCashBack: c.profit + modelCarry.cashBack };
-    if (f.gut) gutPlan = { holding: hmMonthly * months, buffer, target: modelCarry.cashBack, cashBack: modelCarry.cashBack, estClosing: modelCarry.closing, shortfall: 0 };
+    if (f.gut && !hold) gutPlan = { holding: hmMonthly * months, buffer, target: modelCarry.cashBack, cashBack: modelCarry.cashBack, estClosing: modelCarry.closing, shortfall: 0 };
   }
   const why = [];
   if (d.dom !== null && d.dom < SCR.cfg.minDom) why.push(`${d.dom} days on market`);
-  if (profit && !profit.ok) why.push(`buyer profit ${scrMoney(profit.sale)} is under the ${scrMoney(profit.min)} minimum even at the lowest carry price`);
+  if (profit && !profit.ok) why.push(`buyer profit ${scrMoney(profit.sale)} is under the ${scrMoney(profit.min)} minimum ${holdPlan && holdPlan.structure === "principal" ? "at " + SCR.HOLD_PRICE_BUMP * 100 + "% over asking, even at the longest balloon" : "even at the lowest carry price"}`);
   if (lowEquity) why.push(`owner equity ${ownerEquityPct.toFixed(0)}% < ${SCR.cfg.minOwnerEquityPct}%`);
   const offerToList = list ? cashOffer / list * 100 : null;   // informational only: low and dual offers are fine
-  return { ready: true, land, arvMid, rehab, rehabSource, asIs, months, suite, mao, cashOffer, carryOffer, carryDown, hmLoan, hmMonthly, ltv, ltvNote, profit, priceNote, ceiling,
+  return { ready: true, land, hold, dev, strategy: strat, arvMid, rehab, rehabSource, asIs, months, suite, mao, cashOffer, carryOffer, carryDown, hmLoan, hmMonthly, ltv, ltvNote, profit, priceNote, ceiling,
+    holdPlan, noteRate, monthlyPrincipal, devNote,
     reserves: hmMonthly * months, gutPlan, modelCarry, modelCash, ownerEquityPct, offerToList, equityAfterRehab: arvMid - list - rehab, qualifies: why.length === 0, why };
+}
+
+const SCR_STRAT_NAMES = { flip: "Fix & flip", hold: "Buy & hold", cash: "Land, cash offer", dev: "New development (land)" };
+
+// One sentence on the buy & hold structure that was chosen and why.
+function scrHoldText(p) {
+  const h = p.holdPlan; if (!h) return "";
+  const warn = h.feasible ? "" : `WARNING: no balloon term up to ${SCR.HOLD_TERMS[SCR.HOLD_TERMS.length - 1]} months meets the buyer profit minimum at these numbers; the ${SCR.HOLD_TERMS[0]}-month version is shown. `;
+  const rent = h.rentKnown ? `${h.basis} rent NOI ${scrMoney(h.noi)}/mo` : "no rent entered, so cash flow was not tested (enter rent to test it)";
+  if (h.structure === "io") return `${warn}${h.feasible ? "Soonest balloon that meets the buyer profit minimum" : "Balloon"}: ${p.months} months. Seller note ${SCR.HOLD_IO_RATE * 100}% interest-only = ${scrMoney(h.ioPmt)}/mo; hard money interest ${scrMoney(h.hmInt)}/mo; ${rent}${h.rentKnown ? " -> cash flow " + scrMoney(h.cashflow) + "/mo, so it cash flows" : ""}.`;
+  return `${warn}The ${SCR.HOLD_IO_RATE * 100}% interest-only note would not cash flow (${scrMoney(h.ioCashflow)}/mo; ${rent}), so: principal-only at 0% interest, carry price ${SCR.HOLD_PRICE_BUMP * 100}% over asking = ${scrMoney(p.carryOffer)}, balloon in ${p.months} months${h.feasible ? " (soonest that meets the buyer profit minimum)" : ""}, principal payments ${p.monthlyPrincipal ? scrMoney(p.monthlyPrincipal) + "/mo" : "none (balloon only)"}; cash flow after that ${scrMoney(h.cashflow)}/mo.`;
 }
 
 /* ---------- links + notes ---------- */
@@ -203,17 +264,17 @@ function scrLoiLink(d, p) {
   const t = new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10);
   const q = {
     address: d.address, units: 1, prop_type: p.land ? "land" : "residential", sqft: d.sqft || "", appreciation: 3, noi_growth: 2,
-    purchase_price: p.land ? p.cashOffer : p.carryOffer, cash_at_closing: p.land ? p.cashOffer : p.carryDown,
-    dual_cash_price: p.land ? "" : p.cashOffer, as_is_value: p.asIs, arv: p.arvMid, rehab: p.rehab,
+    purchase_price: p.land && !p.dev ? p.cashOffer : p.carryOffer, cash_at_closing: p.land && !p.dev ? p.cashOffer : p.carryDown,
+    dual_cash_price: p.land && !p.dev ? "" : p.cashOffer, as_is_value: p.asIs, arv: p.arvMid, rehab: p.rehab,
     sr_rate: SCR.HM_RATE, sr_amort: 30, sr_term: 12, sr_ltv: Math.round(p.ltv * 1000) / 10, sr_dscr: 1.25, sr_points: 2,
-    hm_ltc: 90, hm_arv_pct: 75, hm_rehab_pct: 100, hm_rehab_months: p.months, sc_rate: 0, sc_term: p.months / 12, monthly_principal: 0,
+    hm_ltc: 90, hm_arv_pct: 75, hm_rehab_pct: 100, hm_rehab_months: p.months, sc_rate: p.noteRate * 100, sc_term: p.months / 12, monthly_principal: p.monthlyPrincipal || 0,
     esc1_pct: 2, esc2_pct: 1.5, acq_pct: 50, broker_pct: 0, taf_pct: 2.5, park_escrow: "N", exit_type: "sale", exit_sale_costs: 6,
     exit_refi_ltv: 75, exit_refi_rate: 7.5, exit_dscr_req: 1.25, exit_amort: 30, exit_refi_costs: 2.5, exit_refi_fees: 15000,
     exit_reserve_mo: p.months, ac_phone: "520 633 6437", ac_email1: "SuedeBuffaloOfficial@gmail.com", buyer_company: "Suede Buffalo LLC",
     offer_expiry: t, loi_agent_fee: 3, loi_agent_fee_type: "pct", closing_cost_party: "split", appraisal_contingency: "off",
-    acq_fee_basis: "at_closing", seller_security_type: "equity", mode: "principal_only", loan_type: "hard_money", static_cf: 1
+    acq_fee_basis: "at_closing", seller_security_type: "equity", mode: p.noteRate ? "interest_only" : "principal_only", loan_type: "hard_money", static_cf: 1
   };
-  if (p.land) q.no_sc = 1; else q.dual_offer_active = 1;
+  if (p.land && !p.dev) q.no_sc = 1; else q.dual_offer_active = 1;
   const u = new URLSearchParams();
   Object.entries(q).forEach(([k, v]) => { if (v !== "" && v !== null && v !== undefined) u.set(k, v); });
   return SCR.LOI_URL + "?" + u.toString();
@@ -230,6 +291,7 @@ function scrAnswers(d, f, p) {
     rehabEstimate: String(p.rehab), rehabEstimateLow: String(f.rehabLow || ""), rehabEstimateHigh: String(f.rehabHigh || ""), rehabAiText: f.rehabAiText || "", dealType: "Cash Deal", estMortgageBalance: String(f.pwMortgage || 0),
     // The wizard's "Seller / Realtor / Broker Contact" step: on-market deals go to the listing agent, so the contact is
     // the realtor unless you pick Owner / seller (then an empty name falls back to the Propwire owner).
+    preLoiStrategy: SCR_STRAT_NAMES[p.strategy],
     sellerContactName: f.contactName || (f.contactRole === "seller" ? f.owner || "" : ""),
     sellerContactPhone: f.contactPhone || "", sellerContactEmail: f.contactEmail || "",
     contactRole: f.contactRole === "seller" ? "Seller" : "Realtor / listing agent", ownerName: f.owner || ""
@@ -249,9 +311,11 @@ function scrNotes(d, f, p, loi, resume) {
     `- LOI Generator (${land ? "cash template, land" : "cash template + dual offer"}, pre-filled): ${loi}`,
     `- sendmyseller.com resume link (do NOT submit): ${resume}`, "", "UNDERWRITING",
     land ? `- As-is value (middle of range): ${scrMoney(p.arvMid)}` : `- ARV (middle of comp range): ${scrMoney(p.arvMid)}   Rehab: ${scrMoney(p.rehab)}   As-is: ${scrMoney(p.asIs)}`,
-    land ? `- Cash offer (land): ${scrMoney(p.cashOffer)}   [site MAO: ${scrMoney(p.mao)}]`
-         : `- Hard Money Buyer MAO (20% down): ${scrMoney(p.mao)}\n- Offer A, all cash (${(SCR.CASH_PCT_OF_CARRY * 100).toFixed(1)}% of the carry price): ${scrMoney(p.cashOffer)}\n- Offer B, seller carry (${(SCR.CARRY_PCT_OF_ARV * 100).toFixed(1)}% of ARV, capped at list): ${scrMoney(p.carryOffer)} (${scrMoney(p.carryDown)} at closing, balance carried ${p.months} months at 0%)`,
+    land ? `- Cash offer (land): ${scrMoney(p.cashOffer)}   [site MAO: ${scrMoney(p.mao)}]` + (p.dev ? `\n- Offer B, full asking price: ${scrMoney(p.carryOffer)}, $0 at closing, paid at sale or refinance of the property within ${p.months} months (${p.devNote})` : "")
+         : `- Hard Money Buyer MAO (20% down): ${scrMoney(p.mao)}\n- Offer A, all cash (${(SCR.CASH_PCT_OF_CARRY * 100).toFixed(1)}% of the carry price): ${scrMoney(p.cashOffer)}\n- Offer B, seller carry (${p.hold && p.holdPlan.structure === "principal" ? SCR.HOLD_PRICE_BUMP * 100 + "% over asking" : (SCR.CARRY_PCT_OF_ARV * 100).toFixed(1) + "% of ARV, capped at list"}): ${scrMoney(p.carryOffer)} (${scrMoney(p.carryDown)} at closing, balance carried ${p.months} months at ${p.noteRate * 100}%${p.hold ? (p.noteRate ? " interest-only" : ", principal-only") : ""})`,
   ];
+  L.splice(L.indexOf("UNDERWRITING") + 1, 0, `- Strategy: ${SCR_STRAT_NAMES[p.strategy]}`);
+  if (p.holdPlan) L.push(`- Buy & hold: ${scrHoldText(p)}`);
   if (p.gutPlan) {
     const g = p.gutPlan;
     L.push(`- GUT cash at closing: buyer gets ${scrMoney(g.cashBack)} back = holding cost ${scrMoney(g.holding)} (${p.months} mo of hard money interest) + cushion ${scrMoney(g.buffer)} (greater of ${scrMoney(SCR.GUT_BUFFER_MIN)} or ${SCR.GUT_BUFFER_PCT * 100}% of ARV) for assignment fee / extra buyer cash. Seller cash at closing ${scrMoney(p.carryDown)}, rest carried. Estimated with the generator's fee structure; confirm in the LOI generator.${g.shortfall ? " NOTE: the loan can't fully fund this; short by " + scrMoney(g.shortfall) + "." : ""}`);
@@ -448,7 +512,7 @@ function scrRenderTable() {
 }
 
 function scrPrepare(id) {
-  const d = SCR.rows[id], land = SCR.cfg.asset === "land";
+  const d = SCR.rows[id], land = SCR.cfg.asset === "land", hold = !land && SCR.cfg.strategy === "hold", noRehab = land || hold;
   SCR.sel = { d, f: { tier: "moderate" } };
   const panel = document.getElementById("scr-prepare");
   panel.hidden = false;
@@ -485,18 +549,18 @@ function scrPrepare(id) {
     <p id="scr-msg-contact" class="small-muted" style="margin:0 0 6px;"></p>
     <div id="scr-gate" style="margin:10px 0;"></div>
     <div id="scr-after" hidden>
-    <p class="small-muted" style="margin:0 0 6px;"><strong>Step 2: comps${land ? "" : " and rehab"}.</strong></p>
+    <p class="small-muted" style="margin:0 0 6px;"><strong>Step 2: comps${noRehab ? "" : " and rehab"}.</strong></p>
     <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:6px; align-items:center;">
       <button type="button" class="btn secondary" id="scr-ask-comps">2. Ask Google AI: ${land ? "land comps" : "ARV comps"}</button>
-      ${land ? "" : `<button type="button" class="btn secondary" id="scr-ask-rehab">3. Ask Google AI: rehab</button>`}
+      ${noRehab ? "" : `<button type="button" class="btn secondary" id="scr-ask-rehab">3. Ask Google AI: rehab</button>`}
     </div>
     <div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:6px;">
       <button type="button" class="link-btn" id="scr-copy-comps">Copy comps prompt</button>
-      ${land ? "" : `<button type="button" class="link-btn" id="scr-copy-rehab">Copy rehab prompt</button>`}
+      ${noRehab ? "" : `<button type="button" class="link-btn" id="scr-copy-rehab">Copy rehab prompt</button>`}
     </div>
     <details style="margin-bottom:8px;"><summary class="small-muted" style="cursor:pointer;">Show the exact prompts</summary>
       <p class="small-muted" style="margin:6px 0 2px;"><strong>Comps</strong></p><pre id="scr-show-comps" class="small-muted" style="white-space:pre-wrap;max-height:160px;overflow:auto;"></pre>
-      ${land ? "" : `<p class="small-muted" style="margin:6px 0 2px;"><strong>Rehab</strong> (uses the middle of the ARV range once it is filled in)</p><pre id="scr-show-rehab" class="small-muted" style="white-space:pre-wrap;"></pre>`}
+      ${noRehab ? "" : `<p class="small-muted" style="margin:6px 0 2px;"><strong>Rehab</strong> (uses the middle of the ARV range once it is filled in)</p><pre id="scr-show-rehab" class="small-muted" style="white-space:pre-wrap;"></pre>`}
     </details>
     <div style="margin:10px 0;">
       <label>Google AI: ARV comps answer</label>
@@ -504,7 +568,7 @@ function scrPrepare(id) {
       <button type="button" class="btn primary" id="scr-in-comps-btn" style="margin-top:6px;">Parse comps → ARV</button>
       <span id="scr-msg-comps" class="small-muted" style="margin-left:8px;"></span>
     </div>
-    ${land ? "" : `    <div style="margin:10px 0;">
+    ${noRehab ? "" : `    <div style="margin:10px 0;">
       <label>Google AI: rehab answer</label>
       <textarea id="scr-in-rehab" rows="3" placeholder="Paste the full answer to the rehab prompt"></textarea>
       <button type="button" class="btn primary" id="scr-in-rehab-btn" style="margin-top:6px;">Parse rehab</button>
@@ -514,18 +578,21 @@ function scrPrepare(id) {
     <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; margin:10px 0;">
       <div><label>${land ? "As-is value low" : "ARV low"}</label><input type="number" id="scr-arv-low"></div>
       <div><label>${land ? "As-is value high" : "ARV high"}</label><input type="number" id="scr-arv-high"></div>
-      ${land ? "" : `<div><label>Rehab low (Google AI)</label><input type="number" id="scr-rehab-low"></div>
+      ${hold ? `<div><label>Rent: long-term, per month</label><input type="number" id="scr-rent-ltr"></div>
+      <div><label>Rent: short-term, gross per month</label><input type="number" id="scr-rent-str"></div>` : ""}
+      ${noRehab ? "" : `<div><label>Rehab low (Google AI)</label><input type="number" id="scr-rehab-low"></div>
       <div><label>Rehab high (Google AI)</label><input type="number" id="scr-rehab-high"></div>
-      <div><label>Rehab $ override (blank = middle of range)</label><input type="number" id="scr-rehab"></div>
+      <div><label>Rehab $ override (blank = middle of range, 0 = no rehab)</label><input type="number" id="scr-rehab"></div>
       <div><label>Rehab tier</label><select id="scr-tier"><option value="light">Light $25/sf</option><option value="moderate" selected>Moderate $40/sf</option><option value="heavy">Heavy $55/sf</option><option value="gut">Gut $75/sf</option></select></div>`}
     </div>
-    ${land ? "" : `<label style="display:flex;gap:6px;align-items:center;"><input type="checkbox" id="scr-gut" style="width:auto;margin:0"> Full rehab / gut (24-month reserves and carry)</label>`}
+    ${noRehab ? "" : `<label style="display:flex;gap:6px;align-items:center;"><input type="checkbox" id="scr-gut" style="width:auto;margin:0"> Full rehab / gut (24-month reserves and carry)</label>`}
     </div>
     <div id="scr-calc" style="margin-top:12px;"></div></div>`;
   panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
   const read = () => {
     const v = i => Number((document.getElementById(i) || {}).value) || 0;
-    SCR.sel.f = { arvLow: v("scr-arv-low"), arvHigh: v("scr-arv-high"), rehab: v("scr-rehab"), rehabLow: v("scr-rehab-low"), rehabHigh: v("scr-rehab-high"),
+    SCR.sel.f = { arvLow: v("scr-arv-low"), arvHigh: v("scr-arv-high"), rehab: ((document.getElementById("scr-rehab") || {}).value || "") === "" ? null : Number(document.getElementById("scr-rehab").value),
+      rentLtr: v("scr-rent-ltr"), rentStr: v("scr-rent-str"), rehabLow: v("scr-rehab-low"), rehabHigh: v("scr-rehab-high"),
       rehabAiText: SCR.sel.rehabAiText || "",
       tier: (document.getElementById("scr-tier") || {}).value, gut: !!(document.getElementById("scr-gut") || {}).checked,
       pwValue: v("scr-pw-val"), pwMortgage: v("scr-pw-mort"),
@@ -580,7 +647,7 @@ function scrRenderGate() {
   if (eq === null) { after.hidden = true; gate.innerHTML = `<div class="banner warn" style="text-align:left;">No Propwire equity yet. Enter the equity %, or the value and mortgage balance. If Propwire doesn't show equity, skip this one.</div><button type="button" class="btn secondary" id="scr-skip-gate" style="margin-top:6px;">Skip to next deal</button>`; document.getElementById("scr-skip-gate").onclick = () => scrSkipToNext("No Propwire equity shown"); return; }
   if (eq < min) { after.hidden = true; gate.innerHTML = `<div class="banner warn" style="text-align:left;">Owner equity ${eq.toFixed(0)}% is under ${min}%. No comps or rehab needed: skip it.</div><button type="button" class="btn primary" id="scr-skip-gate" style="margin-top:6px;">Skip to next deal</button>`; document.getElementById("scr-skip-gate").onclick = () => scrSkipToNext(`Owner equity ${eq.toFixed(0)}% < ${min}%`); return; }
   after.hidden = false;
-  gate.innerHTML = `<div class="banner info" style="text-align:left;">Owner equity ${eq.toFixed(0)}% passes (${min}% minimum). Now comps${SCR.cfg.asset === "land" ? "" : " and rehab"}.</div>`;
+  gate.innerHTML = `<div class="banner info" style="text-align:left;">Owner equity ${eq.toFixed(0)}% passes (${min}% minimum). Now comps${SCR.cfg.asset === "land" || SCR.cfg.strategy === "hold" ? "" : " and rehab"}.</div>`;
 }
 
 function scrRenderCalc() {
@@ -595,8 +662,11 @@ function scrRenderCalc() {
     <dl class="review-grid">
       ${row(p.land ? "As-is value (middle)" : "ARV (middle of range)", scrMoney(p.arvMid))}
       ${p.land ? "" : row("Rehab (" + p.rehabSource + ")", scrMoney(p.rehab)) + row("As-is", scrMoney(p.asIs)) + row("Hard Money Buyer MAO (20% down)", scrMoney(p.mao))}
+      ${row("Strategy", SCR_STRAT_NAMES[p.strategy])}
       ${row(p.land ? "Cash offer (land)" : "Offer A: all cash", scrMoney(p.cashOffer))}
-      ${p.land ? "" : row("Offer B: seller carry", `${scrMoney(p.carryOffer)} (${scrMoney(p.carryDown)} down, ${p.months} mo)`) + row("Hard money loan (LTV solved)", `${scrMoney(p.hmLoan)} at ${(p.ltv * 100).toFixed(1)}% LTV → ${scrMoney(p.hmMonthly)}/mo${p.ltvNote ? " (" + escapeHtml(p.ltvNote) + ")" : ""}`) + row(`Reserves (${p.months} mo)`, scrMoney(p.reserves))}
+      ${p.dev ? row("Offer B: full asking price", `${scrMoney(p.carryOffer)}, $0 at closing, paid at sale or refinance within ${p.months} months${p.devNote ? " (" + escapeHtml(p.devNote) + ")" : ""}`) : ""}
+      ${p.holdPlan ? row("Buy & hold structure", escapeHtml(scrHoldText(p))) : ""}
+      ${p.land ? "" : row("Offer B: seller carry", `${scrMoney(p.carryOffer)} (${scrMoney(p.carryDown)} down, ${p.months} mo${p.hold ? ", " + (p.noteRate ? p.noteRate * 100 + "% interest-only" : "principal-only, 0%") : ""})`) + row("Hard money loan (LTV solved)", `${scrMoney(p.hmLoan)} at ${(p.ltv * 100).toFixed(1)}% LTV → ${scrMoney(p.hmMonthly)}/mo${p.ltvNote ? " (" + escapeHtml(p.ltvNote) + ")" : ""}`) + row(`Reserves (${p.months} mo)`, scrMoney(p.reserves))}
       ${p.gutPlan ? row("Gut: cash back to buyer at close", `${scrMoney(p.gutPlan.cashBack)} = holding ${scrMoney(p.gutPlan.holding)} + cushion ${scrMoney(p.gutPlan.buffer)}`) + row("Gut: cash to seller at close", scrMoney(p.carryDown) + (p.gutPlan.shortfall ? ` (loan short by ${scrMoney(p.gutPlan.shortfall)})` : "")) : ""}
       ${p.profit ? row(`Buyer profit at ${p.profit.years}-yr balloon exit (Sale + CF)`, `${scrMoney(p.profit.sale)} vs ${scrMoney(p.profit.min)} minimum ${p.profit.ok ? "✓" : "✗"}`) : ""}
       ${p.ceiling ? row("Room to go up", `carry to ${scrMoney(p.ceiling.carry)} (${scrMoney(p.ceiling.down)} down), cash offer to ${scrMoney(p.ceiling.cash)}; buyer profit there ${scrMoney(p.ceiling.profit)} ${p.ceiling.ok ? "✓" : "✗"}`) : ""}
@@ -650,18 +720,31 @@ function scrRenderCalc() {
   };
 }
 
+const SCR_STRATS = { sf: [["flip", "Fix & flip"], ["hold", "Buy & hold"]], land: [["cash", "Land: cash offer"], ["dev", "New development"]] };
+
+// Strategy buttons: houses are fix & flip or buy & hold (rehab $0); land is a plain cash offer or new development.
+function scrRenderStrat() {
+  const box = document.getElementById("scr-strat"), opts = SCR_STRATS[SCR.cfg.asset];
+  if (!opts.some(o => o[0] === SCR.cfg.strategy)) SCR.cfg.strategy = opts[0][0];
+  box.innerHTML = `<span class="small-muted">Strategy:</span> ` + opts.map(([k, label]) => `<button type="button" class="btn ${k === SCR.cfg.strategy ? "primary" : "secondary"}" data-scr-strat="${k}">${label}</button>`).join(" ");
+  box.querySelectorAll("[data-scr-strat]").forEach(b => b.onclick = () => {
+    SCR.cfg.strategy = b.dataset.scrStrat; document.getElementById("scr-prepare").hidden = true; scrRenderStrat(); scrRenderTable();
+  });
+}
+
 function scrMount() {
   const host = document.getElementById("preloi-panel");
   if (!host || document.getElementById("scr-card")) return;
   const card = document.createElement("div");
   card.className = "card"; card.id = "scr-card"; card.style.marginBottom = "16px";
   card.innerHTML = `<h3 class="step-title" style="font-size:18px;">Screen a list of active MLS deals</h3>
-    <p class="small-muted">Upload a Redfin "Download All" CSV (or a plain list of addresses). Deals are screened on days on market and property type. For each one you check Propwire first (owner equity, 90%+ by default, is the only qualifier; no equity shown means skip) and Propwire also fills in any year built the list is missing. Only deals that pass the equity check get comps and rehab. Offer price vs list doesn't matter.</p>
+    <p class="small-muted">Upload a Redfin "Download All" CSV (or a plain list of addresses). Deals are screened on days on market and property type. For each one you check Propwire first (owner equity, 90%+ by default, is the only qualifier; no equity shown means skip) and Propwire also fills in any year built the list is missing. Only deals that pass the equity check get comps and rehab. Pick a strategy first: houses are Fix & flip or Buy & hold (rehab $0, rent-tested seller note); land is a Cash offer or New development (cash, or full asking price paid at sale/refinance within 2 years). Offer price vs list doesn't matter.</p>
     <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px;">
       <div><label>Asset class</label><select id="scr-asset"><option value="sf">Single family (dual offer)</option><option value="land">Land (cash offer)</option></select></div>
       <div><label>Min days on market</label><input type="number" id="scr-min-dom" value="180"></div>
       <div><label>Min owner equity %</label><input type="number" id="scr-min-eq" value="90"></div>
     </div>
+    <div id="scr-strat" style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;"></div>
     <p class="small-muted" style="margin:10px 0 0;">One-press helpers: drag these to your bookmarks bar, then press them on the matching page.
       <a class="btn secondary" id="scr-bm-pw" style="cursor:grab;padding:4px 10px;">Copy Propwire equity</a>
       <a class="btn secondary" id="scr-bm-g" style="cursor:grab;padding:4px 10px;">Copy Google AI comps</a></p>
@@ -675,10 +758,12 @@ function scrMount() {
   });
   const sync = () => {
     SCR.cfg.asset = document.getElementById("scr-asset").value;
+    scrRenderStrat();
     SCR.cfg.minDom = Number(document.getElementById("scr-min-dom").value) || 0;
     SCR.cfg.minOwnerEquityPct = Number(document.getElementById("scr-min-eq").value) || 0;
     document.getElementById("scr-prepare").hidden = true; scrRenderTable();
   };
+  scrRenderStrat();
   card.querySelectorAll("select,input[type=number]").forEach(el => el.addEventListener("change", sync));
   document.getElementById("scr-file").onchange = async e => {
     const f = e.target.files[0]; if (!f) return;
