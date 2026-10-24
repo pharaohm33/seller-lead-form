@@ -5915,12 +5915,12 @@ async function loadPreLoi() {
   const res = await api("adminGetPreLoi", { token: sessionToken });
   if (!res.ok) { wrap.innerHTML = `<p class="small-muted">${escapeHtml(res.error || "Couldn't load.")}</p>`; return; }
   if (!res.entries.length) { wrap.innerHTML = `<p class="small-muted" style="padding:12px;">No pre-LOI deals yet.</p>`; return; }
-  wrap.innerHTML = `<table class="crm-table"><thead><tr><th>Updated</th><th>Address</th><th>Asking</th><th>Seller contact</th><th></th></tr></thead><tbody>
+  wrap.innerHTML = `<table class="crm-table"><thead><tr><th>Updated</th><th>Address</th><th>Asking</th><th>Seller / realtor contact</th><th></th></tr></thead><tbody>
     ${res.entries.map(e => `<tr style="cursor:default">
       <td>${formatDate(e.updatedAt)}</td>
       <td>${escapeHtml(e.street || "")}<br><span class="small-muted">${escapeHtml(e.city || "")}, ${escapeHtml(e.state || "")} ${escapeHtml(e.zip || "")}</span></td>
       <td>${escapeHtml(String(e.askingPrice || ""))}</td>
-      <td>${escapeHtml(e.sellerContactName || "")}<br><span class="small-muted">${escapeHtml(e.sellerContactPhone || "")}</span></td>
+      <td>${escapeHtml(e.sellerContactName || "")}<br><span class="small-muted">${escapeHtml([e.sellerContactPhone, e.sellerContactEmail].filter(Boolean).join(" · "))}</span></td>
       <td style="white-space:nowrap">
         <button type="button" class="btn secondary" data-pl-notes="${escapeHtml(e.crmId)}">Notes</button>
         <button type="button" class="btn primary" data-pl-sent="${escapeHtml(e.crmId)}" title="Moves it into your CRM as Offer sent to cold lead. No email is sent.">LOI sent</button>

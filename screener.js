@@ -228,7 +228,11 @@ function scrAnswers(d, f, p) {
     assetType: land ? "Land" : "Residential Property (1-4 units)", units: "1", marketStatus: "On-Market", sourceLink: d.url || "",
     arv: String(p.arvMid), arvRange: f.arvLow && f.arvHigh ? `$${f.arvLow.toLocaleString()} – $${f.arvHigh.toLocaleString()}` : "",
     rehabEstimate: String(p.rehab), rehabEstimateLow: String(f.rehabLow || ""), rehabEstimateHigh: String(f.rehabHigh || ""), rehabAiText: f.rehabAiText || "", dealType: "Cash Deal", estMortgageBalance: String(f.pwMortgage || 0),
-    sellerContactName: f.owner || ""
+    // The wizard's "Seller / Realtor / Broker Contact" step: on-market deals go to the listing agent, so the contact is
+    // the realtor unless you pick Owner / seller (then an empty name falls back to the Propwire owner).
+    sellerContactName: f.contactName || (f.contactRole === "seller" ? f.owner || "" : ""),
+    sellerContactPhone: f.contactPhone || "", sellerContactEmail: f.contactEmail || "",
+    contactRole: f.contactRole === "seller" ? "Seller" : "Realtor / listing agent", ownerName: f.owner || ""
   };
 }
 
@@ -258,6 +262,9 @@ function scrNotes(d, f, p, loi, resume) {
   if (!land) L.push(`- Hard money: ${scrMoney(p.hmLoan)} at ${(p.ltv * 100).toFixed(1)}% LTV, ${SCR.HM_RATE}% -> ${scrMoney(p.hmMonthly)}/mo interest; reserves for ${p.months} months: ${scrMoney(p.reserves)}`);
   L.push(`- Owner equity (Propwire): ${p.ownerEquityPct === null ? "n/a" : p.ownerEquityPct.toFixed(0) + "%"}   Offer vs list: ${p.offerToList === null ? "n/a" : p.offerToList.toFixed(0) + "%"}`);
   L.push(`- Screen: ${p.qualifies ? "QUALIFIES" : "DOES NOT QUALIFY (" + p.why.join("; ") + ")"}`);
+  const who = f.contactRole === "seller" ? "Seller" : "Realtor / listing agent";
+  const contact = [f.contactName, f.contactPhone, f.contactEmail].filter(Boolean).join(" · ");
+  L.push(`- Contact (${who}): ${contact || "not entered yet"}${f.owner && f.contactRole !== "seller" ? "   Owner (Propwire): " + f.owner : ""}`);
   if (f.owner || f.pwNotes) L.push(`- Propwire notes: ${[f.owner, f.pwNotes].filter(Boolean).join(" | ")}`);
   return L.join("\n");
 }
@@ -468,6 +475,14 @@ function scrPrepare(id) {
       <div><label>Owner name</label><input type="text" id="scr-owner"></div>
     </div>
     <label>Propwire / other notes</label><textarea id="scr-pw-notes" rows="2"></textarea>
+    <p class="small-muted" style="margin:10px 0 4px;"><strong>Who you will contact</strong> (listing agent for on-market deals, or the owner)</p>
+    <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; margin:0 0 10px;">
+      <div><label>Contact is the</label><select id="scr-role"><option value="realtor" selected>Realtor / listing agent</option><option value="seller">Owner / seller</option></select></div>
+      <div><label>Contact name</label><input type="text" id="scr-c-name"></div>
+      <div><label>Contact phone</label><input type="tel" id="scr-c-phone"></div>
+      <div><label>Contact email</label><input type="email" id="scr-c-email"></div>
+    </div>
+    <p id="scr-msg-contact" class="small-muted" style="margin:0 0 6px;"></p>
     <div id="scr-gate" style="margin:10px 0;"></div>
     <div id="scr-after" hidden>
     <p class="small-muted" style="margin:0 0 6px;"><strong>Step 2: comps${land ? "" : " and rehab"}.</strong></p>
@@ -516,7 +531,11 @@ function scrPrepare(id) {
       pwValue: v("scr-pw-val"), pwMortgage: v("scr-pw-mort"),
       pwMortgageSet: document.getElementById("scr-pw-mort").value !== "",
       pwEquityPct: document.getElementById("scr-pw-eq").value !== "" ? Number(document.getElementById("scr-pw-eq").value) : null, owner: document.getElementById("scr-owner").value.trim(),
-      pwNotes: document.getElementById("scr-pw-notes").value.trim() };
+      pwNotes: document.getElementById("scr-pw-notes").value.trim(),
+      contactRole: document.getElementById("scr-role").value, contactName: document.getElementById("scr-c-name").value.trim(),
+      contactPhone: document.getElementById("scr-c-phone").value.trim(), contactEmail: document.getElementById("scr-c-email").value.trim() };
+    const ph = SCR.sel.f.contactPhone && typeof blockedPhoneReason === "function" ? blockedPhoneReason(SCR.sel.f.contactPhone) : "";
+    scrMsg("scr-msg-contact", ph, false);
     const yr = scrYear(document.getElementById("scr-year").value);
     if (yr !== d.year) { d.year = yr; scrRenderTable(); }
     scrRenderGate();
