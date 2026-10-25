@@ -1318,7 +1318,8 @@ const steps = [
     progress: true,
     // Land is cash-only for now -- assetType's button handler already forces
     // answers.dealType = "Cash Deal" when Land is selected, so this step has nothing to ask.
-    skip() { return answers.assetType === "Land"; },
+    // Pre-LOI mode: the deal is a dual offer (cash + seller carry) by construction, so it stays a Cash Deal. Switching it to Seller Financing hides the assignment fee.
+    skip() { return answers.assetType === "Land" || !!preLoiSession; },
     render(root) {
       // The preforeclosure/auction category is cash-only under the hood -- no seller carryback
       // offers there (see preforeclosureDebtCheck's comment). Picking it sets dealCategory (for
@@ -1999,6 +2000,15 @@ const steps = [
             arvVsAskingBanner.hidden = true;
             answers.arvBelowAskingBlocked = false;
             answers.forcedSellerFinancingOnly = false;
+          } else if (arv < askingPrice && preLoiSession) {
+            // Pre-LOI: the screener already priced the offers from the comps (not from the asking price), so ARV under asking is expected on a stale listing. It is not a stop,
+            // and it must not flip the deal to seller-financing-only (that hides the assignment fee and drops the cash offer).
+            arvVsAskingBanner.hidden = false;
+            arvVsAskingBanner.className = "banner info";
+            arvVsAskingBanner.innerHTML = `<strong>ARV is below the asking price.</strong> Normal for a Pre-LOI: the offers were priced from the comps, not from the asking price.
+              This is not a stop here and the deal stays a dual offer (cash + seller carry).`;
+            answers.arvBelowAskingBlocked = false;
+            answers.forcedSellerFinancingOnly = false;
           } else if (arv < askingPrice) {
             const gapPct = (askingPrice - arv) / askingPrice;
             if (!needsRehabLive && gapPct <= ARV_VS_ASKING_CLOSE_PCT) {
@@ -2665,7 +2675,7 @@ If this suggests the property is worth meaningfully less than expected, say so p
         const askingPriceNum = Number(answers.askingPrice) || 0;
         const needsRehabNow = (Number(answers.rehabEstimate) || 0) > 0;
         answers.forcedSellerFinancingOnly = false;
-        if (arvNum && askingPriceNum && arvNum < askingPriceNum) {
+        if (!preLoiSession && arvNum && askingPriceNum && arvNum < askingPriceNum) {      // (Pre-LOI mode: see the note in the live check above)
           const gapPct = (askingPriceNum - arvNum) / askingPriceNum;
           if (!needsRehabNow && gapPct <= ARV_VS_ASKING_CLOSE_PCT) {
             // Close enough with no rehab -- pivot to seller-financing-only (cashflow requirement is
@@ -5014,6 +5024,7 @@ function preLoiLoiUrl() {
   const u = new URL(answers.loiUrl || fromNotes || "https://pharaohm33.github.io/loi-generator/");
   const p = u.searchParams, warnings = [];
   const num = v => Number(String(v == null ? "" : v).replace(/[^0-9.]/g, "")) || 0;
+  const to500 = v => Math.round(v / 500) * 500;          // the screener prices on $500 steps; the wizard averages the AI range to the dollar
   const addr = [answers.street, answers.city, answers.state, answers.zip].filter(Boolean).join(", ");
   if (addr) p.set("address", addr);
   if (answers.units) p.set("units", String(answers.units));
@@ -5021,11 +5032,11 @@ function preLoiLoiUrl() {
   const pt = { "Residential Property (1-4 units)": "residential", "Commercial Property": "commercial", "Land": "land" }[answers.assetType];
   if (pt) p.set("prop_type", pt);
   const arv = num(answers.arv), rehab = answers.rehabEstimate !== undefined && answers.rehabEstimate !== "" ? num(answers.rehabEstimate) : null;
-  if (arv && arv !== num(p.get("arv"))) {
+  if (arv && to500(arv) !== to500(num(p.get("arv")))) {
     if (p.get("arv")) warnings.push(`ARV is $${arv.toLocaleString()} now but the screener priced this deal at $${num(p.get("arv")).toLocaleString()}. The offer prices in the LOI were solved for the old ARV: re-price it in the screener if the change is real.`);
     p.set("arv", String(arv));
   }
-  if (rehab !== null && rehab !== num(p.get("rehab"))) {
+  if (rehab !== null && to500(rehab) !== to500(num(p.get("rehab")))) {
     if (p.get("rehab")) warnings.push(`Rehab is $${rehab.toLocaleString()} now but the screener priced this deal with $${num(p.get("rehab")).toLocaleString()}. Re-price it in the screener if the change is real.`);
     p.set("rehab", String(rehab));
   }
@@ -6064,6 +6075,7 @@ async function loadPreLoi() {
     Object.assign(answers, e.answers || {});
     delete answers._crmId;
     preLoiSession = { crmId: e.crmId };
+    if (answers.assetType !== "Land" && answers.dealCategory !== "Upcoming Auction/Preforeclosure Property") { answers.dealType = "Cash Deal"; answers.dealTypeAutoPivoted = false; }
     earlyCaptureDone = true;                    // belt and braces: no early beehiiv sync in this mode
     document.getElementById("admin-view").hidden = true;
     document.getElementById("public-view").hidden = false;

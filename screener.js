@@ -409,11 +409,16 @@ function scrAnswers(d, f, p) {
     sqft: String(d.sqft || ""), askingPrice: String(d.price || ""), priceSought: String(d.price || ""), yearBuilt: String(d.year || ""),
     assetType: land ? "Land" : "Residential Property (1-4 units)", units: "1", marketStatus: "On-Market", sourceLink: d.url || "",
     arv: String(p.arvMid), arvRange: f.arvLow && f.arvHigh ? `$${f.arvLow.toLocaleString()} – $${f.arvHigh.toLocaleString()}` : "",
-    rehabEstimate: String(p.rehab), rehabEstimateLow: String(f.rehabLow || ""), rehabEstimateHigh: String(f.rehabHigh || ""), rehabAiText: f.rehabAiText || "", dealType: "Cash Deal", estMortgageBalance: String(f.pwMortgage || 0),
+    // The wizard recomputes the rehab from low/high on every visit to the Cash Deal Details step. For a $0 or hand-entered rehab (and buy & hold) the AI range
+    // must not survive, or the wizard would quietly replace the number the offer was priced with. The AI range stays in rehabAiText / the notes.
+    rehabEstimate: String(p.rehab), rehabEstimateLow: (f.rehab !== null && f.rehab !== undefined) || p.hold ? (p.rehab ? String(p.rehab) : "") : String(f.rehabLow || ""),
+    rehabEstimateHigh: (f.rehab !== null && f.rehab !== undefined) || p.hold ? (p.rehab ? String(p.rehab) : "") : String(f.rehabHigh || ""), rehabAiText: f.rehabAiText || "", dealType: "Cash Deal", estMortgageBalance: String(f.pwMortgage || 0),
     // The wizard's "Seller / Realtor / Broker Contact" step: on-market deals go to the listing agent, so the contact is
     // the realtor unless you pick Owner / seller (then an empty name falls back to the Propwire owner).
     priceReasoning: `Listed at ${scrMoney(d.price)}${d.dom != null ? " for " + d.dom + " days" : ""}. Offer priced from the AI comps ${p.land ? "as-is value" : "ARV"} of ${scrMoney(p.arvMid)}${p.land ? "" : " less a " + scrMoney(p.rehab) + " rehab"}; Propwire owner equity ${p.ownerEquityPct === null ? "n/a" : p.ownerEquityPct.toFixed(0) + "%"}.`,
     isTearDown: land ? "" : "No", daysOnMarket: d.dom != null ? String(d.dom) : "",
+    // Cash Deal Details wants pictures, a rehab estimate, an assessed value or a note: the listing link covers the pictures, and the note covers a listing without a link.
+    picturesLink: d.url || "", cashDealNotes: d.url ? "" : "Pre-LOI from the screener: priced from AI comps; no listing link in the list.",
     preLoiStrategy: SCR_STRAT_NAMES[p.strategy], holdLog: p.holdLog ? JSON.stringify(p.holdLog) : "",
     sellerContactName: f.contactName || (f.contactRole === "seller" ? f.owner || "" : ""),
     sellerContactPhone: f.contactPhone || "", sellerContactEmail: f.contactEmail || "",

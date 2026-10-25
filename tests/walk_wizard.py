@@ -12,6 +12,8 @@ CSV_FULL = "ADDRESS,CITY,STATE OR PROVINCE,ZIP OR POSTAL CODE,PROPERTY TYPE,PRIC
            "2901 W Milton Rd,Tucson,AZ,85746,Single Family Residential,330000,4,2,1800,7000,1978,200,Active,https://www.redfin.com/AZ/Tucson/2901-W-Milton-Rd-85746/home/1,MLS1\n"
 CSV_NOCITY = "Address,Location,Price,Beds,Baths,SqFt,Price per SqFt,Days on Redfin\n2901 W Milton Rd,Southwest,330000,4,2,1800,183,98\n"
 
+ARV_RANGE = {"belowask": (301500, 323500), "norehab": (321000, 323000)}.get(SCENARIO, (400000, 420000))
+REHAB_JS = "0" if SCENARIO == "norehab" else "null"
 DB = {"entries": {}, "calls": [], "n": 0}
 
 
@@ -84,20 +86,20 @@ def main():
         page.click("#admin-access-btn")
         page.wait_for_selector("#admin-view:not([hidden])")
         page.click("#admin-tab-preloi")
-        csv = CSV_FULL if SCENARIO == "full" else CSV_NOCITY
+        csv = CSV_NOCITY if SCENARIO == "nocity" else CSV_FULL.replace(",330000,", ",325000,") if SCENARIO == "belowask" else CSV_FULL
         # ---- the REAL screener builds the Pre-LOI answers
         saved = page.evaluate("""async (csv) => {
           SCR.cfg.defCity = %s; SCR.cfg.defState = %s;
           SCR.rows = scrLoad(csv); const d = SCR.rows[0];
           SCR.cfg.asset = 'sf'; SCR.cfg.strategy = 'flip'; SCR.cfg.minDom = 0;
-          const f = { tier: 'moderate', pwEquityPct: 100, pwValue: 330000, pwMortgage: 0, pwMortgageSet: true, arvLow: 400000, arvHigh: 420000, rehabLow: 40000, rehabHigh: 60000,
-                      owner: 'Olive Owner', contactRole: 'realtor', contactName: 'Rita Realtor', contactPhone: '520-247-8391', contactEmail: 'rita@broker.com', rehab: null };
+          const f = { tier: 'moderate', pwEquityPct: 100, pwValue: 330000, pwMortgage: 0, pwMortgageSet: true, arvLow: %d, arvHigh: %d, rehabLow: 40000, rehabHigh: 60000,
+                      owner: 'Olive Owner', contactRole: 'realtor', contactName: 'Rita Realtor', contactPhone: '520-247-8391', contactEmail: 'rita@broker.com', rehab: %s };
           const p = scrPrice(d, f); if (!p.ready) return { error: 'not ready', p };
           const a = scrAnswers(d, f, p); const loi = scrLoiLink(d, p);
           a.loiUrl = loi; a.preLoiNotes = scrNotes(d, f, p, loi, scrResumeLink(a));
           const r = await api('adminSavePreLoi', { token: sessionToken, email: SCR.AGENT_EMAIL, crmId: '', stepIndex: 19, answers: a });
           return { ok: r.ok, keys: Object.keys(a).length, answers: a };
-        }""" % (json.dumps("Tucson" if SCENARIO == "nocity" else ""), json.dumps("AZ" if SCENARIO == "nocity" else "")), csv)
+        }""" % (json.dumps("Tucson" if SCENARIO == "nocity" else ""), json.dumps("AZ" if SCENARIO == "nocity" else ""), *ARV_RANGE, REHAB_JS), csv)
         print("screener saved a Pre-LOI:", saved.get("ok"), "| answers keys:", saved.get("keys"))
         if "--answers" in sys.argv: print({k: str(v)[:60] for k, v in saved["answers"].items() if k not in ("preLoiNotes", "loiUrl", "holdLog")})
         # ---- list -> Resume
@@ -113,10 +115,18 @@ def main():
             key = page.evaluate("steps[stepIndex].key")
             idx = page.evaluate("stepIndex")
             last = page.evaluate("stepIndex === steps.length - 1")
+            if key in ("dealType", "cashDealDetails"):
+                info = page.evaluate("""() => ({deal: answers.dealType, fee: !!document.getElementById('wholesale-fee-input'),
+                    selected: (document.querySelector('#deal-type-group .selected') || {}).textContent || null})""")
+                print(f"   [{key}] answers.dealType={info['deal']!r}  assignment-fee input on page={info['fee']}  selected deal-type button={info['selected']!r}")
             btn = page.locator("#next-btn")
             label = btn.inner_text()
             btn.click()
             page.wait_for_timeout(700)
+            if key == "cashDealDetails":
+                after_info = page.evaluate("""() => ({deal: answers.dealType, pivoted: !!answers.dealTypeAutoPivoted, forced: !!answers.forcedSellerFinancingOnly, blocked: !!answers.arvBelowAskingBlocked,
+                    banner: [...document.querySelectorAll('#arv-vs-asking-banner')].filter(e => !e.hidden).map(e => e.innerText.trim().slice(0, 110))[0] || null, arv: answers.arv, ask: answers.askingPrice, rehab: answers.rehabEstimate})""")
+                print("   after Next on cashDealDetails:", after_info)
             after = page.evaluate("stepIndex")
             if last:
                 report.append((idx, key, "FINISH CLICKED", label))
