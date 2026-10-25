@@ -17,7 +17,8 @@ const SCR = {
   // The generator's acquisition fee is 50% of the buyer's net cash and the seller bears half of closing costs, so the
   // hard money loan is the lever: each deal's LTV is SOLVED so buyer cash back hits that same % of the carry price
   // (it came out at 40% on Ashurst; bigger rehab or a different ARV/price mix moves it).
-  CARRY_PCT_OF_ARV: 420000 / 600500, CASH_PCT_OF_CARRY: 200000 / 420000, CARRY_DOWN: 128000 / 420000, CASHBACK_PCT: 27548 / 420000,
+  CARRY_PCT_OF_ARV: 420000 / 600500, CASH_PCT_OF_CARRY: 0.65,   // the all-cash offer is 65% of the seller-carry purchase price (flip, hold, and the carry side of land dev), capped at the hard money MAO
+   CARRY_DOWN: 128000 / 420000, CASHBACK_PCT: 27548 / 420000,
   LTV_MIN: 0.10, LTV_MAX: 0.70,
   // Buyer profit at the balloon exit = the generator's "Sale + CF" column: ARV x (1+3%)^yrs less 6% sale costs, less the
   // seller carry, less the hard money loan, less the interest paid (static CF). Must be at least the greater of
@@ -180,7 +181,7 @@ function scrPrice(d, f) {
       const profitFor = (carry, down, loan) => arvMid * Math.pow(1 + SCR.APPRECIATION, years) * (1 - SCR.SALE_COSTS) - (carry - down) - loan - loan * SCR.HM_RATE / 100 * years
         - (carry - down) * st.noteRate * years + st.noi * termMonths;
       const build = carry => {
-        const cashRaw = scrRound((hold ? SCR.HOLD_CASH_PCT : SCR.CASH_PCT_OF_CARRY) * carry), cashCapped = hold && mao > 0 && cashRaw > scrRound(mao);
+        const cashRaw = scrRound((hold ? SCR.HOLD_CASH_PCT : SCR.CASH_PCT_OF_CARRY) * carry), cashCapped = mao > 0 && cashRaw > scrRound(mao);
         const cash = cashCapped ? scrRound(mao) : cashRaw;
         const baseDown = scrRound((hold ? SCR.HOLD_DOWN_PCT : SCR.CARRY_DOWN) * carry), dMin = scrRound(SCR.MIN_SELLER_CASH_PCT * carry);
         const targetFor = loan => f.gut && !hold ? loan * SCR.HM_RATE / 100 / 12 * termMonths + buffer : SCR.CASHBACK_PCT * carry;
