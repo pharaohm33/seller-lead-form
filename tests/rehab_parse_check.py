@@ -24,6 +24,7 @@ for f in sys.argv[1:] or glob.glob(os.path.expanduser("~/.clipper_agent/runs/*.j
         if isinstance(x, str) and len(x) > 1500 and "rehab_text" in k:
             real.append((os.path.basename(f), x))
 bad = 0
+fixtures = json.load(open(os.path.join(ROOT, "tests", "fixtures", "rehab_answers.json")))
 with sync_playwright() as p:
     b = p.chromium.launch(channel="chrome", headless=True); pg = b.new_page()
     pg.route("https://script.google.com/**", lambda r: r.fulfill(status=200, content_type="application/json", headers={"access-control-allow-origin": "*"}, body='{"ok":true}'))
@@ -32,6 +33,10 @@ with sync_playwright() as p:
         r = pg.evaluate("t => scrBestRehab(t)", text)
         ok = r and (r["low"], r["high"]) == want
         bad += not ok; print("PASS" if ok else "FAIL", name, (r or {}).get("low"), (r or {}).get("high"))
+    for fx in fixtures:                                   # real Google AI answers (3021 W Vande Loo St): the pick must be a repair budget, never a price or a value
+        r = pg.evaluate("([t, a]) => scrBestRehab(t, a)", [fx["text"], fx["arv_mid"]])
+        ok = (r is None) if fx["name"] == "vande-loo-run-2" else (bool(r) and r["high"] <= fx["arv_mid"] * 0.45 and r["low"] >= 3000)      # run 2 has no repair figure at all: nothing is better than a wrong one
+        bad += not ok; print("PASS" if ok else "FAIL", fx["name"], (r or {}).get("low"), (r or {}).get("high"), "|", (r or {}).get("ctx", "")[-70:])
     seen = set()
     for fn, text in real:
         if text in seen: continue

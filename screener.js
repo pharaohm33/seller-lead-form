@@ -546,7 +546,7 @@ function scrApplyComps(text, msgId = "scr-msg-comps") {
 // per-sq-ft rates, tiers and finally a total. parseRehabText (the wizard's parser) takes the FIRST dollar figure,
 // which here is the ARV or a $/sq ft rate. So pick the most likely total-repair range first, then hand just that
 // snippet to the same parser.
-function scrBestRehab(text) {
+function scrBestRehab(text, arvMid) {
   const t = text.replace(/how much fix and flip investor repair[^\n]*/gi, " ");    // the echoed question
   const re = /\$\s*[\d,]+(?:\.\d+)?(?:[Kk](?![a-z]))?\s*(?:to|and|–|-|—)\s*\$?\s*[\d,]+(?:\.\d+)?(?:[Kk](?![a-z]))?/g;   // a K must touch the number: \"$45,000\\nMedium\" is not $45,000 million
   let m, best = null;
@@ -566,22 +566,25 @@ function scrBestRehab(text) {
     if (/contingency|including/i.test(after)) score += 1;
     // one part of the work: a kitchen refresh, a roof, flooring, paint, HVAC ...
     if (/kitchen|bath(?:room)?s?\b|roof|hvac|a\/c|furnace|floor|paint|cabinet|counter|window|plumbing|electric|foundation|landscap|appliance|garage|fence|pool|cosmetic|refresh|lighting|water heater/i.test(lineBefore) && !/\b(grand\s+)?total\b/i.test(lineBefore)) score -= 5;
-    if (/\b(?:ARV|comparables?|comps|market value|listed|sold|sale price|worth)\b/i.test(before.slice(-70)) && !/repair|rehab|renovat/i.test(before.slice(-70))) score -= 6;   // a value or a comp price, not a cost
+    const near = before.slice(-70);
+    if (/\b(?:ARV|comparables?|comps|market value|list(?:ed|ing)?(?: price)?|sold|sales?|sale price|price|worth|valuation|wholesale|discount|purchase|offer|buy|equity)\b/i.test(near) && !/repair|rehab|renovat|budget/i.test(near)) score -= 6;   // a price or a value, not a cost
+    if (/repairs?|rehab|renovation|budget/i.test(near)) score += 3;
+    if (arvMid && (r.low + (r.high != null ? r.high : r.low)) / 2 > arvMid * 0.45) score -= 12;                        // a "repair" of nearly half the ARV is a price or a value that was picked up by mistake
     if (!best || score > best.score) best = { score, low: r.low, high: r.high != null ? r.high : r.low, ctx: (before.slice(-60) + snip).replace(/\s+/g, " ").trim() };   // ties keep the first: the headline comes before the breakdown
   }
-  if (best) return best;
+  if (best && best.score > -6) return best;                                          // below that every range in the answer looked like a price or a value
   const single = t.match(/(?:total|estimated|budget|repair)[^$\n]{0,60}\$\s*([\d,]+)/i);
-  if (single && Number(single[1].replace(/,/g, "")) >= 3000) { const v = Number(single[1].replace(/,/g, "")); return { low: v, high: v, ctx: single[0] }; }
+  if (single && Number(single[1].replace(/,/g, "")) >= 3000 && !(arvMid && Number(single[1].replace(/,/g, "")) > arvMid * 0.45)) { const v = Number(single[1].replace(/,/g, "")); return { low: v, high: v, ctx: single[0] }; }
   return null;
 }
 
 // Google AI rehab answer -> rehab low/high
 function scrApplyRehab(text, msgId = "scr-msg-rehab") {
-  const r = scrBestRehab(text);
+  const arvMid = SCR.sel.f && SCR.sel.f.arvLow && SCR.sel.f.arvHigh ? (SCR.sel.f.arvLow + SCR.sel.f.arvHigh) / 2 : 0;
+  const r = scrBestRehab(text, arvMid);
   if (!r) { scrMsg(msgId, "Couldn't find a total repair amount in that answer. Enter rehab low/high manually.", false); return false; }
   SCR.sel.rehabAiText = text.slice(0, 6000);
   scrSet("scr-rehab-low", r.low); scrSet("scr-rehab-high", r.high);
-  const arvMid = SCR.sel.f && SCR.sel.f.arvLow && SCR.sel.f.arvHigh ? (SCR.sel.f.arvLow + SCR.sel.f.arvHigh) / 2 : 0;
   const mid = (r.low + r.high) / 2, high = arvMid && mid > arvMid * 0.5;
   scrMsg(msgId, `Parsed rehab $${r.low.toLocaleString()} to $${r.high.toLocaleString()} from "…${r.ctx}". The offer uses the middle.${high ? " WARNING: that is over half the ARV, so check it's the total repair figure." : ""}`, !high);
   return true;
