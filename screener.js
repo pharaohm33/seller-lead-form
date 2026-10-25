@@ -545,7 +545,7 @@ function scrApplyComps(text, msgId = "scr-msg-comps") {
 // snippet to the same parser.
 function scrBestRehab(text) {
   const t = text.replace(/how much fix and flip investor repair[^\n]*/gi, " ");    // the echoed question
-  const re = /\$\s*[\d,]+(?:\.\d+)?\s*[KkMm]?\s*(?:to|and|–|-|—)\s*\$?\s*[\d,]+(?:\.\d+)?\s*[KkMm]?/g;
+  const re = /\$\s*[\d,]+(?:\.\d+)?(?:[Kk](?![a-z]))?\s*(?:to|and|–|-|—)\s*\$?\s*[\d,]+(?:\.\d+)?(?:[Kk](?![a-z]))?/g;   // a K must touch the number: \"$45,000\\nMedium\" is not $45,000 million
   let m, best = null;
   while ((m = re.exec(t))) {
     const snip = m[0], r = parseRehabText(snip);
@@ -556,10 +556,15 @@ function scrBestRehab(text) {
     // A table row or sentence that begins with "Total ..." is the answer, however many header words ("Estimated Cost", "Repair Category") sit above the line items.
     const lineBefore = t.slice(t.lastIndexOf("\n", m.index) + 1, m.index);
     if (/\b(grand\s+)?total\b/i.test(lineBefore)) score += 10;
-    if (/total|overall|estimated|budget|all[- ]in|recommend|bottom line|realistic|expect/i.test(before)) score += 3;
+    // Google's own headline for the whole job ("Rough estimate: $30,000 to $45,000") is the answer too; a line item is not ("Kitchen refresh: $10,000 to $15,000").
+    if (/rough (?:estimate|range|cost)|ballpark|overall|in total|total (?:repair|rehab|renovation|cost|budget|estimate)|full (?:rehab|repair|renovation|gut)|whole[- ]house|all[- ]in|bottom line|estimated (?:range|cost|repair|rehab) (?:is|of|for|to)/i.test(before.slice(-90))) score += 8;
+    if (/total|overall|estimate|budget|all[- ]in|recommend|bottom line|realistic|expect/i.test(before)) score += 3;
     if (/repair|rehab|renovat|cost/i.test(before)) score += 1;
     if (/contingency|including/i.test(after)) score += 1;
-    if (!best || score >= best.score) best = { score, low: r.low, high: r.high != null ? r.high : r.low, ctx: (before.slice(-60) + snip).replace(/\s+/g, " ").trim() };
+    // one part of the work: a kitchen refresh, a roof, flooring, paint, HVAC ...
+    if (/kitchen|bath(?:room)?s?\b|roof|hvac|a\/c|furnace|floor|paint|cabinet|counter|window|plumbing|electric|foundation|landscap|appliance|garage|fence|pool|cosmetic|refresh|lighting|water heater/i.test(lineBefore) && !/\b(grand\s+)?total\b/i.test(lineBefore)) score -= 5;
+    if (/\b(?:ARV|comparables?|comps|market value|listed|sold|sale price|worth)\b/i.test(before.slice(-70)) && !/repair|rehab|renovat/i.test(before.slice(-70))) score -= 6;   // a value or a comp price, not a cost
+    if (!best || score > best.score) best = { score, low: r.low, high: r.high != null ? r.high : r.low, ctx: (before.slice(-60) + snip).replace(/\s+/g, " ").trim() };   // ties keep the first: the headline comes before the breakdown
   }
   if (best) return best;
   const single = t.match(/(?:total|estimated|budget|repair)[^$\n]{0,60}\$\s*([\d,]+)/i);
