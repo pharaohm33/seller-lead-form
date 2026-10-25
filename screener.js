@@ -155,6 +155,7 @@ function scrPrice(d, f) {
   const rehabSource = land ? "" : hold ? "none (buy & hold)" : manualRehab ? (f.rehab === 0 ? "none ($0 entered)" : "manual") : aiRehab ? "Google AI range (middle)" : "per-sq-ft tier guess";
   if (!arvMid) return { ready: false, ownerEquityPct, lowEquity };
   const suite = computeMaoSuite(arvMid, rehab, land ? "Land" : "Residential Property (1-4 units)", undefined, "On-Market");
+  const mao10 = scrRound(suite.maoHardMoney10 || 0);                  // Hard Money Buyer MAO (10% down): the fix & flip seller carry price
   let cashOffer, carryOffer = 0, carryDown = 0, mao, ltv = 0, ltvNote = "";
   const asIs = arvMid - rehab;
   let months = f.gut && !hold ? 24 : 12;
@@ -170,6 +171,9 @@ function scrPrice(d, f) {
     mao = suite.maoHardMoney20;                                     // reference only
     const buffer = Math.max(SCR.GUT_BUFFER_MIN, SCR.GUT_BUFFER_PCT * arvMid);
     const carryRaw = Math.round(SCR.CARRY_PCT_OF_ARV * arvMid / 1000) * 1000;
+    // Fix & flip: the seller carryback purchase price starts at the Hard Money Buyer MAO (10% down) from the site's own MAO math (never above the list price). The solver below
+    // still checks the buyer profit minimum and the room to negotiate, and only steps the price down from there if it has to (the notes say so).
+    const carryStart = !hold && mao10 > 0 ? mao10 : carryRaw;
     // Solves the whole structure for one balloon term. st = { noteRate, noi (monthly rent after expenses), fixedCarry (carry price that may not step down) }.
     const solve = (termMonths, st) => {
       const years = termMonths / 12;
@@ -256,11 +260,11 @@ function scrPrice(d, f) {
         c = build(st.fixedCarry);
       } else {
         ceilOf = carry => Math.round(Math.min(list || Infinity, carry * (1 + SCR.NEGOTIATION_ROOM)) / 1000) * 1000;
-        c = build(list ? Math.min(list, carryRaw) : carryRaw);
+        c = build(list ? Math.min(list, carryStart) : carryStart);
         const startCarry = c.carry;
         // The offer we send must be feasible AND stay feasible if we raise it by the negotiation room.
         while (!(c.feasible && build(ceilOf(c.carry)).feasible) && c.carry - 1000 >= SCR.MIN_CARRY_PCT_OF_ARV * arvMid) c = build(c.carry - 1000);
-        if (c.carry < startCarry) pn = `carry price reduced from ${scrMoney(startCarry)} to ${scrMoney(c.carry)} so the seller gets at least ${SCR.MIN_SELLER_CASH_PCT * 100}% cash at closing, the buyer profit minimum is met, and there is ${SCR.NEGOTIATION_ROOM * 100}% room to go up`;
+        if (c.carry < startCarry) pn = `carry price reduced from ${hold ? "" : "the Hard Money Buyer MAO (10% down) of "}${scrMoney(startCarry)} to ${scrMoney(c.carry)} so the seller gets at least ${SCR.MIN_SELLER_CASH_PCT * 100}% cash at closing, the buyer profit minimum is met, and there is ${SCR.NEGOTIATION_ROOM * 100}% room to go up`;
       }
       const ceil = build(ceilOf(c.carry));
       let cfInfo = null;
@@ -277,7 +281,9 @@ function scrPrice(d, f) {
       return out;
     };
     let pick;
-    if (!hold) pick = solve(months, { noteRate: 0, noi: 0 });
+    // Fix & flip: the carry price IS the Hard Money Buyer MAO (10% down) (capped at list). The solver sets the seller cash and LTV around it and reports when the buyer profit
+    // minimum is not met at that price; it no longer lowers the price on its own.
+    if (!hold) pick = solve(months, { noteRate: 0, noi: 0, fixedCarry: mao10 > 0 ? (list ? Math.min(list, mao10) : mao10) : undefined });
     else {
       const noiL = (f.rentLtr || 0) * (1 - SCR.OPEX_LTR), noiS = (f.rentStr || 0) * (1 - SCR.OPEX_STR), noi = Math.max(noiL, noiS), rentKnown = noi > 0;
       const basis = noiS > noiL ? "short-term" : "long-term";
@@ -320,11 +326,11 @@ function scrPrice(d, f) {
   }
   const why = [];
   if (d.dom !== null && d.dom < SCR.cfg.minDom) why.push(`${d.dom} days on market`);
-  if (profit && !profit.ok) why.push(`buyer profit ${scrMoney(profit.sale)} is under the ${scrMoney(profit.min)} minimum ${holdPlan && holdPlan.structure === "principal" ? "at " + SCR.HOLD_PRICE_BUMP * 100 + "% over asking, even at the longest balloon" : "even at the lowest carry price"}`);
+  if (profit && !profit.ok) why.push(`buyer profit ${scrMoney(profit.sale)} is under the ${scrMoney(profit.min)} minimum ${holdPlan && holdPlan.structure === "principal" ? "at " + SCR.HOLD_PRICE_BUMP * 100 + "% over asking, even at the longest balloon" : !hold && !land && mao10 > 0 ? "at the Hard Money Buyer MAO (10% down) price" : "even at the lowest carry price"}`);
   if (holdPlan && holdPlan.cfOk === false) why.push(`net cash flow ${scrMoney(holdPlan.cashflow)}/mo is under the ${scrMoney(holdPlan.cfNeed)}/mo minimum`);
   if (lowEquity) why.push(`owner equity ${ownerEquityPct.toFixed(0)}% < ${SCR.cfg.minOwnerEquityPct}%`);
   const offerToList = list ? cashOffer / list * 100 : null;   // informational only: low and dual offers are fine
-  return { ready: true, land, hold, dev, strategy: strat, arvMid, rehab, rehabSource, asIs, months, suite, mao, cashOffer, carryOffer, carryDown, hmLoan, hmMonthly, ltv, ltvNote, profit, priceNote, ceiling,
+  return { ready: true, land, hold, dev, strategy: strat, arvMid, rehab, rehabSource, asIs, months, suite, mao, mao10: suite.maoHardMoney10 || 0, cashOffer, carryOffer, carryDown, hmLoan, hmMonthly, ltv, ltvNote, profit, priceNote, ceiling,
     holdPlan, holdLog, noteRate, monthlyPrincipal, devNote,
     reserves: hmMonthly * months, gutPlan, modelCarry, modelCash, ownerEquityPct, offerToList, equityAfterRehab: arvMid - list - rehab, qualifies: why.length === 0, why };
 }
@@ -391,7 +397,7 @@ function scrLoiLink(d, p) {
     esc1_pct: 2, esc2_pct: 1.5, acq_pct: 50, broker_pct: 0, taf_pct: 2.5, park_escrow: "N", exit_type: "sale", exit_sale_costs: 6,
     exit_refi_ltv: 75, exit_refi_rate: 7.5, exit_dscr_req: 1.25, exit_amort: 30, exit_refi_costs: 2.5, exit_refi_fees: 15000,
     exit_reserve_mo: p.months, ac_phone: "520 633 6437", ac_email1: "SuedeBuffaloOfficial@gmail.com", buyer_company: "Suede Buffalo LLC",
-    offer_expiry: t, loi_agent_fee: 3, loi_agent_fee_type: "pct", closing_cost_party: "split", appraisal_contingency: "off",
+    offer_expiry: t, loi_agent_fee: 3, loi_agent_fee_type: "pct", closing_cost_party: "split", appraisal_contingency: "on", cash_financing: "hard_money_appraisal",
     acq_fee_basis: "at_closing", seller_security_type: "equity", mode: p.noteRate ? "interest_only" : "principal_only", loan_type: "hard_money", static_cf: 1
   };
   if (p.land && !p.dev) q.no_sc = 1; else q.dual_offer_active = 1;
@@ -440,7 +446,7 @@ function scrNotes(d, f, p, loi, resume) {
     `- sendmyseller.com resume link (do NOT submit): ${resume}`, "", "UNDERWRITING",
     land ? `- As-is value (middle of range): ${scrMoney(p.arvMid)}` : `- ARV (middle of comp range): ${scrMoney(p.arvMid)}   Rehab: ${scrMoney(p.rehab)}   As-is: ${scrMoney(p.asIs)}`,
     land ? `- Cash offer (land): ${scrMoney(p.cashOffer)}   [site MAO: ${scrMoney(p.mao)}]` + (p.dev ? `\n- Offer B, full asking price: ${scrMoney(p.carryOffer)}, $0 at closing, paid at sale or refinance of the property within ${p.months} months (${p.devNote})` : "")
-         : `- Hard Money Buyer MAO (20% down): ${scrMoney(p.mao)}\n- Offer A, all cash (${(SCR.CASH_PCT_OF_CARRY * 100).toFixed(1)}% of the carry price): ${scrMoney(p.cashOffer)}\n- Offer B, seller carry (${p.hold && p.holdPlan.structure === "principal" ? SCR.HOLD_PRICE_BUMP * 100 + "% over asking" : (SCR.CARRY_PCT_OF_ARV * 100).toFixed(1) + "% of ARV, capped at list"}): ${scrMoney(p.carryOffer)} (${scrMoney(p.carryDown)} at closing, balance carried ${p.months} months at ${p.noteRate * 100}%${p.hold ? (p.noteRate ? " interest-only" : ", principal-only") : ""})`,
+         : `- Hard Money Buyer MAO (10% down): ${scrMoney(p.mao10)}   (20% down): ${scrMoney(p.mao)}\n- Offer A, all cash (${(SCR.CASH_PCT_OF_CARRY * 100).toFixed(1)}% of the carry price): ${scrMoney(p.cashOffer)}\n- Offer B, seller carry (${p.hold && p.holdPlan.structure === "principal" ? SCR.HOLD_PRICE_BUMP * 100 + "% over asking" : p.hold ? (SCR.CARRY_PCT_OF_ARV * 100).toFixed(1) + "% of ARV, capped at list" : "Hard Money Buyer MAO (10% down) " + scrMoney(p.mao10) + ", capped at list"}): ${scrMoney(p.carryOffer)} (${scrMoney(p.carryDown)} at closing, balance carried ${p.months} months at ${p.noteRate * 100}%${p.hold ? (p.noteRate ? " interest-only" : ", principal-only") : ""})`,
   ];
   L.splice(L.indexOf("UNDERWRITING") + 1, 0, `- Strategy: ${SCR_STRAT_NAMES[p.strategy]}`);
   if (p.holdPlan) L.push(`- Buy & hold: ${scrHoldText(p)}`);
@@ -505,7 +511,7 @@ equityAmt:g(/\\$([\\d,]+)\\s*\\n\\s*Est\\. Equity/),equityPct:g(/(\\d+(?:\\.\\d+
 lastSold:g(/Last sold ([A-Za-z]+ \\d+, \\d{4})/),yearBuilt:g(/Year Built\\s*[:\\n]?\\s*(1[89]\\d\\d|20\\d\\d)/i)||g(/(1[89]\\d\\d|20\\d\\d)\\s*\\n\\s*Year Built/i),owner:g(/Owner Name\\s*\\n\\s*([^\\n]+)/),
 tags:['Free & Clear','High Equity','Absentee Owners','Tired Landlords','Vacant','Pre-Foreclosure','Tax Delinquent','Out-of-State Owners','Senior Owner'].filter(function(x){return t.replace(/Tax Delinquent\\?/g,'').indexOf(x)>-1})};
 var s=JSON.stringify(o);(navigator.clipboard?navigator.clipboard.writeText(s):Promise.reject()).then(function(){alert('Propwire copied: '+(o.equityPct||'?')+'% equity for '+o.address+'. Now press Fill from clipboard in SendMySeller.')},function(){prompt('Copy this:',s)})})();`;
-const SCR_BM_GOOGLE = `(function(){var t=document.body.innerText,m=t.match(/---COMPS SUMMARY---[\\s\\S]*?---END SUMMARY---/i),out=m?m[0]:t.slice(0,20000);
+const SCR_BM_GOOGLE = `(function(){var t=document.body.innerText,ms=(t.match(/---COMPS SUMMARY---[\\s\\S]*?---END SUMMARY---/gi)||[]).filter(function(b){return !/\\[low\\]|\\[For each|\\[single best/i.test(b)}),m=ms.length?[ms[ms.length-1]]:null,out=m?m[0]:t.slice(0,20000);
 (navigator.clipboard?navigator.clipboard.writeText(out):Promise.reject()).then(function(){alert(m?'Comps summary copied. Now press Fill from clipboard in SendMySeller.':'No summary block found; copied page text instead.')},function(){prompt('Copy this:',out.slice(0,3000))})})();`;
 const scrBmHref = code => "javascript:" + encodeURIComponent(code.replace(/\n/g, ""));
 
@@ -515,8 +521,16 @@ const scrSet = (id, v) => { const el = document.getElementById(id); if (el) { el
 const scrMsg = (id, t, ok) => { const m = document.getElementById(id); if (m) { m.textContent = t; m.style.color = ok === false ? "#b45309" : ok ? "#166534" : ""; } };
 const scrNumOf = x => Number(String(x || "").replace(/[^0-9.]/g, ""));
 
+// A Google AI page repeats the question (with its blank "[low] to [high]" format template) before the answer, so the first ---COMPS SUMMARY--- block on the page is the
+// template. The answer is the last block that is not the template.
+function scrCompsBlock(text) {
+  const blocks = [...String(text || "").matchAll(/---COMPS SUMMARY---[\s\S]*?---END SUMMARY---/gi)].map(m => m[0]).filter(b => !/\[low\]|\[For each|\[single best/i.test(b));
+  return blocks.length ? blocks[blocks.length - 1] : String(text || "");
+}
+
 // Google AI ARV comps answer -> ARV low/high (the wizard's own parser)
 function scrApplyComps(text, msgId = "scr-msg-comps") {
+  text = scrCompsBlock(text);
   const land = SCR.cfg.asset === "land", r = parseAICompsResponse(text, land, false);
   if (!(r.arvLow || r.arvHigh || r.arvEstimate)) { scrMsg(msgId, `Couldn't find ${land ? "an As-Is Value range" : "an ARV range"}. Paste the full answer including the ---COMPS SUMMARY--- block.`, false); return false; }
   scrSet("scr-arv-low", r.arvLow || r.arvEstimate); scrSet("scr-arv-high", r.arvHigh || r.arvEstimate);
@@ -539,6 +553,9 @@ function scrBestRehab(text) {
     const before = t.slice(Math.max(0, m.index - 140), m.index), after = t.slice(m.index + snip.length, m.index + snip.length + 30);
     if (/^\s*(?:\/|per)\s*(?:sq|square)/i.test(after)) continue;                    // a rate, not a total
     let score = 0;
+    // A table row or sentence that begins with "Total ..." is the answer, however many header words ("Estimated Cost", "Repair Category") sit above the line items.
+    const lineBefore = t.slice(t.lastIndexOf("\n", m.index) + 1, m.index);
+    if (/\b(grand\s+)?total\b/i.test(lineBefore)) score += 10;
     if (/total|overall|estimated|budget|all[- ]in|recommend|bottom line|realistic|expect/i.test(before)) score += 3;
     if (/repair|rehab|renovat|cost/i.test(before)) score += 1;
     if (/contingency|including/i.test(after)) score += 1;
@@ -764,6 +781,9 @@ function scrPrepare(id) {
   wire("scr-in-comps", scrApplyComps, "scr-msg-comps");
   wire("scr-in-rehab", scrApplyRehab, "scr-msg-rehab");
   wire("scr-in-pw", scrApplyPropwire, "scr-msg-pw");
+  if (d.agentName || d.agentPhone || d.agentEmail) {          // from a pasted listing: the listing agent is who the offer goes to
+    scrSet("scr-c-name", d.agentName || ""); scrSet("scr-c-phone", d.agentPhone || ""); scrSet("scr-c-email", d.agentEmail || "");
+  }
   read();
 }
 
@@ -789,7 +809,7 @@ function scrRenderCalc() {
   box.innerHTML = `<div class="banner ${p.qualifies ? "info" : "warn"}" style="text-align:left;">${p.qualifies ? "Qualifies for an offer (owner equity " + p.ownerEquityPct.toFixed(0) + "%)." : "Does not qualify: " + escapeHtml(p.why.join("; ")) + ". Skip it rather than forcing a tight offer."}</div>
     <dl class="review-grid">
       ${row(p.land ? "As-is value (middle)" : "ARV (middle of range)", scrMoney(p.arvMid))}
-      ${p.land ? "" : row("Rehab (" + p.rehabSource + ")", scrMoney(p.rehab)) + row("As-is", scrMoney(p.asIs)) + row("Hard Money Buyer MAO (20% down)", scrMoney(p.mao))}
+      ${p.land ? "" : row("Rehab (" + p.rehabSource + ")", scrMoney(p.rehab)) + row("As-is", scrMoney(p.asIs)) + row("Hard Money Buyer MAO (10% down)", scrMoney(p.mao10)) + row("Hard Money Buyer MAO (20% down)", scrMoney(p.mao))}
       ${row("Strategy", SCR_STRAT_NAMES[p.strategy])}
       ${row(p.land ? "Cash offer (land)" : "Offer A: all cash", scrMoney(p.cashOffer))}
       ${p.dev ? row("Offer B: full asking price", `${scrMoney(p.carryOffer)}, $0 at closing, paid at sale or refinance within ${p.months} months${p.devNote ? " (" + escapeHtml(p.devNote) + ")" : ""}`) : ""}
@@ -891,6 +911,13 @@ function scrMount() {
       <a class="btn secondary" id="scr-bm-pw" style="cursor:grab;padding:4px 10px;">Copy Propwire equity</a>
       <a class="btn secondary" id="scr-bm-g" style="cursor:grab;padding:4px 10px;">Copy Google AI comps</a></p>
     <input type="file" id="scr-file" accept=".csv,.txt" style="margin-top:10px;">
+    <details open style="margin-top:10px;" id="scr-paste-wrap"><summary class="small-muted" style="cursor:pointer;">Or add ONE listing by pasting its page (Ctrl+A, Ctrl+C on the Redfin / Zillow page)</summary>
+      <textarea id="scr-paste-listing" rows="4" placeholder="Paste the whole listing page text here"></textarea>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px;">
+        <input type="text" id="scr-paste-url" placeholder="Listing link (optional)" style="flex:1;min-width:220px;margin:0;">
+        <input type="text" id="scr-paste-days" placeholder="Days on market (if not in the text)" style="width:200px;margin:0;">
+        <button type="button" class="btn secondary" id="scr-paste-add">Add this listing</button><span id="scr-paste-msg" class="small-muted"></span>
+      </div></details>
     <div id="scr-results" style="margin-top:10px;"></div><div id="scr-prepare" hidden></div>`;
   host.insertBefore(card, host.firstChild);
   document.getElementById("scr-bm-pw").setAttribute("href", scrBmHref(SCR_BM_PROPWIRE));
@@ -911,6 +938,22 @@ function scrMount() {
   };
   scrRenderStrat();
   card.querySelectorAll("select,input[type=number],input[type=text]").forEach(el => el.addEventListener("change", sync));
+  document.getElementById("scr-paste-add").onclick = () => {
+    const text = document.getElementById("scr-paste-listing").value;
+    const msg = (t, ok) => { const m = document.getElementById("scr-paste-msg"); m.textContent = t; m.style.color = ok ? "#166534" : "#b45309"; };
+    if (!text.trim()) { msg("Paste the listing page text first.", false); return; }
+    const r = parseListingText(text);                      // the wizard's own Auto-Fill parser, so this reads a page exactly like the form does
+    if (!r.street) { msg("Couldn't find an address in that text.", false); return; }
+    const n = v => Number(String(v || "").replace(/[^0-9.]/g, "")) || 0;
+    const row = { type: r.assetType === "Land" ? "Vacant Land" : "Single Family Residential", street: r.street, city: r.city || "", state: r.state || "", zip: r.zip || "", price: n(r.price), beds: r.beds || "", baths: r.baths || "",
+      sqft: n(r.sqft), lot: n(r.acreage) * 43560, year: scrYear(r.yearBuilt), dom: document.getElementById("scr-paste-days").value.trim() !== "" ? n(document.getElementById("scr-paste-days").value) : (r.daysOnMarket ? n(r.daysOnMarket) : null),
+      url: document.getElementById("scr-paste-url").value.trim(), mls: "", status: "Active", agentName: (r.agentName || "").replace(/\s+Contact$/i, ""), agentPhone: r.agentPhone || "", agentEmail: r.agentEmail || "" };
+    row.id = SCR.rows.length;
+    SCR.rows.push(row); scrApplyDefaults(SCR.rows);
+    document.getElementById("scr-min-dom").value = 0;     // one hand-picked listing is screened on equity and price only
+    sync();
+    msg(`Added ${row.address}: ${row.price ? scrMoney(row.price) : "no price found"}${row.agentName ? ", agent " + row.agentName : ""}.`, true);
+  };
   document.getElementById("scr-file").onchange = async e => {
     const f = e.target.files[0]; if (!f) return;
     SCR.flash = ""; SCR.rows = scrLoad(await f.text()); sync();

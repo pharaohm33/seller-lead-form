@@ -26,6 +26,10 @@ with sync_playwright() as p:
       SCR.rows = scrLoad('ADDRESS,CITY,STATE OR PROVINCE,ZIP OR POSTAL CODE,PROPERTY TYPE,PRICE,BEDS,BATHS,SQUARE FEET,LOT SIZE,YEAR BUILT,DAYS ON MARKET,STATUS,URL,MLS#\\n2901 W Milton Rd,Tucson,AZ,85746,Single Family Residential,330000,4,2,1800,7000,1978,200,Active,https://x,M1\\n');
       const d = SCR.rows[0]; SCR.cfg.asset = 'sf'; SCR.cfg.minDom = 0;
       const f = { tier: 'moderate', pwEquityPct: 100, arvLow: 400000, arvHigh: 420000, rehabLow: 40000, rehabHigh: 60000, rehab: null };
+      // the 3021 W Vande Loo deal: asking $325,000, AI comps $301,500 to $323,500 (middle $312,500), rehab $22,440 to $37,400
+      { SCR.cfg.strategy = 'flip'; const dv = Object.assign({}, d, { street: '3021 W Vande Loo St', price: 325000, sqft: 1496, beds: 3, baths: 2, address: '3021 W Vande Loo St, Tucson, AZ 85746' });
+        const pv = scrPrice(dv, { tier: 'moderate', pwEquityPct: 86, arvLow: 301500, arvHigh: 323500, rehabLow: 22440, rehabHigh: 37400, rehab: null });
+        out.vande = { url: scrLoiLink(dv, pv), mao10: pv.mao10, mao20: Math.round(pv.mao), carry: pv.carryOffer, cash: pv.cashOffer, down: pv.carryDown, note: pv.priceNote }; }
       for (const strat of ['flip', 'hold']) { SCR.cfg.strategy = strat; const pp = scrPrice(d, Object.assign({ rentLtr: 3500 }, f)); out[strat] = { url: scrLoiLink(d, pp), cash: pp.cashOffer, carry: pp.carryOffer, down: pp.carryDown, arv: pp.arvMid }; }
       SCR.cfg.asset = 'land'; SCR.cfg.strategy = 'cash'; const land = Object.assign({}, d, { type: 'Vacant Land', lot: 43560 });
       const pl = scrPrice(land, { pwEquityPct: 100, arvLow: 90000, arvHigh: 110000 }); out.land = { url: scrLoiLink(land, pl), cash: pl.cashOffer };
@@ -45,6 +49,8 @@ with sync_playwright() as p:
         nums = {k: info[k] for k in info if k not in ("url",)}
         shown = [str(v) for v in nums.values() if isinstance(v, (int, float))]
         print("   solver numbers:", nums, "| each appears in the LOI text:", {s: (f"{int(float(s)):,}" in text) for s in shown})
+        st = lp.evaluate("({fin: cashFinancingType, appr: appraisalContingency})"); print("   financing contingency:", st, "| LOI says satisfactory appraisal:", "satisfactory appraisal" in text.lower() or "appraisal" in text.lower())
+        if info.get("mao10"): print("   MAO10:", info["mao10"], "MAO20:", info.get("mao20"), "-> carry price", info["carry"], "| note:", (info.get("note") or "none")[:140])
         print("   mentions interest-only:", "interest-only" in text.lower(), "| dual:", "DUAL" in text); print("   first lines:", " / ".join([l.strip() for l in text.splitlines() if l.strip()][:4])[:230])
         lp.close()
     b.close()
