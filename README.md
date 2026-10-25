@@ -75,6 +75,22 @@ it talks to a Google Sheet instead of encoding everything into a URL.
 
 ---
 
+## Pre-LOI before contact (admin)
+
+Admin → **Auto Pre-LOI Before Contact**. The screener (upload a Redfin/MLS list, check Propwire equity first, price the offers) saves each deal here.
+
+* **Resume** walks the deal through the **whole form**, pre-filled and validated like a normal submission (the Auto-Fill and Deal Status steps are skipped because they don't apply before contact).
+  Fix whatever a step flags, e.g. a ZIP the list didn't have. Nothing is synced to beehiiv and nothing is emailed while you do this.
+* The last step says **Finish Pre-LOI (no email)**: the deal is saved under **Submissions** (not under Leads), and the **LOI generator opens pre-filled** and builds the LOI by itself (`autogen=1`).
+* **Submissions** keeps every submission (public form and Pre-LOI form) with a Matches column (L leads, P Pre-LOIs, C CRM entries for the same address), a detail view that lists everything on file for that address,
+  and boxes for the Google Doc link and email-draft status (the browser agent fills these in).
+* A Pre-LOI is never removed on its own: **Delete** hides it (tick "show deleted" to restore), **LOI sent** keeps the row and files a copy in your CRM, and the **Pre-LOI Log** sheet records every save, finish, sent and delete.
+* Saving the same property again updates its row instead of adding a duplicate; a different property always gets its own row.
+* After pulling this change, **redeploy `backend/Code.gs`** (SETUP.md → Redeploying after a change). The `Submissions` and `Pre-LOI Log` sheets are created automatically.
+
+Tests (in `tests/`): `osascript -l JavaScript tests/backend_driver.jxa` runs the real `Code.gs` against a fake Google Sheet (macOS); `python tests/walk_wizard.py full` walks the real site in headless Chrome
+(screener → Resume → every step → Finish); `python tests/loi_check.py` checks the LOI generator link for each strategy.
+
 ## Files
 
 | File | Purpose |
@@ -83,6 +99,8 @@ it talks to a Google Sheet instead of encoding everything into a URL.
 | `app.js` | All wizard logic, admin CRM logic, and API calls |
 | `config.js` | The one thing you edit after deployment — your Apps Script Web App URL |
 | `backend/Code.gs` | The entire backend — paste into a Google Sheet's Apps Script editor |
+| `screener.js` | Admin Pre-LOI screener (Redfin/MLS list → Propwire equity → comps/rehab → offers) |
+| `tests/` | Backend, wizard and LOI-link tests (see above) |
 | `SETUP.md` | Step-by-step deployment instructions |
 
 *Internal use — Suede Buffalo LLC*

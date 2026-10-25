@@ -641,6 +641,8 @@ const steps = [
   {
     key: "listingAutofill",
     progress: true,
+    // A Pre-LOI is already filled in from the screener, and this step wipes every listing-sourced field when it renders: skip it in Pre-LOI mode.
+    skip() { return !!preLoiSession; },
     render(root) {
       root.innerHTML = `
         <h2 class="step-title">Auto-Fill from Listing</h2>
@@ -3965,7 +3967,8 @@ If this suggests the property is worth meaningfully less than expected, say so p
     // doesn't make sense to ask a seller "what price has the seller agreed to" about themselves.
     // Runs AFTER dualOfferTemplates (Make Your Offers) -- the associate needs the offer text from
     // that step to actually text the seller before there's any outcome to report here.
-    skip() { return answers.dealType !== "Cash Deal" || answers.role === "Seller"; },
+    // Pre-LOI mode (before any contact): there is no seller outcome to report yet, so this step does not apply.
+    skip() { return !!preLoiSession || answers.dealType !== "Cash Deal" || answers.role === "Seller"; },
     render(root) {
       // Residential/commercial cash deals must pencil out under at least one buyer profile before
       // they can be submitted -- Business isn't held to this since it doesn't get a comparable MAO
@@ -4314,6 +4317,10 @@ If this suggests the property is worth meaningfully less than expected, say so p
 }
 
 let stepIndex = 0;
+// Set while an admin walks a Pre-LOI deal through the wizard ("Resume" in the Auto Pre-LOI list): the form runs exactly as it does for anyone else
+// (answers pre-filled, every step validated), but nothing is emailed or synced to beehiiv, the last step finishes the Pre-LOI instead of submitting a
+// lead, and the LOI generator opens pre-filled.
+let preLoiSession = null;
 
 function buildAnswerRows() {
   const rows = [
@@ -4939,12 +4946,23 @@ function renderStep() {
     container.insertBefore(emailBanner, container.firstChild);
   }
 
+  if (preLoiSession) {
+    const pb = document.createElement("div");
+    pb.className = "banner warn";
+    pb.style.cssText = "margin-bottom:16px;text-align:left;";
+    pb.innerHTML = `<strong>Pre-LOI mode (admin).</strong> Answers are pre-filled from the screener. Go through every step like a normal submission and fix whatever a step flags.
+      Nothing is emailed or added to Leads; the last step saves it under Submissions and opens the LOI generator.
+      <button type="button" class="link-btn" id="exit-preloi-btn">Leave Pre-LOI mode</button>`;
+    container.insertBefore(pb, container.firstChild);
+    pb.querySelector("#exit-preloi-btn").onclick = () => leavePreLoiMode();
+  }
+
   const nav = document.createElement("div");
   nav.className = "nav-row";
   const isLast = stepIndex === steps.length - 1;
   nav.innerHTML = `
     ${stepIndex > 0 ? `<button class="btn secondary" id="back-btn">Back</button>` : `<span></span>`}
-    <button class="btn primary" id="next-btn">${isLast ? "Submit" : "Next"}</button>
+    <button class="btn primary" id="next-btn">${isLast ? (preLoiSession ? "Finish Pre-LOI (no email)" : "Submit") : "Next"}</button>
   `;
   container.appendChild(nav);
 
@@ -4952,7 +4970,7 @@ function renderStep() {
   container.querySelector("#next-btn").onclick = () => {
     if (step.validate && !step.validate(container)) return;
     maybeEarlyCaptureEmail();
-    if (isLast) { submitLead(container); return; }
+    if (isLast) { if (preLoiSession) finishPreLoi(container); else submitLead(container); return; }
     goTo(nextIndex(stepIndex));
   };
 }
@@ -4966,6 +4984,7 @@ function renderStep() {
 // never blocks navigation.
 let earlyCaptureDone = false;
 function maybeEarlyCaptureEmail() {
+  if (preLoiSession) return;           // an admin's own Pre-LOI work must never sync the admin's address to beehiiv (that is what sent the emails)
   if (earlyCaptureDone || !answers.email) return;
   const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(answers.email);
   if (!emailOk) return;
@@ -4978,6 +4997,86 @@ function goTo(idx) {
   stepIndex = idx;
   renderStep();
   window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function leavePreLoiMode() {
+  preLoiSession = null;
+  Object.keys(answers).forEach(k => delete answers[k]);
+  document.getElementById("public-view").hidden = true;
+  document.getElementById("admin-view").hidden = false;
+  showAdminTab("preloi");
+}
+
+// The LOI generator link for this deal: the one the screener solved (offer prices, loan, carry terms), with the property facts the admin may have
+// corrected in the wizard laid over it. If ARV or rehab changed, the solved prices no longer match them, so that is reported rather than hidden.
+function preLoiLoiUrl() {
+  const fromNotes = (String(answers.preLoiNotes || "").match(/LOI Generator[^\n]*?: (https:\/\/\S+)/) || [])[1];
+  const u = new URL(answers.loiUrl || fromNotes || "https://pharaohm33.github.io/loi-generator/");
+  const p = u.searchParams, warnings = [];
+  const num = v => Number(String(v == null ? "" : v).replace(/[^0-9.]/g, "")) || 0;
+  const addr = [answers.street, answers.city, answers.state, answers.zip].filter(Boolean).join(", ");
+  if (addr) p.set("address", addr);
+  if (answers.units) p.set("units", String(answers.units));
+  if (num(answers.sqft)) p.set("sqft", String(num(answers.sqft)));
+  const pt = { "Residential Property (1-4 units)": "residential", "Commercial Property": "commercial", "Land": "land" }[answers.assetType];
+  if (pt) p.set("prop_type", pt);
+  const arv = num(answers.arv), rehab = answers.rehabEstimate !== undefined && answers.rehabEstimate !== "" ? num(answers.rehabEstimate) : null;
+  if (arv && arv !== num(p.get("arv"))) {
+    if (p.get("arv")) warnings.push(`ARV is $${arv.toLocaleString()} now but the screener priced this deal at $${num(p.get("arv")).toLocaleString()}. The offer prices in the LOI were solved for the old ARV: re-price it in the screener if the change is real.`);
+    p.set("arv", String(arv));
+  }
+  if (rehab !== null && rehab !== num(p.get("rehab"))) {
+    if (p.get("rehab")) warnings.push(`Rehab is $${rehab.toLocaleString()} now but the screener priced this deal with $${num(p.get("rehab")).toLocaleString()}. Re-price it in the screener if the change is real.`);
+    p.set("rehab", String(rehab));
+  }
+  if (num(p.get("arv"))) p.set("as_is_value", String(Math.max(num(p.get("arv")) - num(p.get("rehab")), 0)));
+  if (!answers.loiUrl && !fromNotes) {                       // an older Pre-LOI saved before links were kept: fall back to the basic hand-off
+    const mao = num(answers.maoCash) || num(answers.askingPrice);
+    if (mao) { p.set("purchase_price", String(mao)); p.set("cash_at_closing", String(mao)); }
+    warnings.push("This Pre-LOI has no saved LOI link, so the LOI generator was filled with the basic values only. Re-save it from the screener for the full terms.");
+  }
+  p.set("src", "preloi");
+  return { url: u.toString(), warnings };
+}
+
+async function finishPreLoi(container) {
+  const btn = container.querySelector("#next-btn");
+  const errBox = container.querySelector("#submit-error");
+  btn.disabled = true;
+  btn.textContent = "Saving...";
+  if (errBox) errBox.style.display = "none";
+  try {
+    const built = preLoiLoiUrl();
+    answers.loiUrl = built.url;
+    const res = await api("adminFinishPreLoi", { token: sessionToken, email: answers.email, crmId: preLoiSession.crmId || "", stepIndex: steps.length - 1, answers: answersForCrm(), loiUrl: built.url });
+    if (!res.ok) throw new Error(res.error || "Couldn't save.");
+    preLoiSession.crmId = res.crmId;
+    preLoiSession.submissionId = res.submissionId;
+    const finalUrl = built.url + "&sub=" + encodeURIComponent(res.submissionId);
+    renderPreLoiDone(container, finalUrl, built.warnings, res.submissionId);
+    window.open(finalUrl, "_blank");
+  } catch (err) {
+    if (errBox) { errBox.style.display = "block"; errBox.textContent = "Couldn't finish the Pre-LOI: " + err.message; }
+    btn.disabled = false;
+    btn.textContent = "Finish Pre-LOI (no email)";
+  }
+}
+
+function renderPreLoiDone(container, loiUrl, warnings, submissionId) {
+  container.innerHTML = `
+    <div class="success-box">
+      <div class="check">&#9989;</div>
+      <h2>Pre-LOI complete</h2>
+      <p class="step-sub">${escapeHtml(answers.street || "")}, ${escapeHtml(answers.city || "")} ${escapeHtml(answers.state || "")} ${escapeHtml(answers.zip || "")} is saved under
+      <strong>Submissions</strong> (id ${escapeHtml(submissionId)}). No email was sent and nothing was added to Leads. The LOI generator opened in a new tab, pre-filled.</p>
+    </div>
+    ${warnings.length ? `<div class="banner warn" style="text-align:left;"><strong>Check before sending:</strong><ul>${warnings.map(w => `<li>${escapeHtml(w)}</li>`).join("")}</ul></div>` : ""}
+    <div class="nav-row" style="justify-content:center; gap:12px;">
+      <button type="button" class="btn secondary" id="preloi-open-loi">Open the LOI generator again</button>
+      <button class="btn primary" id="preloi-back">Back to Auto Pre-LOI list</button>
+    </div>`;
+  container.querySelector("#preloi-open-loi").onclick = () => window.open(loiUrl, "_blank", "noopener");
+  container.querySelector("#preloi-back").onclick = () => leavePreLoiMode();
 }
 
 async function submitLead(container) {
@@ -5887,75 +5986,167 @@ async function showAdminView() {
 
 /* ---------- Admin: Auto Pre-LOI Before Contact tab (admin session only) ---------- */
 function showAdminTab(which) {
-  const pre = which === "preloi";
+  const pre = which === "preloi", subs = which === "submissions";
   document.getElementById("preloi-panel").hidden = !pre;
-  document.getElementById("crm-table-wrap").hidden = pre;
-  document.getElementById("admin-tab-leads").className = "btn " + (pre ? "secondary" : "primary");
+  document.getElementById("submissions-panel").hidden = !subs;
+  document.getElementById("crm-table-wrap").hidden = pre || subs;
+  document.getElementById("crm-search-input").parentElement.hidden = pre || subs;        // the leads search bar belongs to the Leads tab only
+  document.getElementById("admin-tab-leads").className = "btn " + (pre || subs ? "secondary" : "primary");
   document.getElementById("admin-tab-preloi").className = "btn " + (pre ? "primary" : "secondary");
+  document.getElementById("admin-tab-submissions").className = "btn " + (subs ? "primary" : "secondary");
   if (pre) loadPreLoi();
+  if (subs) loadSubmissions();
 }
 document.getElementById("admin-tab-leads").onclick = () => showAdminTab("leads");
 document.getElementById("admin-tab-preloi").onclick = () => showAdminTab("preloi");
+document.getElementById("admin-tab-submissions").onclick = () => showAdminTab("submissions");
+document.getElementById("preloi-show-deleted").onchange = () => loadPreLoi();
 
-// "LOI sent": the deal moves out of Auto Pre-LOI into your CRM as "Offer sent to cold lead". It goes through the same
-// saveCrmEntry route as Save My Progress, which never sends an email, so doing this in volume sends you nothing.
+// "LOI sent": the Pre-LOI row stays (status LOI Sent) and a copy is filed in your CRM as "Offer sent to cold lead". No email is sent.
 async function markPreLoiSent(crmId) {
-  const r = await api("adminGetPreLoiEntry", { token: sessionToken, crmId });
-  if (!r.ok) return r;
-  const a = r.entry.answers || {};
-  const email = (a.email || getRememberedEmail() || "").trim();
-  if (!EMAIL_PATTERN.test(email)) return { ok: false, error: "This deal has no email address to file it under." };
-  a.loiSentAt = new Date().toISOString();
-  return api("saveCrmEntry", { email, status: CRM_STATUS_OFFER, crmId, stepIndex: r.entry.stepIndex || 19, answers: a });
+  return api("adminMarkPreLoiSent", { token: sessionToken, crmId });
 }
+
+const PRELOI_BADGE = {
+  "Auto Pre-LOI Before Contact": ["Ready", "#1d4ed8"], "Auto Pre-LOI Form Completed": ["Form completed", "#166534"],
+  "Auto Pre-LOI LOI Sent": ["LOI sent", "#6d28d9"], "Auto Pre-LOI Deleted": ["Deleted", "#991b1b"]
+};
 
 async function loadPreLoi() {
   const wrap = document.getElementById("preloi-entries");
+  const showDeleted = document.getElementById("preloi-show-deleted").checked;
   wrap.innerHTML = `<p class="small-muted">Loading...</p>`;
-  const res = await api("adminGetPreLoi", { token: sessionToken });
+  const res = await api("adminGetPreLoi", { token: sessionToken, includeDeleted: showDeleted });
   if (!res.ok) { wrap.innerHTML = `<p class="small-muted">${escapeHtml(res.error || "Couldn't load.")}</p>`; return; }
   if (!res.entries.length) { wrap.innerHTML = `<p class="small-muted" style="padding:12px;">No pre-LOI deals yet.</p>`; return; }
-  wrap.innerHTML = `<table class="crm-table"><thead><tr><th>Updated</th><th>Address</th><th>Asking</th><th>Seller / realtor contact</th><th></th></tr></thead><tbody>
-    ${res.entries.map(e => `<tr style="cursor:default">
+  wrap.innerHTML = `<table class="crm-table"><thead><tr><th>Updated</th><th>Status</th><th>Address</th><th>Asking</th><th>Seller / realtor contact</th><th></th></tr></thead><tbody>
+    ${res.entries.map(e => {
+      const badge = PRELOI_BADGE[e.status] || [e.status, "#374151"], gone = e.status === "Auto Pre-LOI Deleted", id = escapeHtml(e.crmId);
+      return `<tr style="cursor:default${gone ? ";opacity:.6" : ""}">
       <td>${formatDate(e.updatedAt)}</td>
+      <td><span style="color:${badge[1]};font-weight:600;font-size:12px;">${escapeHtml(badge[0])}</span></td>
       <td>${escapeHtml(e.street || "")}<br><span class="small-muted">${escapeHtml(e.city || "")}, ${escapeHtml(e.state || "")} ${escapeHtml(e.zip || "")}</span></td>
       <td>${escapeHtml(String(e.askingPrice || ""))}</td>
       <td>${escapeHtml(e.sellerContactName || "")}<br><span class="small-muted">${escapeHtml([e.sellerContactPhone, e.sellerContactEmail].filter(Boolean).join(" · "))}</span></td>
       <td style="white-space:nowrap">
-        <button type="button" class="btn secondary" data-pl-notes="${escapeHtml(e.crmId)}">Notes</button>
-        <button type="button" class="btn primary" data-pl-sent="${escapeHtml(e.crmId)}" title="Moves it into your CRM as Offer sent to cold lead. No email is sent.">LOI sent</button>
-        <button type="button" class="btn secondary" data-pl-resume="${escapeHtml(e.crmId)}">Resume</button>
-        <button type="button" class="link-btn" data-pl-delete="${escapeHtml(e.crmId)}">Delete</button>
-      </td></tr>`).join("")}
+        ${gone ? `<button type="button" class="btn secondary" data-pl-restore="${id}">Restore</button>
+                  <button type="button" class="link-btn" data-pl-purge="${id}">Delete forever</button>`
+               : `<button type="button" class="btn secondary" data-pl-notes="${id}">Notes</button>
+                  <button type="button" class="btn secondary" data-pl-loi="${id}" title="Opens the LOI generator with this deal's saved link">Open LOI</button>
+                  <button type="button" class="btn primary" data-pl-resume="${id}" title="Walk it through the whole form, pre-filled">Resume</button>
+                  <button type="button" class="btn secondary" data-pl-sent="${id}" title="Keeps this row and files a copy in your CRM as Offer sent to cold lead. No email is sent.">LOI sent</button>
+                  <button type="button" class="link-btn" data-pl-delete="${id}">Delete</button>`}
+      </td></tr>`;
+    }).join("")}
   </tbody></table><pre id="preloi-notes-box" class="small-muted" style="white-space:pre-wrap; margin-top:10px; user-select:text;" hidden></pre>`;
+  const entry = async id => { const r = await api("adminGetPreLoiEntry", { token: sessionToken, crmId: id }); if (!r.ok) alert(r.error || "Couldn't open that lead."); return r.ok ? r.entry : null; };
   wrap.querySelectorAll("[data-pl-notes]").forEach(b => b.onclick = async () => {
-    const r = await api("adminGetPreLoiEntry", { token: sessionToken, crmId: b.dataset.plNotes });
+    const e = await entry(b.dataset.plNotes); if (!e) return;
     const box = document.getElementById("preloi-notes-box");
-    box.textContent = r.ok ? (r.entry.answers.preLoiNotes || "No notes saved on this lead.") : (r.error || "Couldn't load notes.");
+    box.textContent = e.answers.preLoiNotes || "No notes saved on this lead.";
     box.hidden = false;
+  });
+  wrap.querySelectorAll("[data-pl-loi]").forEach(b => b.onclick = async () => {
+    const e = await entry(b.dataset.plLoi); if (!e) return;
+    const saved = e.answers.loiUrl || (String(e.answers.preLoiNotes || "").match(/LOI Generator[^\n]*?: (https:\/\/\S+)/) || [])[1];
+    if (!saved) { alert("This Pre-LOI has no saved LOI link. Re-save it from the screener."); return; }
+    window.open(saved, "_blank", "noopener");
   });
   wrap.querySelectorAll("[data-pl-sent]").forEach(b => b.onclick = async () => {
     b.disabled = true;
     const r = await markPreLoiSent(b.dataset.plSent);
-    if (!r.ok) { b.disabled = false; alert("Couldn't move it to your CRM: " + (r.error || "unknown error")); return; }
+    if (!r.ok) { b.disabled = false; alert("Couldn't mark it sent: " + (r.error || "unknown error")); return; }
     loadPreLoi();
   });
   wrap.querySelectorAll("[data-pl-resume]").forEach(b => b.onclick = async () => {
-    const r = await api("adminGetPreLoiEntry", { token: sessionToken, crmId: b.dataset.plResume });
-    if (!r.ok) { alert(r.error || "Couldn't open that lead."); return; }
+    const e = await entry(b.dataset.plResume); if (!e) return;
     Object.keys(answers).forEach(k => delete answers[k]);
-    Object.assign(answers, r.entry.answers || {});
-    delete answers._crmId; // resuming never overwrites the saved Pre-LOI row; submit/save creates a new one
+    Object.assign(answers, e.answers || {});
+    delete answers._crmId;
+    preLoiSession = { crmId: e.crmId };
+    earlyCaptureDone = true;                    // belt and braces: no early beehiiv sync in this mode
     document.getElementById("admin-view").hidden = true;
     document.getElementById("public-view").hidden = false;
-    goTo(Math.min(Math.max(r.entry.stepIndex || 0, 0), steps.length - 1));
+    goTo(1);                                    // start at the first real step so every step is walked and validated like a normal submission
   });
   wrap.querySelectorAll("[data-pl-delete]").forEach(b => b.onclick = async () => {
-    if (!confirm("Delete this pre-LOI deal?")) return;
+    if (!confirm("Hide this Pre-LOI? It is not erased: tick 'show deleted' to restore it.")) return;
     const r = await api("adminDeletePreLoi", { token: sessionToken, crmId: b.dataset.plDelete });
     if (!r.ok) { alert(r.error || "Couldn't delete."); return; }
     loadPreLoi();
   });
+  wrap.querySelectorAll("[data-pl-restore]").forEach(b => b.onclick = async () => {
+    const r = await api("adminRestorePreLoi", { token: sessionToken, crmId: b.dataset.plRestore });
+    if (!r.ok) { alert(r.error || "Couldn't restore."); return; }
+    loadPreLoi();
+  });
+  wrap.querySelectorAll("[data-pl-purge]").forEach(b => b.onclick = async () => {
+    if (!confirm("Erase this deleted Pre-LOI permanently? This cannot be undone.")) return;
+    const r = await api("adminPurgePreLoi", { token: sessionToken, crmId: b.dataset.plPurge });
+    if (!r.ok) { alert(r.error || "Couldn't remove."); return; }
+    loadPreLoi();
+  });
+}
+
+/* ---------- Admin: Submissions (every submission, for checking and cross referencing) ---------- */
+let subSearchTimer = null;
+document.getElementById("sub-search").oninput = () => { clearTimeout(subSearchTimer); subSearchTimer = setTimeout(loadSubmissions, 300); };
+document.getElementById("sub-source").onchange = () => loadSubmissions();
+
+async function loadSubmissions() {
+  const wrap = document.getElementById("submissions-list");
+  wrap.innerHTML = `<p class="small-muted">Loading...</p>`;
+  const res = await api("adminGetSubmissions", { token: sessionToken, q: document.getElementById("sub-search").value.trim(), source: document.getElementById("sub-source").value });
+  if (!res.ok) { wrap.innerHTML = `<p class="small-muted">${escapeHtml(res.error || "Couldn't load.")}</p>`; return; }
+  if (!res.submissions.length) { wrap.innerHTML = `<p class="small-muted" style="padding:12px;">No submissions yet.</p>`; return; }
+  wrap.innerHTML = `<p class="small-muted">${res.total} submission${res.total === 1 ? "" : "s"}${res.total > res.submissions.length ? " (showing the newest " + res.submissions.length + ")" : ""}</p>
+    <table class="crm-table"><thead><tr><th>When</th><th>Source</th><th>Address</th><th>Contact</th><th>Admin emailed</th><th>Matches</th><th>LOI / Doc / Draft</th><th></th></tr></thead><tbody>
+    ${res.submissions.map(s => `<tr style="cursor:default">
+      <td>${formatDate(s.submittedAt)}</td><td>${escapeHtml(s.source)}</td>
+      <td>${escapeHtml(s.street || "")}<br><span class="small-muted">${escapeHtml(s.city || "")}, ${escapeHtml(s.state || "")} ${escapeHtml(s.zip || "")}</span></td>
+      <td>${escapeHtml(s.sellerContactName || s.contactName || "")}<br><span class="small-muted">${escapeHtml(s.sellerContactEmail || s.contactEmail || "")}</span></td>
+      <td>${escapeHtml(s.adminEmailed || "")}</td>
+      <td class="small-muted">L ${s.matches.leads} · P ${s.matches.preLoi} · C ${s.matches.crm}${s.matches.submissions > 1 ? " · " + s.matches.submissions + " subs" : ""}</td>
+      <td class="small-muted">${s.loiLink ? "LOI ✓" : "—"} · ${s.docUrl ? `<a href="${escapeHtml(s.docUrl)}" target="_blank" rel="noopener">Doc</a>` : "no doc"} · ${escapeHtml(s.draftStatus || "no draft")}</td>
+      <td><button type="button" class="btn secondary" data-sub="${escapeHtml(s.submissionId)}">View</button></td></tr>`).join("")}
+    </tbody></table>`;
+  wrap.querySelectorAll("[data-sub]").forEach(b => b.onclick = () => openSubmission(b.dataset.sub));
+}
+
+async function openSubmission(id) {
+  const box = document.getElementById("submission-detail");
+  box.innerHTML = `<p class="small-muted">Loading...</p>`;
+  const res = await api("adminGetSubmission", { token: sessionToken, submissionId: id });
+  if (!res.ok) { box.innerHTML = `<p class="small-muted">${escapeHtml(res.error || "Couldn't load.")}</p>`; return; }
+  const s = res.submission, a = s.answers || {};
+  const keyFacts = [["Source", s.source], ["Submitted", formatDate(s.submittedAt)], ["Admin emailed", s.adminEmailed], ["Property", [s.street, s.city, s.state, s.zip].filter(Boolean).join(", ")],
+    ["Asset", s.assetType], ["Asking", s.askingPrice], ["Seller / realtor", [s.sellerContactName, s.sellerContactPhone, s.sellerContactEmail].filter(Boolean).join(" · ")],
+    ["Submitted by", [s.contactName, s.contactEmail].filter(Boolean).join(" · ")], ["ARV", a.arv], ["Rehab", a.rehabEstimate], ["Offer strategy", a.preLoiStrategy]];
+  box.innerHTML = `<div class="card" style="margin-top:14px;">
+    <div style="display:flex;justify-content:space-between;"><h3 class="step-title" style="font-size:17px;">Submission ${escapeHtml(s.submissionId)}</h3><button type="button" class="link-btn" id="sub-close">Close</button></div>
+    <dl class="review-grid">${keyFacts.filter(([, v]) => v).map(([k, v]) => `<div><dt>${escapeHtml(k)}</dt><dd>${escapeHtml(String(v))}</dd></div>`).join("")}</dl>
+    <h4>Cross reference: everything on file for this address</h4>
+    ${s.related.length ? `<table class="crm-table"><thead><tr><th>Kind</th><th>Status / source</th><th>When</th><th>Who</th></tr></thead><tbody>${s.related.map(r => `<tr style="cursor:default"><td>${escapeHtml(r.kind)}</td><td>${escapeHtml(r.status || "")}</td><td>${formatDate(r.when)}</td><td>${escapeHtml(r.who || "")}</td></tr>`).join("")}</tbody></table>` : `<p class="small-muted">Nothing else on file for this address.</p>`}
+    <h4>Where the LOI went</h4>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;">
+      <div><label>Google Doc link</label><input type="text" id="sub-doc" value="${escapeHtml(s.docUrl || "")}"></div>
+      <div><label>Email draft status</label><input type="text" id="sub-draft" value="${escapeHtml(s.draftStatus || "")}" placeholder="e.g. Gmail draft saved"></div>
+    </div>
+    <label>Notes</label><textarea id="sub-notes" rows="2">${escapeHtml(s.notes || "")}</textarea>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+      <button type="button" class="btn primary" id="sub-save">Save</button>
+      ${s.loiLink ? `<button type="button" class="btn secondary" id="sub-open-loi">Open the LOI generator</button>` : ""}
+      <button type="button" class="btn secondary" id="sub-copy">Copy all answers (JSON)</button>
+    </div><p id="sub-msg" class="small-muted"></p></div>`;
+  box.querySelector("#sub-close").onclick = () => { box.innerHTML = ""; };
+  const openLoi = box.querySelector("#sub-open-loi"); if (openLoi) openLoi.onclick = () => window.open(s.loiLink, "_blank", "noopener");
+  box.querySelector("#sub-copy").onclick = () => navigator.clipboard.writeText(JSON.stringify(a, null, 2)).then(() => { box.querySelector("#sub-msg").textContent = "Copied."; });
+  box.querySelector("#sub-save").onclick = async () => {
+    const r = await api("adminUpdateSubmission", { token: sessionToken, submissionId: id, docUrl: box.querySelector("#sub-doc").value.trim(), draftStatus: box.querySelector("#sub-draft").value.trim(), notes: box.querySelector("#sub-notes").value });
+    box.querySelector("#sub-msg").textContent = r.ok ? "Saved." : (r.error || "Couldn't save.");
+    if (r.ok) loadSubmissions();
+  };
+  box.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 function adminMessage(text, type) {

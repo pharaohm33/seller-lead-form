@@ -359,10 +359,24 @@
   <div style="display:flex; gap:6px; margin-bottom:14px;">
     <button type="button" class="btn primary" id="admin-tab-leads">Leads</button>
     <button type="button" class="btn secondary" id="admin-tab-preloi">Auto Pre-LOI Before Contact</button>
+    <button type="button" class="btn secondary" id="admin-tab-submissions">Submissions</button>
+  </div>
+  <div id="submissions-panel" hidden>
+    <div class="banner info" style="text-align:left;">Every submission, kept for you to check and cross reference: real form submissions and Pre-LOI forms you finished (those send no email and are not added to Leads).
+      The Matches column counts what else is on file for the same address: <strong>L</strong> real leads, <strong>P</strong> Pre-LOIs, <strong>C</strong> CRM entries.</div>
+    <div style="display:flex; gap:8px; margin-bottom:10px;">
+      <input type="text" id="sub-search" placeholder="Search address, name, email..." style="flex:1; width:auto; margin-bottom:0;">
+      <select id="sub-source" style="flex:0 0 auto; width:auto;"><option value="">All sources</option><option value="Public">Public form</option><option value="Pre-LOI">Pre-LOI form</option></select>
+    </div>
+    <div id="submissions-list"></div>
+    <div id="submission-detail"></div>
   </div>
   <div id="preloi-panel" hidden>
-    <div class="banner info" style="text-align:left;">Offers prepared before any contact. Nothing here was submitted and no notification email was sent.
-      <strong>Notes</strong> holds the underwriting plus both labeled links (LOI generator and sendmyseller resume link).</div>
+    <div class="banner info" style="text-align:left;">Offers prepared before any contact. Nothing here was submitted and no notification email was sent. Deals are never removed on their own:
+      each one keeps its row (Delete only hides it, and Restore brings it back).
+      <strong>Resume</strong> walks the deal through the whole form with everything pre-filled; the last step finishes it (no email, nothing added to Leads), saves it under Submissions and opens the LOI generator.
+      <strong>Notes</strong> holds the underwriting plus both labeled links.
+      <label style="margin-left:12px;"><input type="checkbox" id="preloi-show-deleted" style="width:auto;"> show deleted</label></div>
     <div id="preloi-entries"></div>
   </div>
   <div style="display:flex; gap:8px; margin-bottom:16px;">
@@ -408,7 +422,7 @@
 </div>
 
 <script src="config.js?v=158"></script>
-<script src="app.js?v=163"></script>
-<script src="screener.js?v=12"></script>
+<script src="app.js?v=164"></script>
+<script src="screener.js?v=13"></script>
 </body>
 </html>

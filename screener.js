@@ -6,7 +6,7 @@
 
 const SCR = {
   rows: [], sel: null,
-  cfg: { asset: "sf", strategy: "flip", minDom: 180, minOwnerEquityPct: 90 },   // strategy: sf = flip | hold, land = cash | dev   // qualification = days on market + Propwire owner equity only
+  cfg: { asset: "sf", strategy: "flip", minDom: 180, minOwnerEquityPct: 90, defCity: "", defState: "", defZip: "" },   // strategy: sf = flip | hold, land = cash | dev   // qualification = days on market + Propwire owner equity only
   AGENT_EMAIL: "montanoemmanuel@gmail.com", AGENT_NAME: "Emmanuel's LOI Helper Agent", PHONE: "5206336437",
   LOI_URL: "https://pharaohm33.github.io/loi-generator/",
   REHAB_PSF: { light: 25, moderate: 40, heavy: 55, gut: 75 },   // quick estimate when no rehab number is entered
@@ -90,7 +90,18 @@ function scrLoad(text) {
     });
   }
   out.forEach((d, i) => { d.id = i; d.address = `${d.street}, ${d.city}, ${d.state} ${d.zip}`.replace(/(, )+$/, ""); });
+  scrApplyDefaults(out);
   return out;
+}
+
+// A list with only street addresses gets the default city / state / ZIP typed in the settings. Row values that exist are never overwritten.
+function scrApplyDefaults(rows) {
+  rows.forEach(d => {
+    if (!d.city && SCR.cfg.defCity) d.city = SCR.cfg.defCity;
+    if (!d.state && SCR.cfg.defState) d.state = SCR.cfg.defState;
+    if (!d.zip && SCR.cfg.defZip) d.zip = SCR.cfg.defZip;
+    d.address = `${d.street}, ${d.city}, ${d.state} ${d.zip}`.replace(/(, )+$/, "").replace(/, +,/g, ",").replace(/,\s*$/, "");
+  });
 }
 
 /* ---------- stage 1: days on market + property type ---------- */
@@ -384,6 +395,7 @@ function scrLoiLink(d, p) {
     acq_fee_basis: "at_closing", seller_security_type: "equity", mode: p.noteRate ? "interest_only" : "principal_only", loan_type: "hard_money", static_cf: 1
   };
   if (p.land && !p.dev) q.no_sc = 1; else q.dual_offer_active = 1;
+  q.autogen = 1;                       // the LOI generator builds the LOI text itself on load
   const u = new URLSearchParams();
   Object.entries(q).forEach(([k, v]) => { if (v !== "" && v !== null && v !== undefined) u.set(k, v); });
   return SCR.LOI_URL + "?" + u.toString();
@@ -400,6 +412,8 @@ function scrAnswers(d, f, p) {
     rehabEstimate: String(p.rehab), rehabEstimateLow: String(f.rehabLow || ""), rehabEstimateHigh: String(f.rehabHigh || ""), rehabAiText: f.rehabAiText || "", dealType: "Cash Deal", estMortgageBalance: String(f.pwMortgage || 0),
     // The wizard's "Seller / Realtor / Broker Contact" step: on-market deals go to the listing agent, so the contact is
     // the realtor unless you pick Owner / seller (then an empty name falls back to the Propwire owner).
+    priceReasoning: `Listed at ${scrMoney(d.price)}${d.dom != null ? " for " + d.dom + " days" : ""}. Offer priced from the AI comps ${p.land ? "as-is value" : "ARV"} of ${scrMoney(p.arvMid)}${p.land ? "" : " less a " + scrMoney(p.rehab) + " rehab"}; Propwire owner equity ${p.ownerEquityPct === null ? "n/a" : p.ownerEquityPct.toFixed(0) + "%"}.`,
+    isTearDown: land ? "" : "No", daysOnMarket: d.dom != null ? String(d.dom) : "",
     preLoiStrategy: SCR_STRAT_NAMES[p.strategy], holdLog: p.holdLog ? JSON.stringify(p.holdLog) : "",
     sellerContactName: f.contactName || (f.contactRole === "seller" ? f.owner || "" : ""),
     sellerContactPhone: f.contactPhone || "", sellerContactEmail: f.contactEmail || "",
@@ -809,7 +823,7 @@ function scrRenderCalc() {
   document.getElementById("scr-copy-notes").onclick = () => navigator.clipboard.writeText(build().notes).then(() => msg("Notes copied."));
   const savePreLoi = async (action = "save") => {
     scrLogDeal(d, f, p, action);
-    const b = build(); b.a.preLoiNotes = b.notes;
+    const b = build(); b.a.preLoiNotes = b.notes; b.a.loiUrl = b.loi;
     if (SCR.sel.comps) { b.a.soldCompsJson = JSON.stringify(SCR.sel.comps.sold || []); b.a.activeCompsJson = JSON.stringify(SCR.sel.comps.active || []); }
     msg("Saving...");
     const r = await api("adminSavePreLoi", { token: sessionToken, email: SCR.AGENT_EMAIL, crmId: SCR.sel.crmId || "", stepIndex: 19, answers: b.a });
@@ -863,6 +877,9 @@ function scrMount() {
       <div><label>Asset class</label><select id="scr-asset"><option value="sf">Single family (dual offer)</option><option value="land">Land (cash offer)</option></select></div>
       <div><label>Min days on market</label><input type="number" id="scr-min-dom" value="180"></div>
       <div><label>Min owner equity %</label><input type="number" id="scr-min-eq" value="90"></div>
+      <div><label>Default city (if the list has none)</label><input type="text" id="scr-def-city" placeholder="Tucson"></div>
+      <div><label>Default state</label><input type="text" id="scr-def-state" maxlength="2" placeholder="AZ" style="text-transform:uppercase"></div>
+      <div><label>Default ZIP (optional)</label><input type="text" id="scr-def-zip" maxlength="5" placeholder="85701"></div>
     </div>
     <div id="scr-strat" style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;"></div>
     <p class="small-muted" style="margin:10px 0 0;">One-press helpers: drag these to your bookmarks bar, then press them on the matching page.
@@ -881,10 +898,14 @@ function scrMount() {
     scrRenderStrat();
     SCR.cfg.minDom = Number(document.getElementById("scr-min-dom").value) || 0;
     SCR.cfg.minOwnerEquityPct = Number(document.getElementById("scr-min-eq").value) || 0;
+    SCR.cfg.defCity = document.getElementById("scr-def-city").value.trim();
+    SCR.cfg.defState = document.getElementById("scr-def-state").value.trim().toUpperCase();
+    SCR.cfg.defZip = document.getElementById("scr-def-zip").value.trim();
+    scrApplyDefaults(SCR.rows);
     document.getElementById("scr-prepare").hidden = true; scrRenderTable();
   };
   scrRenderStrat();
-  card.querySelectorAll("select,input[type=number]").forEach(el => el.addEventListener("change", sync));
+  card.querySelectorAll("select,input[type=number],input[type=text]").forEach(el => el.addEventListener("change", sync));
   document.getElementById("scr-file").onchange = async e => {
     const f = e.target.files[0]; if (!f) return;
     SCR.flash = ""; SCR.rows = scrLoad(await f.text()); sync();

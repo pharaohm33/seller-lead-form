@@ -157,6 +157,20 @@ function doPost(e) {
         return jsonOut(fetchListing(body));
       case 'adminSavePreLoi':
         return jsonOut(withSession(body, adminSavePreLoi));
+      case 'adminFinishPreLoi':
+        return jsonOut(withSession(body, adminFinishPreLoi));
+      case 'adminMarkPreLoiSent':
+        return jsonOut(withSession(body, adminMarkPreLoiSent));
+      case 'adminRestorePreLoi':
+        return jsonOut(withSession(body, adminRestorePreLoi));
+      case 'adminPurgePreLoi':
+        return jsonOut(withSession(body, adminPurgePreLoi));
+      case 'adminGetSubmissions':
+        return jsonOut(withSession(body, adminGetSubmissions));
+      case 'adminGetSubmission':
+        return jsonOut(withSession(body, adminGetSubmission));
+      case 'adminUpdateSubmission':
+        return jsonOut(withSession(body, adminUpdateSubmission));
       case 'adminGetPreLoi':
         return jsonOut(withSession(body, adminGetPreLoi));
       case 'adminGetPreLoiEntry':
@@ -485,6 +499,8 @@ function submitLead(body) {
   forceTextValue(sheet, newRow, 'Referrer Phone', referrerPhone);
   forceTextValue(sheet, newRow, 'Zip', d.zip);
 
+  try { logSubmission('Public form', 'see Leads', d, { leadId: leadId }); } catch (err) { /* the log must never block a real submission */ }
+
   beehiivUpsertSubscriber(d.email, d.name, leadTags(d.role, d.state));
 
   return { ok: true, leadId: leadId };
@@ -540,6 +556,13 @@ const CRM_STATUSES = ['Contact Initiated on Cold Lead', 'Offer sent to cold lead
 // Offers prepared before any contact. Admin-session only (the bot logs in with ADMIN_PASSWORD, like the
 // admin does) and never visible through the public, email-keyed CRM routes below.
 const PRELOI_STATUS = 'Auto Pre-LOI Before Contact';
+// A Pre-LOI row moves through these. It is never removed by the app on its own: "deleted" is a status (recoverable), and the Pre-LOI Log sheet records
+// every save / finish / sent / delete, so nothing can disappear without a trace.
+const PRELOI_DONE_STATUS = 'Auto Pre-LOI Form Completed';
+const PRELOI_SENT_STATUS = 'Auto Pre-LOI LOI Sent';
+const PRELOI_DELETED_STATUS = 'Auto Pre-LOI Deleted';
+const PRELOI_STATUSES = [PRELOI_STATUS, PRELOI_DONE_STATUS, PRELOI_SENT_STATUS, PRELOI_DELETED_STATUS];
+function isPreLoiStatus(status) { return PRELOI_STATUSES.indexOf(status) !== -1; }
 // Sheets caps a single cell at 50,000 characters, so the answers JSON is split across a few columns.
 const CRM_ANSWER_CHUNK_SIZE = 45000;
 const CRM_ANSWER_COLUMNS = ['Answers 1', 'Answers 2', 'Answers 3', 'Answers 4'];
@@ -647,7 +670,7 @@ function getCrmEntries(body) {
   if (!email) return { ok: false, error: 'A valid email is required.' };
   const sheet = getSheet(CRM_SHEET, CRM_COLUMNS);
   const entries = sheetToObjects(sheet)
-    .filter(function (r) { return normalizeCrmEmail(r['Owner Email']) === email && r['Status'] !== PRELOI_STATUS; })
+    .filter(function (r) { return normalizeCrmEmail(r['Owner Email']) === email && !isPreLoiStatus(r['Status']); })
     .map(crmSummary);
   entries.sort(function (a, b) { return String(b.updatedAt).localeCompare(String(a.updatedAt)); });
   return { ok: true, entries: entries };
@@ -660,7 +683,7 @@ function getCrmEntry(body) {
   if (!email || !body.crmId) return { ok: false, error: 'Missing information.' };
   const sheet = getSheet(CRM_SHEET, CRM_COLUMNS);
   const row = findCrmRow(sheet, String(body.crmId));
-  if (!row || row['Status'] === PRELOI_STATUS || normalizeCrmEmail(row['Owner Email']) !== email) {
+  if (!row || isPreLoiStatus(row['Status']) || normalizeCrmEmail(row['Owner Email']) !== email) {
     return { ok: false, error: 'No saved lead found for that email address.' };
   }
   const json = CRM_ANSWER_COLUMNS.map(function (c) { return row[c] || ''; }).join('');
@@ -682,7 +705,7 @@ function updateCrmStatus(body) {
   try {
     const sheet = getSheet(CRM_SHEET, CRM_COLUMNS);
     const row = findCrmRow(sheet, String(body.crmId));
-    if (!row || row['Status'] === PRELOI_STATUS || normalizeCrmEmail(row['Owner Email']) !== email) {
+    if (!row || isPreLoiStatus(row['Status']) || normalizeCrmEmail(row['Owner Email']) !== email) {
       return { ok: false, error: 'No saved lead found for that email address.' };
     }
     writeCrmRow(sheet, row._row, { 'Status': body.status, 'Updated At': new Date().toISOString() });
@@ -700,7 +723,7 @@ function deleteCrmEntry(body) {
   try {
     const sheet = getSheet(CRM_SHEET, CRM_COLUMNS);
     const row = findCrmRow(sheet, String(body.crmId));
-    if (!row || row['Status'] === PRELOI_STATUS || normalizeCrmEmail(row['Owner Email']) !== email) {
+    if (!row || isPreLoiStatus(row['Status']) || normalizeCrmEmail(row['Owner Email']) !== email) {
       return { ok: false, error: 'No saved lead found for that email address.' };
     }
     sheet.deleteRow(row._row);
@@ -711,22 +734,168 @@ function deleteCrmEntry(body) {
 }
 
 // ---------- Admin: Auto Pre-LOI Before Contact ----------
-// Never calls submitLead / MailApp, so saving here sends no notification email.
+// Nothing in this section calls submitLead, earlyCaptureLead, beehiiv or MailApp, so working a deal here sends no notification email and never adds a row
+// to the Leads sheet. Instead every finished deal is written to the Submissions sheet (below) so you can check it and cross reference it later.
+
+const PRELOI_LOG_SHEET = 'Pre-LOI Log';
+const PRELOI_LOG_COLUMNS = ['Logged At', 'Action', 'CRM ID', 'Street Address', 'City', 'State', 'Zip', 'Status After', 'Detail'];
+
+const SUBMISSIONS_SHEET = 'Submissions';
+const SUBMISSION_COLUMNS = [
+  'Submission ID', 'Submitted At', 'Source', 'Admin Emailed',
+  'Street Address', 'City', 'State', 'Zip', 'Asset Type', 'Asking Price',
+  'Contact Name', 'Contact Email', 'Contact Phone', 'Seller Contact Name', 'Seller Contact Phone', 'Seller Contact Email',
+  'Lead ID', 'CRM ID', 'LOI Link', 'Doc URL', 'Draft Status', 'Notes'
+].concat(CRM_ANSWER_COLUMNS);
+
+// Same property written two ways ("123 N Main St." / "123 north main street") should match; zip narrows it when known.
+function addrKey(street, zip, city, state) {
+  const s = String(street || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\b(street|st|drive|dr|avenue|ave|road|rd|lane|ln|court|ct|place|pl|boulevard|blvd|circle|cir|way|terrace|ter)\b/g, '')
+    .replace(/\s+/g, ' ').trim();
+  if (!s) return '';
+  const z = String(zip || '').replace(/\D/g, '').slice(0, 5);
+  const where = z || (String(city || '').toLowerCase().replace(/[^a-z]/g, '') + String(state || '').toLowerCase().replace(/[^a-z]/g, ''));
+  return s + '|' + where;
+}
+
+function logPreLoi(action, fields, statusAfter, detail) {
+  try {
+    appendRowByHeaders(getSheet(PRELOI_LOG_SHEET, PRELOI_LOG_COLUMNS), {
+      'Logged At': new Date().toISOString(), 'Action': action, 'CRM ID': fields.crmId || '',
+      'Street Address': fields.street || '', 'City': fields.city || '', 'State': fields.state || '', 'Zip': fields.zip || '',
+      'Status After': statusAfter || '', 'Detail': String(detail || '').slice(0, 400)
+    });
+  } catch (err) { /* the log must never block the work it records */ }
+}
+
+// The answers JSON is split across a few columns (a cell holds at most 50,000 characters). Long AI text is dropped first if the total is too big,
+// so a Submissions row can always be written.
+function answersToColumns(answers) {
+  const copy = JSON.parse(JSON.stringify(answers || {}));
+  let json = JSON.stringify(copy);
+  const max = CRM_ANSWER_CHUNK_SIZE * CRM_ANSWER_COLUMNS.length;
+  ['rehabAiText', 'preLoiNotes', 'holdLog', 'soldCompsJson', 'activeCompsJson'].forEach(function (k) {
+    if (json.length > max && copy[k]) { copy[k] = '(too long to keep here; see the Pre-LOI row)'; json = JSON.stringify(copy); }
+  });
+  const out = {};
+  CRM_ANSWER_COLUMNS.forEach(function (col, i) { out[col] = json.slice(i * CRM_ANSWER_CHUNK_SIZE, (i + 1) * CRM_ANSWER_CHUNK_SIZE); });
+  return out;
+}
+
+function columnsToAnswers(row) {
+  try { return JSON.parse(CRM_ANSWER_COLUMNS.map(function (c) { return row[c] || ''; }).join('')); } catch (e) { return {}; }
+}
+
+// d = flat answers/fields of the submission. extra = {leadId, crmId, loiLink}.
+function logSubmission(source, adminEmailed, d, extra) {
+  extra = extra || {};
+  const id = Utilities.getUuid();
+  const sheet = getSheet(SUBMISSIONS_SHEET, SUBMISSION_COLUMNS);
+  const fields = {
+    'Submission ID': id, 'Submitted At': new Date().toISOString(), 'Source': source, 'Admin Emailed': adminEmailed,
+    'Street Address': d.street || '', 'City': d.city || '', 'State': d.state || '', 'Zip': d.zip || '', 'Asset Type': d.assetType || '',
+    'Asking Price': d.askingPrice || d.priceSought || '', 'Contact Name': d.name || '', 'Contact Email': d.email || '', 'Contact Phone': sanitizePhone(d.phone),
+    'Seller Contact Name': d.sellerContactName || '', 'Seller Contact Phone': sanitizePhone(d.sellerContactPhone), 'Seller Contact Email': d.sellerContactEmail || '',
+    'Lead ID': extra.leadId || '', 'CRM ID': extra.crmId || '', 'LOI Link': extra.loiLink || d.loiUrl || '', 'Doc URL': '', 'Draft Status': '', 'Notes': ''
+  };
+  const cols = answersToColumns(d);
+  Object.keys(cols).forEach(function (k) { fields[k] = cols[k]; });
+  writeCrmRow(sheet, sheet.getLastRow() + 1, fields);
+  return id;
+}
+
+function summarizeSubmission(r) {
+  return {
+    submissionId: r['Submission ID'], submittedAt: r['Submitted At'], source: r['Source'], adminEmailed: r['Admin Emailed'],
+    street: r['Street Address'], city: r['City'], state: r['State'], zip: r['Zip'], assetType: r['Asset Type'], askingPrice: r['Asking Price'],
+    contactName: r['Contact Name'], contactEmail: r['Contact Email'], sellerContactName: r['Seller Contact Name'], sellerContactPhone: r['Seller Contact Phone'],
+    sellerContactEmail: r['Seller Contact Email'], leadId: r['Lead ID'], crmId: r['CRM ID'], loiLink: r['LOI Link'], docUrl: r['Doc URL'], draftStatus: r['Draft Status'], notes: r['Notes']
+  };
+}
+
+// Everything on file about one property: Leads (real submissions), Pre-LOI rows, CRM rows, other Submissions.
+function relatedRecords(key, exceptSubmissionId) {
+  if (!key) return [];
+  const out = [];
+  sheetToObjects(getSheet(LEADS_SHEET, LEAD_COLUMNS)).forEach(function (r) {
+    if (addrKey(r['Street Address'], r['Zip'], r['City'], r['State']) === key) out.push({ kind: 'Lead', id: r['Lead ID'], status: r['Status'], when: r['Submitted At'], who: r['Contact Name'] });
+  });
+  sheetToObjects(getSheet(CRM_SHEET, CRM_COLUMNS)).forEach(function (r) {
+    if (addrKey(r['Street Address'], r['Zip'], r['City'], r['State']) === key) out.push({ kind: isPreLoiStatus(r['Status']) ? 'Pre-LOI' : 'CRM', id: r['CRM ID'], status: r['Status'], when: r['Updated At'], who: r['Owner Email'] });
+  });
+  sheetToObjects(getSheet(SUBMISSIONS_SHEET, SUBMISSION_COLUMNS)).forEach(function (r) {
+    if (r['Submission ID'] !== exceptSubmissionId && addrKey(r['Street Address'], r['Zip'], r['City'], r['State']) === key) out.push({ kind: 'Submission', id: r['Submission ID'], status: r['Source'], when: r['Submitted At'], who: r['Contact Email'] });
+  });
+  return out;
+}
 
 function adminSavePreLoi(body) {
-  body.status = PRELOI_STATUS;
   if (!normalizeCrmEmail(body.email)) body.email = PropertiesService.getScriptProperties().getProperty('ADMIN_EMAIL') || '';
-  // An existing crmId is only updated if it is itself a Pre-LOI row.
+  const a = body.answers || {};
+  const sheet = getSheet(CRM_SHEET, CRM_COLUMNS);
+  let existing = null, how = 'new';
   if (body.crmId) {
-    const row = findCrmRow(getSheet(CRM_SHEET, CRM_COLUMNS), String(body.crmId));
-    if (row && row['Status'] !== PRELOI_STATUS) body.crmId = '';
+    existing = findCrmRow(sheet, String(body.crmId));
+    if (existing && !isPreLoiStatus(existing['Status'])) { existing = null; body.crmId = ''; }       // an id that belongs to a real CRM row is never reused
   }
-  return saveCrmEntryCore(body, [PRELOI_STATUS]);
+  if (!existing) {
+    // The same property saved again updates its row; a different property always gets a row of its own.
+    const key = addrKey(a.street, a.zip, a.city, a.state);
+    if (key) {
+      existing = sheetToObjects(sheet).filter(function (r) {
+        return isPreLoiStatus(r['Status']) && addrKey(r['Street Address'], r['Zip'], r['City'], r['State']) === key;
+      }).sort(function (x, y) { return String(y['Updated At']).localeCompare(String(x['Updated At'])); })[0] || null;
+      if (existing) { body.crmId = existing['CRM ID']; how = 'same property, updated'; }
+    }
+  } else { how = 'updated'; }
+  // A deal that already went further keeps its status when saved again (a deleted one comes back as a normal Pre-LOI).
+  body.status = existing && existing['Status'] !== PRELOI_DELETED_STATUS ? existing['Status'] : PRELOI_STATUS;
+  const res = saveCrmEntryCore(body, PRELOI_STATUSES);
+  if (res.ok) logPreLoi('save', { crmId: res.crmId, street: a.street, city: a.city, state: a.state, zip: a.zip }, body.status, how);
+  res.how = how;
+  return res;
+}
+
+// The admin has walked the deal through the whole wizard (pre-filled, validated like a normal submission). This records it WITHOUT touching Leads,
+// beehiiv or any email: the Pre-LOI row becomes "Form Completed" with the final answers, and a Submissions row is written for review.
+function adminFinishPreLoi(body) {
+  const a = body.answers;
+  if (!a || typeof a !== 'object') return { ok: false, error: 'Nothing to save.' };
+  const required = ['street', 'city', 'state', 'zip', 'assetType', 'marketStatus'];
+  for (let i = 0; i < required.length; i++) {
+    if (a[required[i]] === undefined || a[required[i]] === null || a[required[i]] === '') return { ok: false, error: 'Missing required field: ' + required[i] };
+  }
+  if (body.loiUrl) a.loiUrl = body.loiUrl;
+  const saved = adminSavePreLoi({ token: body.token, email: body.email || a.email, crmId: body.crmId || '', stepIndex: body.stepIndex || 19, answers: a });
+  if (!saved.ok) return saved;
+  const sheet = getSheet(CRM_SHEET, CRM_COLUMNS);
+  const row = findCrmRow(sheet, saved.crmId);
+  const submissionId = logSubmission('Pre-LOI form (admin, no email)', 'No', a, { crmId: saved.crmId, loiLink: a.loiUrl });
+  if (row && row['Status'] !== PRELOI_SENT_STATUS) writeCrmRow(sheet, row._row, { 'Status': PRELOI_DONE_STATUS, 'Updated At': new Date().toISOString() });
+  logPreLoi('finish', { crmId: saved.crmId, street: a.street, city: a.city, state: a.state, zip: a.zip }, PRELOI_DONE_STATUS, 'submission ' + submissionId);
+  return { ok: true, crmId: saved.crmId, submissionId: submissionId };
+}
+
+// "LOI sent": the Pre-LOI row stays (status "LOI Sent") and a copy is filed in your CRM as "Offer sent to cold lead". No email.
+function adminMarkPreLoiSent(body) {
+  const sheet = getSheet(CRM_SHEET, CRM_COLUMNS);
+  const row = findCrmRow(sheet, String(body.crmId || ''));
+  if (!row || !isPreLoiStatus(row['Status'])) return { ok: false, error: 'Not found.' };
+  const answers = columnsToAnswers(row);
+  const email = normalizeCrmEmail(answers.email) || normalizeCrmEmail(row['Owner Email']);
+  answers.loiSentAt = new Date().toISOString();
+  answers.fromPreLoi = row['CRM ID'];
+  const copy = saveCrmEntryCore({ email: email, status: 'Offer sent to cold lead', crmId: '', stepIndex: Number(row['Step Index']) || 19, answers: answers }, CRM_STATUSES);
+  if (!copy.ok) return copy;
+  writeCrmRow(sheet, row._row, { 'Status': PRELOI_SENT_STATUS, 'Updated At': new Date().toISOString() });
+  logPreLoi('sent', { crmId: row['CRM ID'], street: row['Street Address'], city: row['City'], state: row['State'], zip: row['Zip'] }, PRELOI_SENT_STATUS, 'filed in the CRM as ' + copy.crmId);
+  return { ok: true, crmId: copy.crmId, preLoiCrmId: row['CRM ID'] };
 }
 
 function adminGetPreLoi(body) {
   const entries = sheetToObjects(getSheet(CRM_SHEET, CRM_COLUMNS))
-    .filter(function (r) { return r['Status'] === PRELOI_STATUS; })
+    .filter(function (r) { return isPreLoiStatus(r['Status']) && (body.includeDeleted || r['Status'] !== PRELOI_DELETED_STATUS); })
     .map(crmSummary);
   entries.sort(function (a, b) { return String(b.updatedAt).localeCompare(String(a.updatedAt)); });
   return { ok: true, entries: entries };
@@ -734,22 +903,96 @@ function adminGetPreLoi(body) {
 
 function adminGetPreLoiEntry(body) {
   const row = findCrmRow(getSheet(CRM_SHEET, CRM_COLUMNS), String(body.crmId || ''));
-  if (!row || row['Status'] !== PRELOI_STATUS) return { ok: false, error: 'Not found.' };
-  let answers = {};
-  try { answers = JSON.parse(CRM_ANSWER_COLUMNS.map(function (c) { return row[c] || ''; }).join('')); } catch (e) {}
+  if (!row || !isPreLoiStatus(row['Status'])) return { ok: false, error: 'Not found.' };
   const entry = crmSummary(row);
-  entry.answers = answers;
+  entry.answers = columnsToAnswers(row);
   return { ok: true, entry: entry };
 }
 
-function adminDeletePreLoi(body) {
+// "Delete" is reversible: the row stays with status "Deleted" (hidden from the list unless you ask for it) and the log records it.
+function adminDeletePreLoi(body) { return setPreLoiStatus(body.crmId, PRELOI_DELETED_STATUS, 'delete'); }
+function adminRestorePreLoi(body) { return setPreLoiStatus(body.crmId, PRELOI_STATUS, 'restore'); }
+
+function setPreLoiStatus(crmId, status, action) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const sheet = getSheet(CRM_SHEET, CRM_COLUMNS);
+    const row = findCrmRow(sheet, String(crmId || ''));
+    if (!row || !isPreLoiStatus(row['Status'])) return { ok: false, error: 'Not found.' };
+    writeCrmRow(sheet, row._row, { 'Status': status, 'Updated At': new Date().toISOString() });
+    logPreLoi(action, { crmId: row['CRM ID'], street: row['Street Address'], city: row['City'], state: row['State'], zip: row['Zip'] }, status, '');
+    return { ok: true };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Permanent removal: only for a row that is already "Deleted".
+function adminPurgePreLoi(body) {
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
     const sheet = getSheet(CRM_SHEET, CRM_COLUMNS);
     const row = findCrmRow(sheet, String(body.crmId || ''));
-    if (!row || row['Status'] !== PRELOI_STATUS) return { ok: false, error: 'Not found.' };
+    if (!row || row['Status'] !== PRELOI_DELETED_STATUS) return { ok: false, error: 'Only a deleted Pre-LOI can be removed permanently.' };
+    logPreLoi('purge', { crmId: row['CRM ID'], street: row['Street Address'], city: row['City'], state: row['State'], zip: row['Zip'] }, 'removed', '');
     sheet.deleteRow(row._row);
+    return { ok: true };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// ---------- Admin: Submissions (every submission, for checking and cross referencing) ----------
+
+function adminGetSubmissions(body) {
+  const q = String(body.q || '').toLowerCase();
+  const rows = sheetToObjects(getSheet(SUBMISSIONS_SHEET, SUBMISSION_COLUMNS));
+  const leads = sheetToObjects(getSheet(LEADS_SHEET, LEAD_COLUMNS));
+  const crm = sheetToObjects(getSheet(CRM_SHEET, CRM_COLUMNS));
+  const count = {};
+  const bump = function (key, kind) { if (!key) return; (count[key] = count[key] || { leads: 0, preLoi: 0, crm: 0, submissions: 0 })[kind]++; };
+  leads.forEach(function (r) { bump(addrKey(r['Street Address'], r['Zip'], r['City'], r['State']), 'leads'); });
+  crm.forEach(function (r) { bump(addrKey(r['Street Address'], r['Zip'], r['City'], r['State']), isPreLoiStatus(r['Status']) ? 'preLoi' : 'crm'); });
+  rows.forEach(function (r) { bump(addrKey(r['Street Address'], r['Zip'], r['City'], r['State']), 'submissions'); });
+  let out = rows.map(function (r) {
+    const s = summarizeSubmission(r);
+    s.matches = count[addrKey(r['Street Address'], r['Zip'], r['City'], r['State'])] || { leads: 0, preLoi: 0, crm: 0, submissions: 1 };
+    return s;
+  });
+  if (body.source) out = out.filter(function (s) { return String(s.source).indexOf(body.source) === 0; });
+  if (q) out = out.filter(function (s) {
+    return [s.street, s.city, s.state, s.zip, s.contactName, s.contactEmail, s.sellerContactName, s.source].join(' ').toLowerCase().indexOf(q) !== -1;
+  });
+  out.sort(function (a, b) { return String(b.submittedAt).localeCompare(String(a.submittedAt)); });
+  const total = out.length;
+  return { ok: true, total: total, submissions: out.slice(0, Math.min(Number(body.limit) || 200, 500)) };
+}
+
+function adminGetSubmission(body) {
+  const row = sheetToObjects(getSheet(SUBMISSIONS_SHEET, SUBMISSION_COLUMNS)).filter(function (r) { return r['Submission ID'] === body.submissionId; })[0];
+  if (!row) return { ok: false, error: 'Not found.' };
+  const s = summarizeSubmission(row);
+  s.answers = columnsToAnswers(row);
+  s.related = relatedRecords(addrKey(row['Street Address'], row['Zip'], row['City'], row['State']), row['Submission ID']);
+  return { ok: true, submission: s };
+}
+
+// Where the finished LOI went: the Google Doc link and the email-draft status (written by you or by the browser agent).
+function adminUpdateSubmission(body) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const sheet = getSheet(SUBMISSIONS_SHEET, SUBMISSION_COLUMNS);
+    const row = sheetToObjects(sheet).filter(function (r) { return r['Submission ID'] === body.submissionId; })[0];
+    if (!row) return { ok: false, error: 'Not found.' };
+    const fields = {};
+    if (body.docUrl !== undefined) fields['Doc URL'] = String(body.docUrl).slice(0, 500);
+    if (body.draftStatus !== undefined) fields['Draft Status'] = String(body.draftStatus).slice(0, 200);
+    if (body.loiLink !== undefined) fields['LOI Link'] = String(body.loiLink).slice(0, 8000);
+    if (body.notes !== undefined) fields['Notes'] = String(body.notes).slice(0, 2000);
+    writeCrmRow(sheet, row._row, fields);
     return { ok: true };
   } finally {
     lock.releaseLock();
