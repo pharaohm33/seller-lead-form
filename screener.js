@@ -6,7 +6,7 @@
 
 const SCR = {
   rows: [], sel: null,
-  cfg: { asset: "sf", strategy: "flip", minDom: 180, minOwnerEquityPct: 90, defCity: "", defState: "", defZip: "" },   // strategy: sf = flip | hold, land = cash | dev   // qualification = days on market + Propwire owner equity only
+  cfg: { asset: "sf", strategy: "flip", minDom: 180, minOwnerEquityPct: 80, defCity: "", defState: "", defZip: "" },   // strategy: sf = flip | hold, land = cash | dev   // qualification = days on market + Propwire owner equity only
   AGENT_EMAIL: "montanoemmanuel@gmail.com", AGENT_NAME: "Emmanuel's LOI Helper Agent", PHONE: "5206336437",
   LOI_URL: "https://pharaohm33.github.io/loi-generator/",
   REHAB_PSF: { light: 25, moderate: 40, heavy: 55, gut: 75 },   // quick estimate when no rehab number is entered
@@ -897,11 +897,11 @@ function scrMount() {
   const card = document.createElement("div");
   card.className = "card"; card.id = "scr-card"; card.style.marginBottom = "16px";
   card.innerHTML = `<h3 class="step-title" style="font-size:18px;">Screen a list of active MLS deals</h3>
-    <p class="small-muted">Upload a Redfin "Download All" CSV (or a plain list of addresses). Deals are screened on days on market and property type. For each one you check Propwire first (owner equity, 90%+ by default, is the only qualifier; no equity shown means skip) and Propwire also fills in any year built the list is missing. Only deals that pass the equity check get comps and rehab. Pick a strategy first: houses are Fix & flip or Buy & hold (rehab $0, rent-tested seller note); land is a Cash offer or New development (cash, or full asking price paid at sale/refinance within 2 years). Offer price vs list doesn't matter.</p>
+    <p class="small-muted">Upload a Redfin "Download All" CSV (or a plain list of addresses). Deals are screened on days on market and property type. For each one you check Propwire first (owner equity, 80%+ by default, is the only qualifier; no equity shown means skip) and Propwire also fills in any year built the list is missing. Only deals that pass the equity check get comps and rehab. Pick a strategy first: houses are Fix & flip or Buy & hold (rehab $0, rent-tested seller note); land is a Cash offer or New development (cash, or full asking price paid at sale/refinance within 2 years). Offer price vs list doesn't matter.</p>
     <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px;">
       <div><label>Asset class</label><select id="scr-asset"><option value="sf">Single family (dual offer)</option><option value="land">Land (cash offer)</option></select></div>
       <div><label>Min days on market</label><input type="number" id="scr-min-dom" value="180"></div>
-      <div><label>Min owner equity %</label><input type="number" id="scr-min-eq" value="90"></div>
+      <div><label>Min owner equity %</label><input type="number" id="scr-min-eq" value="80"></div>
       <div><label>Default city (if the list has none)</label><input type="text" id="scr-def-city" placeholder="Tucson"></div>
       <div><label>Default state</label><input type="text" id="scr-def-state" maxlength="2" placeholder="AZ" style="text-transform:uppercase"></div>
       <div><label>Default ZIP (optional)</label><input type="text" id="scr-def-zip" maxlength="5" placeholder="85701"></div>
