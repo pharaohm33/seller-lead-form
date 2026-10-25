@@ -388,7 +388,7 @@ function scrLogLines(p) {
 
 /* ---------- links + notes ---------- */
 function scrLoiLink(d, p) {
-  const t = new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10);
+  const t = scrLocalDate(7);   // the LOI's acceptance deadline: 7 days from today, by the local calendar (toISOString is UTC, which is already tomorrow on a Phoenix evening)
   const q = {
     address: d.address, units: 1, prop_type: p.land ? "land" : "residential", sqft: d.sqft || "", appreciation: 3, noi_growth: 2,
     purchase_price: p.land && !p.dev ? p.cashOffer : p.carryOffer, cash_at_closing: p.land && !p.dev ? p.cashOffer : p.carryDown,
@@ -475,6 +475,8 @@ function scrGmailLink(d, notes) {
 
 // The comps and rehab prompts are the wizard's own (compsPromptResidential / compsPromptLand / repairPromptText
 // in app.js), so the machine-read summary block and the comp rules match what the lead form uses.
+// YYYY-MM-DD of today (+ days) on the local calendar
+function scrLocalDate(plusDays) { const d = new Date(); d.setDate(d.getDate() + (plusDays || 0)); return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, "0"), String(d.getDate()).padStart(2, "0")].join("-"); }
 const scrNum = v => (v === "" || v === undefined || v === null || isNaN(Number(v))) ? "" : String(Number(v));   // "2.0" -> "2"
 function scrAddressLine(d) { return `${d.street || ""}, ${d.city || ""}, ${d.state || ""} ${d.zip || ""}`.trim(); }
 
@@ -893,7 +895,7 @@ function scrRenderStrat() {
   document.getElementById("scr-log-copy").onclick = () => navigator.clipboard.writeText(scrLogExport()).then(() => scrMsg("scr-fill-msg", "Solver log copied. Paste it to Claude to tune the rules.", true), () => {});
   document.getElementById("scr-log-dl").onclick = () => {
     const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([scrLogExport()], { type: "application/json" }));
-    a.download = "buy-and-hold-solver-log-" + new Date().toISOString().slice(0, 10) + ".json"; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    a.download = "buy-and-hold-solver-log-" + scrLocalDate(0) + ".json"; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   };
 }
 
