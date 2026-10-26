@@ -638,6 +638,8 @@ function scrParseCommercial(text) {
   r.contacts = ci < 0 ? [] : lines.slice(ci + 1, ci + 8).map(l => l.trim()).filter(l => l && !/^(listing id|call|message|date on market|last updated|\|)/i.test(l) && !/\b(LOI|Submit|Request|View|Share|Save|Sign|Call|Message|Contact|Info)\b/i.test(l) && /^[A-Z][A-Za-z'.-]+(?: [A-Z][A-Za-z'.-]+)+$/.test(l)).slice(0, 3);
   const bm = t.match(/Contact\s+([^\n]+?)\s+for more information/i);
   r.brokerage = bm ? bm[1].trim() : "";
+  const di = lines.findIndex(l => /^(marketing description|executive summary|investment highlights|property description|description)$/i.test(l.trim()));
+  r.description = di < 0 ? "" : lines.slice(di + 1, di + 6).map(l => l.trim()).filter(Boolean).join(" ").slice(0, 900);
   r.isMultifamily = /multifamily|apartment/i.test(r.type + " " + r.subtype) || r.units >= 5;
   return r;
 }
