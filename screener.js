@@ -28,6 +28,9 @@ const SCR = {
   // price in cash at closing, and the structure must still meet the buyer profit minimum if the offers are raised by
   // NEGOTIATION_ROOM (so the numbers we send can be countered up without breaking the deal). That can force offers lower.
   MIN_SELLER_CASH_PCT: 0.10, NEGOTIATION_ROOM: 0.15,
+  // Buy & hold: the seller always gets 50% down (the solver may lower the loan's LTV but never the seller's cash). If the deal cannot cash flow that way there is no carryback offer.
+  // A single-family buy & hold over $450,000 does not work without a cash offer, and we are only making seller carryback offers for now, so it is skipped.
+  HOLD_MIN_DOWN_PCT: 0.50, HOLD_SF_MAX_PRICE: 450000,
   GEN: { esc1: 0.02, esc2: 0.015, pts: 0.02, agent: 0.03, acq: 0.50, taf: 0.025, sellerClosingShare: 0.5 },
   // Full rehab / gut: cash back to the buyer at closing = the full holding cost (24 months of hard money
   // interest) + the greater of $30,000 or 6% of ARV, so there is room for the assignment fee and extra cash
@@ -184,7 +187,7 @@ function scrPrice(d, f) {
       const build = carry => {
         const cashRaw = scrRound((hold ? SCR.HOLD_CASH_PCT : SCR.CASH_PCT_OF_CARRY) * carry), cashCapped = mao > 0 && cashRaw > scrRound(mao);
         const cash = cashCapped ? scrRound(mao) : cashRaw;
-        const baseDown = scrRound((hold ? SCR.HOLD_DOWN_PCT : SCR.CARRY_DOWN) * carry), dMin = scrRound(SCR.MIN_SELLER_CASH_PCT * carry);
+        const baseDown = scrRound((hold ? SCR.HOLD_DOWN_PCT : SCR.CARRY_DOWN) * carry), dMin = scrRound((hold ? SCR.HOLD_MIN_DOWN_PCT : SCR.MIN_SELLER_CASH_PCT) * carry);
         const targetFor = loan => f.gut && !hold ? loan * SCR.HM_RATE / 100 / 12 * termMonths + buffer : SCR.CASHBACK_PCT * carry;
         const gap = (r, cac) => scrModel(carry, cac, asIs * r, asIs).cashBack - targetFor(asIs * r);
         const minProfit = Math.max(SCR.MIN_PROFIT_PER_YEAR * years, SCR.MIN_PROFIT_PCT_OF_PRICE * carry);
@@ -329,7 +332,8 @@ function scrPrice(d, f) {
   const why = [];
   if (d.dom !== null && d.dom < SCR.cfg.minDom) why.push(`${d.dom} days on market`);
   if (profit && !profit.ok) why.push(`buyer profit ${scrMoney(profit.sale)} is under the ${scrMoney(profit.min)} minimum ${holdPlan && holdPlan.structure === "principal" ? "at " + SCR.HOLD_PRICE_BUMP * 100 + "% over asking, even at the longest balloon" : !hold && !land && mao10 > 0 ? "at the Hard Money Buyer MAO (10% down) price" : "even at the lowest carry price"}`);
-  if (holdPlan && holdPlan.cfOk === false) why.push(`net cash flow ${scrMoney(holdPlan.cashflow)}/mo is under the ${scrMoney(holdPlan.cfNeed)}/mo minimum`);
+  if (hold && !d.units && list > SCR.HOLD_SF_MAX_PRICE) why.push(`single-family buy & hold over ${scrMoney(SCR.HOLD_SF_MAX_PRICE)} needs a cash offer, and only seller carryback offers are made for now`);
+  if (holdPlan && holdPlan.cfOk === false) why.push(`net cash flow ${scrMoney(holdPlan.cashflow)}/mo is under the ${scrMoney(holdPlan.cfNeed)}/mo minimum with ${SCR.HOLD_MIN_DOWN_PCT * 100}% down to the seller, so there is no seller carryback offer`);
   if (lowEquity) why.push(`owner equity ${ownerEquityPct.toFixed(0)}% < ${SCR.cfg.minOwnerEquityPct}%`);
   const offerToList = list ? cashOffer / list * 100 : null;   // informational only: low and dual offers are fine
   return { ready: true, land, hold, dev, strategy: strat, rentLtr: f.rentLtr || 0, rentStr: f.rentStr || 0, arvMid, rehab, rehabSource, asIs, months, suite, mao, mao10: suite.maoHardMoney10 || 0, cashOffer, carryOffer, carryDown, hmLoan, hmMonthly, ltv, ltvNote, profit, priceNote, ceiling,

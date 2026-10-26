@@ -36,7 +36,7 @@ with sync_playwright() as p:
     lg.route(re.compile(r"https://pharaohm33\.github\.io/loi-generator.*"), lambda rt, rq: rt.fulfill(status=200, content_type="text/html", body=LOI))
     lg.goto(r["loi"]); lg.wait_for_timeout(2000)
     out = lg.evaluate("({ err: document.documentElement.dataset.loiError, text: (window.loiOutput() || {}).text || '' })")
-    check("the generator builds the LOI (no error, price and address in it)", not out["err"] and len(out["text"]) > 800 and "8,339,000" in out["text"] and "Bellevue" in out["text"], (out["err"], len(out["text"])))
+    check("the generator builds the LOI (no error, price and address in it)", not out["err"] and len(out["text"]) > 800 and f"{r['carry']:,}" in out["text"] and "Bellevue" in out["text"], (out["err"], len(out["text"])))
     print("   first lines:", " / ".join(l.strip() for l in out["text"].splitlines() if l.strip())[:300]); check("no script errors", not errs and not lerr, errs[:2] + lerr[:2])
     b.close()
 sys.exit(1 if bad else 0)
