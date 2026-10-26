@@ -30,7 +30,13 @@ const SCR = {
   MIN_SELLER_CASH_PCT: 0.10, NEGOTIATION_ROOM: 0.15,
   // Buy & hold: the seller always gets 50% down (the solver may lower the loan's LTV but never the seller's cash). If the deal cannot cash flow that way there is no carryback offer.
   // A single-family buy & hold over $450,000 does not work without a cash offer, and we are only making seller carryback offers for now, so it is skipped.
-  HOLD_MIN_DOWN_PCT: 0.50, HOLD_SF_MAX_PRICE: 450000,
+  HOLD_SF_MAX_PRICE: 450000,
+  // Buy & hold seller carryback, underwritten with a DSCR senior loan (see scrSolveHold). The offer starts at 50% cash to the seller and a 75% LTV loan on the as-is value; the solver
+  // lowers the LTV (and, only when the loan cannot fund the cash at closing, the seller's cash) until the DSCR, the cash flow floor, the buyer's reserves and the buyer profit all work,
+  // and takes the soonest balloon (5 to 15 years) that does. Single family: proforma rent, long-term or short-term, whichever cash flows more. Multifamily / commercial: the in-place NOI.
+  HOLD: { LTV_START: 0.75, LTV_MIN: 0.30, LTV_STEP: 0.01, DSCR_RATE: 8, DSCR_AMORT_YEARS: 30, DSCR_MIN: 1.25, DOWN_START: 0.50, DOWN_MIN: 0.10, DOWN_STEP: 0.025,
+          BALLOON_MIN_YEARS: 5, BALLOON_MAX_YEARS: 15, NOTE_RATE_IO: 0.03, PRICE_BUMP: 0.10, NOI_GROWTH: 0.02,
+          RESERVE_MIN_MONTHS: 3, RESERVE_TARGET_MONTHS: 6, WHOLESALE_MIN: 25000, WHOLESALE_PCT: 0.03, MIN_PROFIT_PCT_OF_PRICE: 0.10, APPRAISAL_TOLERANCE: 0 },
   GEN: { esc1: 0.02, esc2: 0.015, pts: 0.02, agent: 0.03, acq: 0.50, taf: 0.025, sellerClosingShare: 0.5 },
   // Full rehab / gut: cash back to the buyer at closing = the full holding cost (24 months of hard money
   // interest) + the greater of $30,000 or 6% of ARV, so there is room for the assignment fee and extra cash
@@ -143,6 +149,11 @@ function scrEquityPct(f) {
   return null;
 }
 
+
+// ---------- buy & hold: DSCR loan math ----------
+const scrAmortPmt = (loan, ratePct, years) => { const i = ratePct / 1200, n = years * 12; return i ? loan * i / (1 - Math.pow(1 + i, -n)) : loan / n; };
+const scrLoanBalance = (loan, ratePct, years, paidMonths) => { const i = ratePct / 1200, p = scrAmortPmt(loan, ratePct, years); return i ? loan * Math.pow(1 + i, paidMonths) - p * (Math.pow(1 + i, paidMonths) - 1) / i : loan - p * paidMonths; };
+
 function scrPrice(d, f) {
   const land = SCR.cfg.asset === "land", strat = SCR.cfg.strategy;
   const hold = !land && strat === "hold", dev = land && strat === "dev";
@@ -165,7 +176,7 @@ function scrPrice(d, f) {
   const asIs = arvMid - rehab;
   let months = f.gut && !hold ? 24 : 12;
   let hmLoan = 0, hmMonthly = 0, gutPlan = null, modelCarry = null, modelCash = null, profit = null, priceNote = "", ceiling = null;
-  let holdPlan = null, holdLog = null, noteRate = 0, monthlyPrincipal = 0, devNote = "";
+  let holdPlan = null, holdLog = null, noteRate = 0, monthlyPrincipal = 0, devNote = "", holdWhy = [];
   if (land) {
     mao = suite.maoCash; cashOffer = scrRound(mao);
     if (dev) {
@@ -187,7 +198,7 @@ function scrPrice(d, f) {
       const build = carry => {
         const cashRaw = scrRound((hold ? SCR.HOLD_CASH_PCT : SCR.CASH_PCT_OF_CARRY) * carry), cashCapped = mao > 0 && cashRaw > scrRound(mao);
         const cash = cashCapped ? scrRound(mao) : cashRaw;
-        const baseDown = scrRound((hold ? SCR.HOLD_DOWN_PCT : SCR.CARRY_DOWN) * carry), dMin = scrRound((hold ? SCR.HOLD_MIN_DOWN_PCT : SCR.MIN_SELLER_CASH_PCT) * carry);
+        const baseDown = scrRound((hold ? SCR.HOLD_DOWN_PCT : SCR.CARRY_DOWN) * carry), dMin = scrRound(SCR.MIN_SELLER_CASH_PCT * carry);
         const targetFor = loan => f.gut && !hold ? loan * SCR.HM_RATE / 100 / 12 * termMonths + buffer : SCR.CASHBACK_PCT * carry;
         const gap = (r, cac) => scrModel(carry, cac, asIs * r, asIs).cashBack - targetFor(asIs * r);
         const minProfit = Math.max(SCR.MIN_PROFIT_PER_YEAR * years, SCR.MIN_PROFIT_PCT_OF_PRICE * carry);
@@ -290,32 +301,90 @@ function scrPrice(d, f) {
     // minimum is not met at that price; it no longer lowers the price on its own.
     if (!hold) pick = solve(months, { noteRate: 0, noi: 0, fixedCarry: mao10 > 0 ? (list ? Math.min(list, mao10) : mao10) : undefined });
     else {
-      const noiL = (f.rentLtr || 0) * (1 - SCR.OPEX_LTR), noiS = (f.rentStr || 0) * (1 - SCR.OPEX_STR), noi = f.noiAnnual ? f.noiAnnual / 12 : Math.max(noiL, noiS), rentKnown = noi > 0;   // multifamily / commercial: the listing's annual NOI, already net of expenses
-      const basis = f.noiAnnual ? "listing NOI" : noiS > noiL ? "short-term" : "long-term";
-      const need = carry => carry <= SCR.HOLD_CF_PRICE_CAP ? SCR.HOLD_CF_MIN : carry * SCR.HOLD_CF_PCT_ABOVE;
+      const H = SCR.HOLD, V = asIs;
+      const multi = !!f.noiAnnual;                                          // multifamily over 4 units / commercial: the in-place NOI from the listing, long-term only
+      const noiL = (f.rentLtr || 0) * (1 - SCR.OPEX_LTR), noiS = multi ? 0 : (f.rentStr || 0) * (1 - SCR.OPEX_STR);      // single family: the better of long-term and short-term (proforma)
+      const noi = multi ? f.noiAnnual / 12 : Math.max(noiL, noiS), rentKnown = noi > 0;
+      const basis = multi ? "in-place listing NOI" : noiS > noiL ? "short-term rental, proforma" : "long-term rent, proforma";
+      const need = P => P <= SCR.HOLD_CF_PRICE_CAP ? SCR.HOLD_CF_MIN : P * SCR.HOLD_CF_PCT_ABOVE;
+      const F = Math.max(H.WHOLESALE_MIN, H.WHOLESALE_PCT * V);              // your fee: the greater of $25,000 or 3% of value (the site's current formula)
       holdLog = [];
-      const good = r => r.feasible && r.cfOk !== false;                     // profit minimum met and (when rent is known) cash flow floor met
-      // Soonest balloon that meets the profit minimum and the cash flow floor. A longer balloon only lowers the carry price, so once a term meets
-      // the profit minimum but not the cash flow floor, longer terms are not tried (the structure is changed instead).
-      const soonest = st => { let first = null; for (const m of SCR.HOLD_TERMS) { const r = solve(m, st); first = first || r; if (good(r) || (r.feasible && r.cfOk === false)) return r; } return first; };
-      const hmInt = r => r.c.loan * SCR.HM_RATE / 100 / 12;
-      const stBase = { noi, cfNeed: rentKnown ? need : null, log: holdLog };
-      const io = soonest(Object.assign({ noteRate: SCR.HOLD_IO_RATE, tag: "io" }, stBase));
-      let po = null;
-      if (good(io)) pick = io;
-      else {
-        po = soonest(Object.assign({ noteRate: 0, tag: "principal", fixedCarry: Math.round((list || carryRaw) * (1 + SCR.HOLD_PRICE_BUMP) / 1000) * 1000 }, stBase));
-        if (good(po)) pick = po;
-        else { const rank = r => (r.feasible ? 1e9 : 0) + (r.cf || 0); pick = rank(io) >= rank(po) ? io : po; }   // neither works: show the better one, flagged
+      // One candidate: purchase price P, seller cash %, DSCR loan LTV, balloon T years.
+      const ev = (P, structure, dpct, ltv, T) => {
+        const dn = scrRound(P * dpct), Nn = P - dn, L = Math.round(V * ltv / 500) * 500, pmt = scrAmortPmt(L, H.DSCR_RATE, H.DSCR_AMORT_YEARS), reqCf = need(P);
+        let notePmt, noteBal, nRate = 0;
+        if (structure === "io") { nRate = H.NOTE_RATE_IO; notePmt = Nn * nRate / 12; noteBal = Nn; }
+        else { const room = rentKnown ? Math.max(0, noi - pmt - reqCf) : 0; notePmt = Math.min(Nn / (T * 12), Math.floor(room / 50) * 50); noteBal = Math.max(0, Nn - notePmt * 12 * T); }
+        const cf = noi - notePmt - pmt, dscr = pmt > 0 ? noi / pmt : Infinity;
+        const closing = P * (SCR.GEN.esc1 + SCR.GEN.agent) + Nn * SCR.GEN.esc2 + L * SCR.GEN.pts, avail = L - dn - closing;
+        const M = pmt + notePmt, Rmin = H.RESERVE_MIN_MONTHS * M, Rtgt = H.RESERVE_TARGET_MONTHS * M;
+        // Cash at closing after the seller and the costs: the buyer's reserves first (at least 3 months, aiming for 6), your fee, and anything above that split evenly.
+        let W, B;
+        if (avail >= F + Rtgt) { const sur = avail - F - Rtgt; W = F + sur / 2; B = Rtgt + sur / 2; }
+        else if (avail >= F + Rmin) { W = F; B = avail - F; }
+        else { W = Math.max(0, Math.min(F, avail - Rmin)); B = avail - W; }
+        const loanBal = scrLoanBalance(L, H.DSCR_RATE, H.DSCR_AMORT_YEARS, T * 12), sale = V * Math.pow(1 + SCR.APPRECIATION, T) * (1 - SCR.SALE_COSTS);
+        let cumNoi = 0; for (let y = 0; y < T; y++) cumNoi += noi * 12 * Math.pow(1 + H.NOI_GROWTH, y);
+        const profit = sale - loanBal - noteBal + (rentKnown ? cumNoi - M * 12 * T : 0), minProfit = H.MIN_PROFIT_PCT_OF_PRICE * P;
+        return { P, structure, dpct, ltv, T, dn, Nn, L, pmt, notePmt, nRate, noteBal, loanBal, cf, reqCf, dscr, closing, avail, F, W, B, M, Rmin, Rtgt, profit, minProfit,
+          cfOk: !rentKnown || cf >= reqCf - 0.5, dscrOk: !rentKnown || dscr >= H.DSCR_MIN - 1e-9, cashOk: avail >= F + Rmin - 0.5, profitOk: profit >= minProfit };
+      };
+      const good = e => e.cfOk && e.dscrOk && e.cashOk && e.profitOk;
+      // Seller cash comes down from 50% only when the loan cannot fund the cash at closing; within that the LTV comes down from 75% as little as possible; the balloon is the soonest that works.
+      const search = (P, structure) => {
+        for (let dp = H.DOWN_START; dp >= H.DOWN_MIN - 1e-9; dp -= H.DOWN_STEP)
+          for (let lt = H.LTV_START; lt >= H.LTV_MIN - 1e-9; lt -= H.LTV_STEP)
+            for (let T = H.BALLOON_MIN_YEARS; T <= H.BALLOON_MAX_YEARS; T++) { const e = ev(P, structure, Math.round(dp * 1000) / 1000, Math.round(lt * 100) / 100, T); if (good(e)) return e; }
+        return null;
+      };
+      // Why nothing works: which rule cannot be met anywhere on the grid.
+      const diagnose = (P, structure) => {
+        let anyCf = false, anyCash = false, anyProfit = false, anyCfCash = false;
+        for (let dp = H.DOWN_START; dp >= H.DOWN_MIN - 1e-9; dp -= H.DOWN_STEP)
+          for (let lt = H.LTV_START; lt >= H.LTV_MIN - 1e-9; lt -= H.LTV_STEP)
+            for (let T = H.BALLOON_MIN_YEARS; T <= H.BALLOON_MAX_YEARS; T += 5) { const e = ev(P, structure, dp, lt, T); anyCf = anyCf || (e.cfOk && e.dscrOk); anyCash = anyCash || e.cashOk; anyProfit = anyProfit || e.profitOk; anyCfCash = anyCfCash || (e.cfOk && e.dscrOk && e.cashOk); }
+        return { anyCf, anyCash, anyProfit, anyCfCash };
+      };
+      const appraisalOk = !list || V >= list * (1 - H.APPRAISAL_TOLERANCE);       // the lender sizes the loan on the appraised value: it has to support the asking price
+      const stepP = Math.max(1000, Math.round(V * 0.005 / 1000) * 1000), start = list ? Math.min(list, carryRaw) : carryRaw, floorP = SCR.MIN_CARRY_PCT_OF_ARV * V;
+      const ceilOf = P => Math.round(Math.min(list || Infinity, P * (1 + SCR.NEGOTIATION_ROOM)) / 1000) * 1000;
+      let found = null, ceilFound = null, structure = "io", tries = 0;
+      if (appraisalOk) {
+        // The price stays near asking (the 70%-of-value price, capped at the asking price) and the seller's cash is the lever. The price only comes down as a last resort. The +15% counter-raise is reported, not required.
+        found = search(start, "io");
+        if (!found) { const P = Math.round((list || carryRaw) * (1 + H.PRICE_BUMP) / 1000) * 1000, e = search(P, "principal"); if (e) { found = e; structure = "principal"; } }
+        for (let P = start - stepP; !found && P >= floorP; P -= stepP) { tries++; found = search(P, "io"); }
+        if (found) ceilFound = search(found.structure === "io" ? ceilOf(found.P) : Math.round(found.P * (1 + SCR.NEGOTIATION_ROOM) / 1000) * 1000, found.structure);
       }
-      const structure = pick === io ? "io" : "principal";
-      noteRate = structure === "io" ? SCR.HOLD_IO_RATE : 0;
-      const needNow = need(pick.c.carry), balance = pick.c.carry - pick.c.down;
-      if (structure === "principal" && rentKnown) monthlyPrincipal = Math.max(0, Math.floor(Math.min(noi - hmInt(pick) - needNow, balance / pick.months) / 50) * 50);
-      const pay = structure === "io" ? balance * SCR.HOLD_IO_RATE / 12 : monthlyPrincipal, cf = noi - hmInt(pick) - pay;
-      holdPlan = { structure, feasible: pick.feasible, rentKnown, noi, basis, cashflow: cf, cfNeed: needNow, cfOk: rentKnown ? cf >= needNow - 0.5 : null,
-        ioPmt: balance * SCR.HOLD_IO_RATE / 12, hmInt: hmInt(pick), levers: pick.cfNotes || [], ioCashflow: io.cf, cashCapped: !!pick.c.cashCapped,
-        firstTry: structure === "io" && pick.months === SCR.HOLD_TERMS[0] && !(pick.cfNotes && pick.cfNotes.length) };
+      const shown = found || ev(start, "io", H.DOWN_START, H.LTV_START, H.BALLOON_MIN_YEARS);
+      const dg = found ? null : diagnose(start, "io");
+      structure = found ? found.structure : "io";
+      if (!appraisalOk) holdWhy.push(`appraisal is likely to come in under the asking price (value ${scrMoney(V)} vs asking ${scrMoney(list)}), and the DSCR loan is sized on the appraised value, so the deal cannot close: skipped`);
+      else if (!found) {
+        if (!dg.anyCf) holdWhy.push(`no cash flow: NOI ${scrMoney(noi)}/mo cannot cover the DSCR loan at ${H.DSCR_MIN} DSCR and the seller note down to ${H.LTV_MIN * 100}% LTV (minimum ${scrMoney(need(start))}/mo)`);
+        else if (!dg.anyCash) holdWhy.push(`the DSCR loan cannot fund the seller's cash, the closing costs, ${H.RESERVE_MIN_MONTHS} months of buyer reserves and your ${scrMoney(F)} fee, even at ${H.DOWN_MIN * 100}% down to the seller`);
+        else if (!dg.anyCfCash) holdWhy.push(`the loan that cash flows is too small to fund the cash at closing (seller's cash, costs, ${H.RESERVE_MIN_MONTHS} months of reserves and your fee)`);
+        else holdWhy.push(`buyer profit is under the ${H.MIN_PROFIT_PCT_OF_PRICE * 100}% minimum at every balloon from ${H.BALLOON_MIN_YEARS} to ${H.BALLOON_MAX_YEARS} years`);
+      }
+      const e = shown, levers = [];
+      if (found) {
+        if (e.dpct < H.DOWN_START - 1e-9) levers.push(`seller cash at closing ${H.DOWN_START * 100}% -> ${(e.dpct * 100).toFixed(1)}% because the loan could not fund the cash at closing (appraisal contingency at the asking price)`);
+        if (e.ltv < H.LTV_START - 1e-9) levers.push(`LTV ${H.LTV_START * 100}% -> ${(e.ltv * 100).toFixed(0)}% for cash flow and the ${H.DSCR_MIN} DSCR`);
+        if (e.T > H.BALLOON_MIN_YEARS) levers.push(`balloon ${e.T} years (soonest that meets the buyer profit minimum)`);
+      }
+      holdLog.push({ s: structure, term: e.T * 12, carry: e.P, down: e.dn, downPct: +(e.dpct).toFixed(3), ltv: +e.ltv.toFixed(2), cash: scrRound(SCR.HOLD_CASH_PCT * e.P), cashCapped: false, hmInt: Math.round(e.pmt), pay: Math.round(e.notePmt), noi: Math.round(noi),
+        cf: rentKnown ? Math.round(e.cf) : null, need: rentKnown ? Math.round(e.reqCf) : null, cfOk: rentKnown ? e.cfOk : null, profit: Math.round(e.profit), minProfit: Math.round(e.minProfit), ok: !!found, ceilOk: !!ceilFound,
+        carryNote: tries > 0 ? `price stepped down ${tries} time(s)` : "", notes: levers.concat(holdWhy) });
+      const cashRaw = scrRound(SCR.HOLD_CASH_PCT * e.P), cashCapped = mao > 0 && cashRaw > scrRound(mao), cashO = cashCapped ? scrRound(mao) : cashRaw;
+      const cE = ceilFound;
+      pick = { months: e.T * 12, priceNote: tries > 0 && found ? `carry price reduced from ${scrMoney(start)} to ${scrMoney(e.P)} because nothing cash flows at the starting price, even with less cash to the seller` : "",
+        c: { carry: e.P, cash: cashO, cashCapped, down: e.dn, r: e.ltv, loan: e.L, pmt: e.pmt, profit: e.profit, minProfit: e.minProfit, feasible: !!found, note: levers.join("; "), W: e.W, B: e.B, closing: e.closing, avail: e.avail, Rmin: e.Rmin, Rtgt: e.Rtgt, F: e.F, M: e.M, dpct: e.dpct, notePmt: e.notePmt },
+        ceil: cE ? { carry: cE.P, cash: scrRound(SCR.HOLD_CASH_PCT * cE.P), down: cE.dn, r: cE.ltv, profit: cE.profit, feasible: true } : { carry: ceilOf(e.P), cash: scrRound(SCR.HOLD_CASH_PCT * ceilOf(e.P)), down: scrRound(ceilOf(e.P) * e.dpct), r: e.ltv, profit: 0, feasible: false } };
+      noteRate = e.nRate; monthlyPrincipal = structure === "principal" ? Math.round(e.notePmt / 50) * 50 : 0;
+      holdPlan = { structure, feasible: !!found, rentKnown, noi, basis, cashflow: e.cf, cfNeed: e.reqCf, cfOk: rentKnown ? (e.cfOk && e.dscrOk) : null, dscr: e.dscr, dscrMin: H.DSCR_MIN,
+        ioPmt: e.notePmt, hmInt: e.pmt, seniorPmt: e.pmt, seniorLoan: e.L, ltv: e.ltv, balloonYears: e.T, levers, ioCashflow: structure === "io" ? e.cf : null, cashCapped: false, appraisalOk,
+        cashAtClose: { avail: e.avail, wholesaler: e.W, buyer: e.B, fee: e.F, buyerMonths: e.M ? e.B / e.M : 0, minMonths: H.RESERVE_MIN_MONTHS, targetMonths: H.RESERVE_TARGET_MONTHS, closing: e.closing },
+        firstTry: !!found && structure === "io" && !levers.length };
     }
     months = pick.months;
     const years = months / 12, c = pick.c, ceil = pick.ceil;
@@ -323,22 +392,22 @@ function scrPrice(d, f) {
     ceiling = { carry: ceil.carry, cash: ceil.cash, down: ceil.down, ltv: ceil.r, profit: ceil.profit, ok: ceil.feasible };
     carryOffer = c.carry; cashOffer = c.cash; carryDown = c.down; ltv = c.r;
     ltvNote = [c.note].concat(holdPlan ? holdPlan.levers : [], c.cashCapped ? [`cash offer capped at the hard money MAO ${scrMoney(mao)}`] : []).filter(Boolean).join("; ");
-    hmLoan = c.loan; hmMonthly = hmLoan * SCR.HM_RATE / 100 / 12;
-    modelCarry = scrModel(carryOffer, carryDown, hmLoan, asIs);
+    hmLoan = c.loan; hmMonthly = hold ? c.pmt : hmLoan * SCR.HM_RATE / 100 / 12;
+    modelCarry = hold ? { closing: c.closing, cashBack: c.B, wholesaler: c.W, sellerNet: c.down - c.closing * SCR.GEN.sellerClosingShare, acq: c.W } : scrModel(carryOffer, carryDown, hmLoan, asIs);
     modelCash = scrModel(cashOffer, cashOffer, hmLoan, asIs);
-    profit = { sale: c.profit, min: c.minProfit, ok: c.feasible, years, withCashBack: c.profit + modelCarry.cashBack };
+    profit = { sale: c.profit, min: c.minProfit, ok: hold ? c.profit >= c.minProfit : c.feasible, years, withCashBack: c.profit + modelCarry.cashBack };
     if (f.gut && !hold) gutPlan = { holding: hmMonthly * months, buffer, target: modelCarry.cashBack, cashBack: modelCarry.cashBack, estClosing: modelCarry.closing, shortfall: 0 };
   }
   const why = [];
   if (d.dom !== null && d.dom < SCR.cfg.minDom) why.push(`${d.dom} days on market`);
-  if (profit && !profit.ok) why.push(`buyer profit ${scrMoney(profit.sale)} is under the ${scrMoney(profit.min)} minimum ${holdPlan && holdPlan.structure === "principal" ? "at " + SCR.HOLD_PRICE_BUMP * 100 + "% over asking, even at the longest balloon" : !hold && !land && mao10 > 0 ? "at the Hard Money Buyer MAO (10% down) price" : "even at the lowest carry price"}`);
+  if (hold) holdWhy.forEach(w => why.push(w));
+  if (!hold && profit && !profit.ok) why.push(`buyer profit ${scrMoney(profit.sale)} is under the ${scrMoney(profit.min)} minimum ${holdPlan && holdPlan.structure === "principal" ? "at " + SCR.HOLD.PRICE_BUMP * 100 + "% over asking, even at the longest balloon" : !hold && !land && mao10 > 0 ? "at the Hard Money Buyer MAO (10% down) price" : "even at the lowest carry price"}`);
   if (hold && !d.units && list > SCR.HOLD_SF_MAX_PRICE) why.push(`single-family buy & hold over ${scrMoney(SCR.HOLD_SF_MAX_PRICE)} needs a cash offer, and only seller carryback offers are made for now`);
-  if (holdPlan && holdPlan.cfOk === false) why.push(`net cash flow ${scrMoney(holdPlan.cashflow)}/mo is under the ${scrMoney(holdPlan.cfNeed)}/mo minimum with ${SCR.HOLD_MIN_DOWN_PCT * 100}% down to the seller, so there is no seller carryback offer`);
   if (lowEquity) why.push(`owner equity ${ownerEquityPct.toFixed(0)}% < ${SCR.cfg.minOwnerEquityPct}%`);
   const offerToList = list ? cashOffer / list * 100 : null;   // informational only: low and dual offers are fine
   return { ready: true, land, hold, dev, strategy: strat, rentLtr: f.rentLtr || 0, rentStr: f.rentStr || 0, arvMid, rehab, rehabSource, asIs, months, suite, mao, mao10: suite.maoHardMoney10 || 0, cashOffer, carryOffer, carryDown, hmLoan, hmMonthly, ltv, ltvNote, profit, priceNote, ceiling,
     holdPlan, holdLog, noteRate, monthlyPrincipal, devNote,
-    reserves: hmMonthly * months, gutPlan, modelCarry, modelCash, ownerEquityPct, offerToList, equityAfterRehab: arvMid - list - rehab, qualifies: why.length === 0, why };
+    reserves: hold ? (modelCarry ? modelCarry.cashBack : 0) : hmMonthly * months, gutPlan, modelCarry, modelCash, ownerEquityPct, offerToList, equityAfterRehab: arvMid - list - rehab, qualifies: why.length === 0, why };
 }
 
 const SCR_STRAT_NAMES = { flip: "Fix & flip", hold: "Buy & hold", cash: "Land, cash offer", dev: "New development (land)" };
@@ -346,14 +415,15 @@ const SCR_STRAT_NAMES = { flip: "Fix & flip", hold: "Buy & hold", cash: "Land, c
 // One paragraph on the buy & hold structure that was chosen and why.
 function scrHoldText(p) {
   const h = p.holdPlan; if (!h) return "";
-  const warn = (h.feasible ? "" : `WARNING: no balloon term up to ${SCR.HOLD_TERMS[SCR.HOLD_TERMS.length - 1]} months meets the buyer profit minimum at these numbers; the ${SCR.HOLD_TERMS[0]}-month version is shown. `)
-    + (h.cfOk === false ? `WARNING: net cash flow ${scrMoney(h.cashflow)}/mo is under the ${scrMoney(h.cfNeed)}/mo minimum. ` : "");
-  const rent = h.rentKnown ? `${h.basis} rent NOI ${scrMoney(h.noi)}/mo` : "no rent entered, so cash flow was not tested (enter rent to test it)";
-  const cfTxt = h.rentKnown ? ` Net CF ${scrMoney(h.cashflow)}/mo (minimum ${scrMoney(h.cfNeed)}).` : "";
-  const lev = h.levers.length ? ` To reach the cash flow minimum: ${h.levers.join("; ")}.` : "";
-  const cap = h.cashCapped ? ` The cash offer was capped at the hard money MAO.` : "";
-  if (h.structure === "io") return `${warn}${h.feasible ? "Soonest balloon that meets the buyer profit minimum" : "Balloon"}: ${p.months} months. Seller note ${SCR.HOLD_IO_RATE * 100}% interest-only = ${scrMoney(h.ioPmt)}/mo; hard money interest ${scrMoney(h.hmInt)}/mo; ${rent}.${cfTxt}${lev}${cap}`;
-  return `${warn}The ${SCR.HOLD_IO_RATE * 100}% interest-only note could not reach the cash flow minimum within the profit and balloon rules (best ${h.ioCashflow === null || h.ioCashflow === undefined ? "n/a" : scrMoney(h.ioCashflow) + "/mo"}; ${rent}), so: principal-only at 0% interest, carry price ${SCR.HOLD_PRICE_BUMP * 100}% over asking = ${scrMoney(p.carryOffer)}, balloon in ${p.months} months${h.feasible ? " (soonest that meets the buyer profit minimum)" : ""}, principal payments ${p.monthlyPrincipal ? scrMoney(p.monthlyPrincipal) + "/mo" : "none (balloon only)"}.${cfTxt}${lev}${cap}`;
+  const H = SCR.HOLD, ca = h.cashAtClose || {};
+  const warn = (h.feasible ? "" : "WARNING: this does not work: " + (p.why || []).join("; ") + ". The first attempt is shown. ");
+  const inc = h.rentKnown ? `${h.basis} NOI ${scrMoney(h.noi)}/mo` : "no rent entered, so cash flow was not tested (enter rent to test it)";
+  const struct = h.structure === "io" ? `Seller note ${H.NOTE_RATE_IO * 100}% interest-only = ${scrMoney(h.ioPmt)}/mo` : `The ${H.NOTE_RATE_IO * 100}% interest-only note could not work, so: principal-only at 0% interest, carry price ${H.PRICE_BUMP * 100}% over asking, principal ${p.monthlyPrincipal ? scrMoney(p.monthlyPrincipal) + "/mo" : "none (balloon only)"}`;
+  const cf = h.rentKnown ? ` Net CF ${scrMoney(h.cashflow)}/mo (minimum ${scrMoney(h.cfNeed)}), DSCR ${isFinite(h.dscr) ? h.dscr.toFixed(2) : "n/a"} (minimum ${h.dscrMin}).` : "";
+  const loan = ` DSCR loan ${scrMoney(h.seniorLoan)} at ${(h.ltv * 100).toFixed(0)}% LTV, ${H.DSCR_RATE}% ${H.DSCR_AMORT_YEARS}-year amortization = ${scrMoney(h.seniorPmt)}/mo.`;
+  const cash = ca.avail !== undefined ? ` Cash at closing after the seller and costs: ${scrMoney(ca.avail)}: buyer ${scrMoney(ca.buyer)} (${ca.buyerMonths.toFixed(1)} months of payments in reserve; minimum ${ca.minMonths}, aim ${ca.targetMonths}), your fee ${scrMoney(ca.wholesaler)} (formula ${scrMoney(ca.fee)}).` : "";
+  const lev = h.levers.length ? ` Adjustments: ${h.levers.join("; ")}.` : "";
+  return `${warn}Balloon ${h.balloonYears} years (${p.months} months, soonest that works). ${struct}; ${inc}.${loan}${cf}${cash}${lev}`;
 }
 
 // ---------- solver log: every buy & hold deal that is saved / sent is kept so the rules can be tuned from real outcomes ----------
@@ -377,11 +447,11 @@ function scrLogSummary(all) {
   return { deals: n, firstTryRate: pct(e => e.firstTry), structureIo: pct(e => e.structure === "io"), structurePrincipal: pct(e => e.structure === "principal"),
     cashFlowMet: pct(e => e.cfOk === true), cashFlowNotTested: pct(e => e.cfOk === null), profitMet: pct(e => e.profitOk), usedLtvLever: pct(e => (e.levers || []).some(x => /^LTV/.test(x))),
     usedSellerCashLever: pct(e => (e.levers || []).some(x => /^seller cash/.test(x))), cashOfferCappedAtMao: pct(e => e.cashCapped),
-    longerThanFirstTerm: pct(e => e.term > SCR.HOLD_TERMS[0]), failed: all.filter(e => e.cfOk === false || !e.profitOk).map(e => e.address) };
+    longerThanFirstTerm: pct(e => e.term > SCR.HOLD.BALLOON_MIN_YEARS * 12), failed: all.filter(e => e.cfOk === false || !e.profitOk).map(e => e.address) };
 }
 
 function scrLogExport() {
-  const all = scrLogStore(), keys = ["HOLD_TERMS", "HOLD_IO_RATE", "HOLD_PRICE_BUMP", "OPEX_LTR", "OPEX_STR", "HOLD_CASH_PCT", "HOLD_DOWN_PCT", "HOLD_CF_MIN", "HOLD_CF_PRICE_CAP", "HOLD_CF_PCT_ABOVE", "HOLD_MIN_CASHBACK",
+  const all = scrLogStore(), keys = ["HOLD", "OPEX_LTR", "OPEX_STR", "HOLD_CASH_PCT", "HOLD_CF_MIN", "HOLD_CF_PRICE_CAP", "HOLD_CF_PCT_ABOVE",
     "MIN_SELLER_CASH_PCT", "NEGOTIATION_ROOM", "HM_RATE", "LTV_MIN", "LTV_MAX", "CASHBACK_PCT", "MIN_PROFIT_PER_YEAR", "MIN_PROFIT_PCT_OF_PRICE", "APPRECIATION", "SALE_COSTS"];
   const rules = { version: SCR.LOGIC_VERSION }; keys.forEach(k => rules[k] = SCR[k]);
   return JSON.stringify({ rules, summary: scrLogSummary(all), entries: all }, null, 1);
@@ -408,7 +478,7 @@ function scrLoiLink(d, p, extra) {
     acq_fee_basis: "at_closing", seller_security_type: "equity", mode: p.noteRate ? "interest_only" : "principal_only", loan_type: "hard_money", static_cf: 1
   };
   if (p.hold) {          // Buy & hold: rehab 0, a DSCR senior loan and the generator's "Admin Template" terms (not the cash template the flips use)
-    Object.assign(q, { loan_type: "dscr", rehab: 0, sr_rate: 8, sr_ltv: 75, sr_amort: 30, sr_term: 360, sr_points: 2, sr_dscr: 1.25, acq_pct: 6, esc1_pct: 2, esc2_pct: 1.5, taf_pct: 2.5,
+    Object.assign(q, { loan_type: "dscr", rehab: 0, sr_rate: SCR.HOLD.DSCR_RATE, sr_ltv: Math.round(p.ltv * 1000) / 10, sr_amort: SCR.HOLD.DSCR_AMORT_YEARS, sr_term: 360, sr_points: 2, sr_dscr: 1.25, acq_pct: 6, esc1_pct: 2, esc2_pct: 1.5, taf_pct: 2.5,
       exit_reserve_mo: 6, ac_name: "Suede Buffalo LLC", ac_email1: "suedebuffalofficial@gmail.com", ac_email2: "montanoemmanuel@gmail.com", buyer_company: "Don Ava Capital LLC",
       res_rent: Math.round(p.rentLtr || 0) || "" });
   }
@@ -459,7 +529,7 @@ function scrNotes(d, f, p, loi, resume) {
     `- sendmyseller.com resume link (do NOT submit): ${resume}`, "", "UNDERWRITING",
     land ? `- As-is value (middle of range): ${scrMoney(p.arvMid)}` : `- ARV (middle of comp range): ${scrMoney(p.arvMid)}   Rehab: ${scrMoney(p.rehab)}   As-is: ${scrMoney(p.asIs)}`,
     land ? `- Cash offer (land): ${scrMoney(p.cashOffer)}   [site MAO: ${scrMoney(p.mao)}]` + (p.dev ? `\n- Offer B, full asking price: ${scrMoney(p.carryOffer)}, $0 at closing, paid at sale or refinance of the property within ${p.months} months (${p.devNote})` : "")
-         : `- Hard Money Buyer MAO (10% down): ${scrMoney(p.mao10)}   (20% down): ${scrMoney(p.mao)}${SCR.cfg.offerMode === "dual" ? `\n- Offer A, all cash (${(SCR.CASH_PCT_OF_CARRY * 100).toFixed(1)}% of the carry price): ${scrMoney(p.cashOffer)}` : `\n- (All cash would be ${scrMoney(p.cashOffer)}: not offered, seller carryback only)`}\n- ${SCR.cfg.offerMode === "dual" ? "Offer B" : "Offer"}, seller carry (${p.hold && p.holdPlan.structure === "principal" ? SCR.HOLD_PRICE_BUMP * 100 + "% over asking" : p.hold ? (SCR.CARRY_PCT_OF_ARV * 100).toFixed(1) + "% of ARV, capped at list" : "Hard Money Buyer MAO (10% down) " + scrMoney(p.mao10) + ", capped at list"}): ${scrMoney(p.carryOffer)} (${scrMoney(p.carryDown)} at closing, balance carried ${p.months} months at ${p.noteRate * 100}%${p.hold ? (p.noteRate ? " interest-only" : ", principal-only") : ""})`,
+         : `- Hard Money Buyer MAO (10% down): ${scrMoney(p.mao10)}   (20% down): ${scrMoney(p.mao)}${SCR.cfg.offerMode === "dual" ? `\n- Offer A, all cash (${(SCR.CASH_PCT_OF_CARRY * 100).toFixed(1)}% of the carry price): ${scrMoney(p.cashOffer)}` : `\n- (All cash would be ${scrMoney(p.cashOffer)}: not offered, seller carryback only)`}\n- ${SCR.cfg.offerMode === "dual" ? "Offer B" : "Offer"}, seller carry (${p.hold && p.holdPlan.structure === "principal" ? SCR.HOLD.PRICE_BUMP * 100 + "% over asking" : p.hold ? (SCR.CARRY_PCT_OF_ARV * 100).toFixed(1) + "% of value, capped at list" : "Hard Money Buyer MAO (10% down) " + scrMoney(p.mao10) + ", capped at list"}): ${scrMoney(p.carryOffer)} (${scrMoney(p.carryDown)} at closing, balance carried ${p.months} months at ${p.noteRate * 100}%${p.hold ? (p.noteRate ? " interest-only" : ", principal-only") : ""})`,
   ];
   L.splice(L.indexOf("UNDERWRITING") + 1, 0, `- Strategy: ${SCR_STRAT_NAMES[p.strategy]}`);
   if (p.holdPlan) L.push(`- Buy & hold: ${scrHoldText(p)}`);
@@ -470,7 +540,8 @@ function scrNotes(d, f, p, loi, resume) {
   if (p.profit) L.push(`- Buyer profit at the ${p.profit.years}-year balloon exit (sale at 3% appreciation less 6% costs, less carry, loan and interest): ${scrMoney(p.profit.sale)}; minimum is the greater of ${scrMoney(SCR.MIN_PROFIT_PER_YEAR * p.profit.years)} or ${SCR.MIN_PROFIT_PCT_OF_PRICE * 100}% of price = ${scrMoney(p.profit.min)} -> ${p.profit.ok ? "OK" : "BELOW MINIMUM"}. With cash back at closing: ${scrMoney(p.profit.withCashBack)}.${p.priceNote ? " " + p.priceNote + "." : ""}`);
   if (p.ceiling) L.push(`- Room to go up (${SCR.NEGOTIATION_ROOM * 100}%): carry to ${scrMoney(p.ceiling.carry)} with ${scrMoney(p.ceiling.down)} at closing, cash offer to ${scrMoney(p.ceiling.cash)}; buyer profit there ${scrMoney(p.ceiling.profit)} (${p.ceiling.ok ? "still meets the minimum" : "BELOW the minimum"}). Seller cash at closing floor: ${SCR.MIN_SELLER_CASH_PCT * 100}% of the carry price.`);
   if (p.modelCarry) L.push(`- Estimated (check in the generator): carry offer -> seller nets ${scrMoney(p.modelCarry.sellerNet)} at closing after their half of closing costs, buyer cash back ${scrMoney(p.modelCarry.cashBack)}. Cash offer -> seller nets ${scrMoney(p.modelCash.sellerNet)}, buyer ${p.modelCash.cashBack >= 0 ? "cash back " + scrMoney(p.modelCash.cashBack) : "brings " + scrMoney(-p.modelCash.cashBack)}.`);
-  if (!land) L.push(`- Hard money: ${scrMoney(p.hmLoan)} at ${(p.ltv * 100).toFixed(1)}% LTV, ${SCR.HM_RATE}% -> ${scrMoney(p.hmMonthly)}/mo interest; reserves for ${p.months} months: ${scrMoney(p.reserves)}`);
+  if (!land && p.hold) L.push(`- DSCR loan: ${scrMoney(p.hmLoan)} at ${(p.ltv * 100).toFixed(1)}% LTV, ${SCR.HOLD.DSCR_RATE}% / ${SCR.HOLD.DSCR_AMORT_YEARS}-year amortization -> ${scrMoney(p.hmMonthly)}/mo; buyer cash at closing (reserves) ${scrMoney(p.reserves)}; balloon ${p.months / 12} years`);
+  else if (!land) L.push(`- Hard money: ${scrMoney(p.hmLoan)} at ${(p.ltv * 100).toFixed(1)}% LTV, ${SCR.HM_RATE}% -> ${scrMoney(p.hmMonthly)}/mo interest; reserves for ${p.months} months: ${scrMoney(p.reserves)}`);
   L.push(`- Owner equity (Propwire): ${p.ownerEquityPct === null ? "n/a" : p.ownerEquityPct.toFixed(0) + "%"}   Offer vs list: ${p.offerToList === null ? "n/a" : p.offerToList.toFixed(0) + "%"}`);
   L.push(`- Screen: ${p.qualifies ? "QUALIFIES" : "DOES NOT QUALIFY (" + p.why.join("; ") + ")"}`);
   const who = f.contactRole === "seller" ? "Seller" : "Realtor / listing agent";
