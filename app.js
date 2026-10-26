@@ -240,6 +240,24 @@ function parseListingText(text) {
     }
   }
 
+  // Subject stats: Redfin's page text can list OTHER homes' stats before the subject's ("More homes you might like" comes first), so the first
+  // beds/baths/sqft in the text is not always the subject's. Take the "N bd • N ba • N,NNN sq ft" group that sits right before the subject's own
+  // street address; groups that follow a similar-homes heading score lower; the first of the best-scoring groups wins.
+  {
+    const trip = /\b(\d+)\s*(?:bd|bed(?:room)?s?)\b[\s•·|,\/-]*(\d+(?:\.\d)?)\s*(?:ba\b|bath(?:room)?s?)\b[\s•·|,\/-]*([\d,]{3,})\s*(?:sq\.?\s*ft\.?|sqft|square\s*feet)/gi;
+    const st = (r.street || "").toLowerCase();
+    let best = null, m;
+    while ((m = trip.exec(clean))) {
+      const after = clean.slice(m.index + m[0].length, m.index + m[0].length + 90).toLowerCase();
+      const before = clean.slice(Math.max(0, m.index - 220), m.index);
+      let score = 0;
+      if (st && after.includes(st)) score += 10;
+      if (/more homes|similar homes|you might like|nearby homes|recently sold|homes for sale near|comparable/i.test(before)) score -= 5;
+      if (!best || score > best.score) best = { score, m };
+    }
+    if (best) { r.beds = best.m[1]; r.baths = best.m[2]; r.sqft = best.m[3].replace(/,/g, ""); }
+  }
+
   // Agent name — priority order:
   //   1. "Listing Contacts Tim Dulany" (Crexi — more specific than "Listed by Kidder Mathews" brokerage)
   //   2. "Listed by Chaz Cameli" / "Listing Agent: ..."
@@ -301,12 +319,14 @@ function parseListingText(text) {
   // space, so \s{2,} never fires — stop instead at a digit or a known next-field keyword.
   const ptM = clean.match(/(?:[Pp]roperty\s+[Tt]ype|[Hh]ome\s+[Tt]ype)[:\s•]+([A-Za-z][A-Za-z\s\-/]{1,45}?)(?=\s+(?:Year\b|Lot\b|HOA\b|MLS\b|Parcel\b|APN\b|Garage\b|Stories\b|Bath|Bed|Sq\s|Style\b|Status\b|Price\b|\d)|\s*[.,;]|$)/i);
   const styleM = clean.match(/\b[Ss]tyle[:\s•]+([A-Za-z][A-Za-z\s\/\-]{2,45}?)(?=\s+(?:Year\b|Lot\b|HOA\b|MLS\b|Parcel\b|APN\b|Garage\b|Stories\b|Bath|Bed|Sq\s|Type\b|Status\b|Price\b|Updated\b|Listed\b|\d)|\s*[.,;]|$)/i);
-  const typeCandidate = ptM ? ptM[1] : (styleM ? styleM[1] : "");
+  // Redfin's page text can also put the value BEFORE the label ("Single-family" / "Property Type" on the next line)
+  const ptRev = clean.match(/\b(Single[- ]family(?: Residential)?|Multi[- ]family|Condo(?:minium)?|Townhouse|Townhome|Vacant Land|Lots? \/ Land|Land|Mobile\/Manufactured|Manufactured|Duplex|Triplex|Fourplex|Commercial)\s+(?:Property|Home)\s+Type\b/i);
+  const typeCandidate = ptM ? ptM[1] : (ptRev ? ptRev[1] : (styleM ? styleM[1] : ""));
   if (typeCandidate) {
     const tc = typeCandidate.toLowerCase().trim();
     if (/land|lot|vacant|acreage|raw/.test(tc)) r.assetType = "Land";
     else if (/multi.family|multifamily|apartment|commercial|retail|office|industrial|hospitality|hotel|mixed.use/.test(tc)) r.assetType = "Commercial Property";
-    else if (ptM) r.assetType = "Residential Property (1-4 units)"; // only default to residential if explicit Property Type label was found
+    else if (ptM || ptRev) r.assetType = "Residential Property (1-4 units)"; // only default to residential if explicit Property Type label was found
   }
   if (!r.assetType) {
     if (/\blands?\b|\bvacant\s*lot\b|\braw\s*land\b|\bacreage\b/i.test(clean)) r.assetType = "Land";
