@@ -52,5 +52,15 @@ with sync_playwright() as p:
         st = lp.evaluate("({fin: cashFinancingType, appr: appraisalContingency})"); print("   financing contingency:", st, "| LOI says satisfactory appraisal:", "satisfactory appraisal" in text.lower() or "appraisal" in text.lower())
         if info.get("mao10"): print("   MAO10:", info["mao10"], "MAO20:", info.get("mao20"), "-> carry price", info["carry"], "| note:", (info.get("note") or "none")[:140])
         print("   mentions interest-only:", "interest-only" in text.lower(), "| dual:", "DUAL" in text); print("   first lines:", " / ".join([l.strip() for l in text.splitlines() if l.strip()][:4])[:230])
+        import datetime
+        want = (datetime.date.today() + datetime.timedelta(days=15))
+        exp = re.findall(r"offer_expiry=([\d-]+)", info["url"]); pretty = f"{want.strftime('%B')} {want.day}, {want.year}"
+        print("   expiry param:", exp, "(want", want.isoformat() + ") | LOI shows:", re.findall(r"Offer Expiration: ([^\n]+)", text)[:1], "| dual_offer_active in link:", "dual_offer_active" in info["url"])
+        if name == "hold":
+            assert "loan_type=dscr" in info["url"] and "rehab=0" in info["url"] and "Don+Ava+Capital" in info["url"] and "res_rent=3500" in info["url"], "buy & hold: rehab 0, DSCR loan, admin template terms, rent"
+            print("   hold link: DSCR loan, rehab 0, admin template buyer, rent 3500 OK | LOI mentions DSCR:", "DSCR" in text, "| Don Ava in LOI:", "Don Ava" in text)
+        if name in ("vande", "flip", "hold"):
+            assert exp == [want.isoformat()] and pretty in text, "expiry must be tomorrow + 14 days"
+            assert "dual_offer_active" not in info["url"] and "DUAL" not in text, "seller carryback only: no dual offer"
         lp.close()
     b.close()

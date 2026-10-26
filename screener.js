@@ -6,7 +6,7 @@
 
 const SCR = {
   rows: [], sel: null,
-  cfg: { asset: "sf", strategy: "flip", minDom: 180, minOwnerEquityPct: 80, defCity: "", defState: "", defZip: "" },   // strategy: sf = flip | hold, land = cash | dev   // qualification = days on market + Propwire owner equity only
+  cfg: { asset: "sf", strategy: "flip", offerMode: "carry", minDom: 180, minOwnerEquityPct: 80, defCity: "", defState: "", defZip: "" },   // strategy: sf = flip | hold, land = cash | dev   // qualification = days on market + Propwire owner equity only
   AGENT_EMAIL: "montanoemmanuel@gmail.com", AGENT_NAME: "Emmanuel's LOI Helper Agent", PHONE: "5206336437",
   LOI_URL: "https://pharaohm33.github.io/loi-generator/",
   REHAB_PSF: { light: 25, moderate: 40, heavy: 55, gut: 75 },   // quick estimate when no rehab number is entered
@@ -46,7 +46,8 @@ const SCR = {
   HOLD_CASH_PCT: 0.65, HOLD_DOWN_PCT: 0.50, HOLD_CF_MIN: 250, HOLD_CF_PRICE_CAP: 500000, HOLD_CF_PCT_ABOVE: 0.001, HOLD_MIN_CASHBACK: 0,
   LOGIC_VERSION: 1, LOG_KEY: "scrHoldLog", LOG_MAX: 300,
   // New development (land): dual offer = cash, or the full asking price paid at sale/refinance within 24 months with $0 at closing.
-  DEV_MONTHS: 24
+  DEV_MONTHS: 24,
+  OFFER_DAYS_FROM_TOMORROW: 14       // the seller has two weeks, counted from the day after today
 };
 
 /* ---------- CSV ---------- */
@@ -331,7 +332,7 @@ function scrPrice(d, f) {
   if (holdPlan && holdPlan.cfOk === false) why.push(`net cash flow ${scrMoney(holdPlan.cashflow)}/mo is under the ${scrMoney(holdPlan.cfNeed)}/mo minimum`);
   if (lowEquity) why.push(`owner equity ${ownerEquityPct.toFixed(0)}% < ${SCR.cfg.minOwnerEquityPct}%`);
   const offerToList = list ? cashOffer / list * 100 : null;   // informational only: low and dual offers are fine
-  return { ready: true, land, hold, dev, strategy: strat, arvMid, rehab, rehabSource, asIs, months, suite, mao, mao10: suite.maoHardMoney10 || 0, cashOffer, carryOffer, carryDown, hmLoan, hmMonthly, ltv, ltvNote, profit, priceNote, ceiling,
+  return { ready: true, land, hold, dev, strategy: strat, rentLtr: f.rentLtr || 0, rentStr: f.rentStr || 0, arvMid, rehab, rehabSource, asIs, months, suite, mao, mao10: suite.maoHardMoney10 || 0, cashOffer, carryOffer, carryDown, hmLoan, hmMonthly, ltv, ltvNote, profit, priceNote, ceiling,
     holdPlan, holdLog, noteRate, monthlyPrincipal, devNote,
     reserves: hmMonthly * months, gutPlan, modelCarry, modelCash, ownerEquityPct, offerToList, equityAfterRehab: arvMid - list - rehab, qualifies: why.length === 0, why };
 }
@@ -388,11 +389,12 @@ function scrLogLines(p) {
 
 /* ---------- links + notes ---------- */
 function scrLoiLink(d, p) {
-  const t = scrLocalDate(7);   // the LOI's acceptance deadline: 7 days from today, by the local calendar (toISOString is UTC, which is already tomorrow on a Phoenix evening)
+  const dualMode = SCR.cfg.offerMode === "dual";
+  const t = scrLocalDate(SCR.OFFER_DAYS_FROM_TOMORROW + 1);   // the acceptance deadline: two weeks from TOMORROW (so today + 15), by the local calendar (toISOString is UTC, which is already tomorrow on a Phoenix evening)
   const q = {
     address: d.address, units: 1, prop_type: p.land ? "land" : "residential", sqft: d.sqft || "", appreciation: 3, noi_growth: 2,
     purchase_price: p.land && !p.dev ? p.cashOffer : p.carryOffer, cash_at_closing: p.land && !p.dev ? p.cashOffer : p.carryDown,
-    dual_cash_price: p.land && !p.dev ? "" : p.cashOffer, as_is_value: p.asIs, arv: p.arvMid, rehab: p.rehab,
+    dual_cash_price: p.land && !p.dev || !dualMode ? "" : p.cashOffer, as_is_value: p.asIs, arv: p.arvMid, rehab: p.rehab,
     sr_rate: SCR.HM_RATE, sr_amort: 30, sr_term: 12, sr_ltv: Math.round(p.ltv * 1000) / 10, sr_dscr: 1.25, sr_points: 2,
     hm_ltc: 90, hm_arv_pct: 75, hm_rehab_pct: 100, hm_rehab_months: p.months, sc_rate: p.noteRate * 100, sc_term: p.months / 12, monthly_principal: p.monthlyPrincipal || 0,
     esc1_pct: 2, esc2_pct: 1.5, acq_pct: 50, broker_pct: 0, taf_pct: 2.5, park_escrow: "N", exit_type: "sale", exit_sale_costs: 6,
@@ -401,8 +403,13 @@ function scrLoiLink(d, p) {
     offer_expiry: t, loi_agent_fee: 3, loi_agent_fee_type: "pct", closing_cost_party: "split", appraisal_contingency: "on", cash_financing: "hard_money_appraisal",
     acq_fee_basis: "at_closing", seller_security_type: "equity", mode: p.noteRate ? "interest_only" : "principal_only", loan_type: "hard_money", static_cf: 1
   };
-  if (p.land && !p.dev) q.no_sc = 1; else q.dual_offer_active = 1;
-  q.autogen = 1;                       // the LOI generator builds the LOI text itself on load
+  if (p.hold) {          // Buy & hold: rehab 0, a DSCR senior loan and the generator's "Admin Template" terms (not the cash template the flips use)
+    Object.assign(q, { loan_type: "dscr", rehab: 0, sr_rate: 8, sr_ltv: 75, sr_amort: 30, sr_term: 360, sr_points: 2, sr_dscr: 1.25, acq_pct: 6, esc1_pct: 2, esc2_pct: 1.5, taf_pct: 2.5,
+      exit_reserve_mo: 6, ac_name: "Suede Buffalo LLC", ac_email1: "suedebuffalofficial@gmail.com", ac_email2: "montanoemmanuel@gmail.com", buyer_company: "Don Ava Capital LLC",
+      res_rent: Math.round(p.rentLtr || 0) || "" });
+  }
+  if (p.land && !p.dev) q.no_sc = 1; else if (dualMode || p.dev) q.dual_offer_active = 1;
+  q.autogen = p.land && !p.dev ? 1 : (dualMode || p.dev ? 1 : "loi");     // carryback only: the single seller-carry LOI, no all-cash option                       // the LOI generator builds the LOI text itself on load
   const u = new URLSearchParams();
   Object.entries(q).forEach(([k, v]) => { if (v !== "" && v !== null && v !== undefined) u.set(k, v); });
   return SCR.LOI_URL + "?" + u.toString();
@@ -443,11 +450,11 @@ function scrNotes(d, f, p, loi, resume) {
     `PRE-LOI (not contacted, not submitted): ${d.address}`,
     `Source: ${d.url || "uploaded list"}${d.mls ? "  MLS# " + d.mls : ""}   List: ${scrMoney(d.price)}   Days on market: ${d.dom ?? "?"}   Year built: ${d.year || "?"}`,
     "", "PICK UP WHERE WE LEFT OFF",
-    `- LOI Generator (${land ? "cash template, land" : "cash template + dual offer"}, pre-filled): ${loi}`,
+    `- LOI Generator (${land ? "cash template, land" : SCR.cfg.offerMode === "dual" ? "cash template + dual offer" : "seller carryback only"}, pre-filled): ${loi}`,
     `- sendmyseller.com resume link (do NOT submit): ${resume}`, "", "UNDERWRITING",
     land ? `- As-is value (middle of range): ${scrMoney(p.arvMid)}` : `- ARV (middle of comp range): ${scrMoney(p.arvMid)}   Rehab: ${scrMoney(p.rehab)}   As-is: ${scrMoney(p.asIs)}`,
     land ? `- Cash offer (land): ${scrMoney(p.cashOffer)}   [site MAO: ${scrMoney(p.mao)}]` + (p.dev ? `\n- Offer B, full asking price: ${scrMoney(p.carryOffer)}, $0 at closing, paid at sale or refinance of the property within ${p.months} months (${p.devNote})` : "")
-         : `- Hard Money Buyer MAO (10% down): ${scrMoney(p.mao10)}   (20% down): ${scrMoney(p.mao)}\n- Offer A, all cash (${(SCR.CASH_PCT_OF_CARRY * 100).toFixed(1)}% of the carry price): ${scrMoney(p.cashOffer)}\n- Offer B, seller carry (${p.hold && p.holdPlan.structure === "principal" ? SCR.HOLD_PRICE_BUMP * 100 + "% over asking" : p.hold ? (SCR.CARRY_PCT_OF_ARV * 100).toFixed(1) + "% of ARV, capped at list" : "Hard Money Buyer MAO (10% down) " + scrMoney(p.mao10) + ", capped at list"}): ${scrMoney(p.carryOffer)} (${scrMoney(p.carryDown)} at closing, balance carried ${p.months} months at ${p.noteRate * 100}%${p.hold ? (p.noteRate ? " interest-only" : ", principal-only") : ""})`,
+         : `- Hard Money Buyer MAO (10% down): ${scrMoney(p.mao10)}   (20% down): ${scrMoney(p.mao)}${SCR.cfg.offerMode === "dual" ? `\n- Offer A, all cash (${(SCR.CASH_PCT_OF_CARRY * 100).toFixed(1)}% of the carry price): ${scrMoney(p.cashOffer)}` : `\n- (All cash would be ${scrMoney(p.cashOffer)}: not offered, seller carryback only)`}\n- ${SCR.cfg.offerMode === "dual" ? "Offer B" : "Offer"}, seller carry (${p.hold && p.holdPlan.structure === "principal" ? SCR.HOLD_PRICE_BUMP * 100 + "% over asking" : p.hold ? (SCR.CARRY_PCT_OF_ARV * 100).toFixed(1) + "% of ARV, capped at list" : "Hard Money Buyer MAO (10% down) " + scrMoney(p.mao10) + ", capped at list"}): ${scrMoney(p.carryOffer)} (${scrMoney(p.carryDown)} at closing, balance carried ${p.months} months at ${p.noteRate * 100}%${p.hold ? (p.noteRate ? " interest-only" : ", principal-only") : ""})`,
   ];
   L.splice(L.indexOf("UNDERWRITING") + 1, 0, `- Strategy: ${SCR_STRAT_NAMES[p.strategy]}`);
   if (p.holdPlan) L.push(`- Buy & hold: ${scrHoldText(p)}`);
@@ -912,6 +919,7 @@ function scrMount() {
     <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px;">
       <div><label>Asset class</label><select id="scr-asset"><option value="sf">Single family (dual offer)</option><option value="land">Land (cash offer)</option></select></div>
       <div><label>Min days on market</label><input type="number" id="scr-min-dom" value="180"></div>
+      <div><label>Offer type</label><select id="scr-offer-mode"><option value="carry">Seller carryback only</option><option value="dual">Dual: carryback + cash</option></select></div>
       <div><label>Min owner equity %</label><input type="number" id="scr-min-eq" value="80"></div>
       <div><label>Default city (if the list has none)</label><input type="text" id="scr-def-city" placeholder="Tucson"></div>
       <div><label>Default state</label><input type="text" id="scr-def-state" maxlength="2" placeholder="AZ" style="text-transform:uppercase"></div>
@@ -938,6 +946,7 @@ function scrMount() {
   });
   const sync = () => {
     SCR.cfg.asset = document.getElementById("scr-asset").value;
+    SCR.cfg.offerMode = document.getElementById("scr-offer-mode").value === "dual" ? "dual" : "carry";
     scrRenderStrat();
     SCR.cfg.minDom = Number(document.getElementById("scr-min-dom").value) || 0;
     SCR.cfg.minOwnerEquityPct = Number(document.getElementById("scr-min-eq").value) || 0;
