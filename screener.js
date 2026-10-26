@@ -964,7 +964,7 @@ function scrPrepare(id) {
 
 // Step 1 gate: Propwire equity decides whether comps and rehab are worth doing at all.
 function scrRenderGate() {
-  const f = SCR.sel.f, gate = document.getElementById("scr-gate"), after = document.getElementById("scr-after");
+  const f = SCR.sel.f, d = SCR.sel.d, gate = document.getElementById("scr-gate"), after = document.getElementById("scr-after");
   if (!gate || !after) return;
   const ei = scrEquityInfo(f, { list: d.price }), eq = ei ? ei.pct : null, min = SCR.cfg.minOwnerEquityPct;
   const basis = ei && ei.mortgage !== null ? ` (mortgage ${scrMoney(ei.mortgage)} against ${ei.valueLabel} ${scrMoney(ei.value)}${ei.propwirePct !== null && ei.propwirePct > eq + 1 ? "; Propwire says " + ei.propwirePct.toFixed(0) + "% on its own, higher valuation" : ""})` : "";

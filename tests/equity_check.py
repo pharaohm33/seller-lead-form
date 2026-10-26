@@ -13,7 +13,7 @@ def check(name, ok, extra=""):
 with sync_playwright() as p:
     b = p.chromium.launch(channel="chrome", headless=True); pg = b.new_page(); errs = []
     pg.on("pageerror", lambda e: errs.append(str(e)))
-    pg.route("https://script.google.com/**", lambda r: r.fulfill(status=200, content_type="application/json", headers={"access-control-allow-origin": "*"}, body='{"ok":true}'))
+    pg.route("https://script.google.com/**", lambda r: r.fulfill(status=200, content_type="application/json", headers={"access-control-allow-origin": "*"}, body='{"ok":true,"token":"t","leads":[],"entries":[],"submissions":[],"total":0}'))
     pg.goto(f"http://127.0.0.1:{srv.server_address[1]}/index.html"); pg.wait_for_timeout(1200)
     info = lambda f, ref=None: pg.evaluate("([f, ref]) => scrEquityInfo(f, ref)", [f, ref or {}])
     # 6300 N Camino Miraval: Propwire says value $774,242, mortgage $214,991, 72% equity; asking $1,098,000; the comps ARV came back around $245,000
@@ -34,5 +34,12 @@ with sync_playwright() as p:
       const p = scrPrice(d, { pwEquityPct: 72, pwValue: 774242, pwMortgage: 214991, pwMortgageSet: true, arvLow: 242212, arvHigh: 247712, rehabLow: 20000, rehabHigh: 30000, tier: 'moderate' });
       return { q: p.qualifies, why: p.why, eq: p.ownerEquityPct } }""")
     check("the offer does not qualify, and says why in terms of the mortgage", q["q"] is False and any("owner equity" in w and "mortgage" in w and "comps ARV" in w and "Propwire says 72%" in w for w in q["why"]), q["why"])
+    # the real screen: prepare a row, paste Propwire's page text, and the equity gate must render (this broke once: a missing variable in the gate)
+    pg.add_init_script("sessionStorage.setItem('adminToken','tok');")
+    pg.reload(); pg.wait_for_timeout(1000); pg.click("#admin-access-btn"); pg.wait_for_selector("#admin-view:not([hidden])"); pg.click("#admin-tab-preloi"); pg.wait_for_selector("#scr-paste-listing")
+    pg.evaluate("""() => { SCR.cfg.minDom = 0; SCR.rows = scrLoad('ADDRESS,CITY,STATE OR PROVINCE,ZIP OR POSTAL CODE,PROPERTY TYPE,PRICE,BEDS,BATHS,SQUARE FEET,DAYS ON MARKET,STATUS\\n6300 N Camino Miraval,Tucson,AZ,85718,Single Family Residential,1098000,5,6,5439,300,Active\\n'); scrRenderTable(); scrPrepare(0) }""")
+    pg.fill("#scr-in-pw", "$774,242\nEstimated Property Value\n$214,991\nEst. Mortgage Balance\n$559,251\nEst. Equity\n72%\nEquity\n"); pg.click("#scr-in-pw-btn"); pg.wait_for_timeout(600)
+    gate = pg.inner_text("#scr-gate")
+    check("the equity gate renders with the mortgage basis and closes under the minimum", "under 80%" in gate and "mortgage $214,991" in gate, gate[:160])
     check("no script errors", not errs, errs[:2]); b.close()
 sys.exit(1 if bad else 0)
