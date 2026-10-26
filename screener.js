@@ -143,11 +143,24 @@ function scrModel(pp, cac, loan, asIs) {
 }
 
 // Owner equity % is only known when Propwire equity is actually shown (or value and mortgage balance are both entered).
-function scrEquityPct(f) {
-  if (f.pwEquityPct !== null && f.pwEquityPct !== undefined) return f.pwEquityPct;
-  if (f.pwValue && f.pwMortgageSet) return (f.pwValue - (f.pwMortgage || 0)) / f.pwValue * 100;
+// Owner equity. Propwire's own percentage rests on ITS valuation, which can run far above what a home is really worth; the mortgage balance is the reliable number. So when the mortgage is
+// known the equity is (value - mortgage) / value, with value = the LOWEST of Propwire's value, the asking price and the comps ARV that are known so far. Propwire's own percentage is only
+// used when there is no mortgage figure. ref = { list, arv }.
+function scrEquityInfo(f, ref) {
+  ref = ref || {};
+  const mortgageKnown = !!f.pwMortgageSet || Number(f.pwMortgage) > 0, m = Number(f.pwMortgage) || 0;
+  const vals = [["Propwire's value", f.pwValue], ["asking price", ref.list], ["comps ARV", ref.arv]].filter(x => Number(x[1]) > 0).map(x => [x[0], Number(x[1])]);
+  if (mortgageKnown && vals.length) {
+    const lo = vals.reduce((a, c) => (c[1] < a[1] ? c : a));
+    let pct = (lo[1] - m) / lo[1] * 100;
+    const pwPct = f.pwEquityPct !== null && f.pwEquityPct !== undefined ? Number(f.pwEquityPct) : null;
+    if (pwPct !== null && pwPct < pct) pct = pwPct;
+    return { pct, value: lo[1], valueLabel: lo[0], mortgage: m, propwirePct: pwPct };
+  }
+  if (f.pwEquityPct !== null && f.pwEquityPct !== undefined) return { pct: Number(f.pwEquityPct), value: null, valueLabel: "Propwire's own percentage (no mortgage figure)", mortgage: null, propwirePct: Number(f.pwEquityPct) };
   return null;
 }
+function scrEquityPct(f, ref) { const i = scrEquityInfo(f, ref); return i ? i.pct : null; }
 
 
 // ---------- buy & hold: DSCR loan math ----------
@@ -158,7 +171,8 @@ function scrPrice(d, f) {
   const land = SCR.cfg.asset === "land", strat = SCR.cfg.strategy;
   const hold = !land && strat === "hold", dev = land && strat === "dev";
   const list = d.price || 0;
-  const ownerEquityPct = scrEquityPct(f);
+  const arvMid0 = f.arvLow && f.arvHigh ? (f.arvLow + f.arvHigh) / 2 : (f.arvLow || f.arvHigh || 0);
+  const equityInfo = scrEquityInfo(f, { list, arv: arvMid0 }), ownerEquityPct = equityInfo ? equityInfo.pct : null;
   if (ownerEquityPct === null) return { ready: false, noEquity: true };
   const lowEquity = ownerEquityPct < SCR.cfg.minOwnerEquityPct;
   const arvMid = f.arvLow && f.arvHigh ? scrRound((f.arvLow + f.arvHigh) / 2) : (f.arvLow || f.arvHigh || 0);
@@ -403,11 +417,11 @@ function scrPrice(d, f) {
   if (hold) holdWhy.forEach(w => why.push(w));
   if (!hold && profit && !profit.ok) why.push(`buyer profit ${scrMoney(profit.sale)} is under the ${scrMoney(profit.min)} minimum ${holdPlan && holdPlan.structure === "principal" ? "at " + SCR.HOLD.PRICE_BUMP * 100 + "% over asking, even at the longest balloon" : !hold && !land && mao10 > 0 ? "at the Hard Money Buyer MAO (10% down) price" : "even at the lowest carry price"}`);
   if (hold && !d.units && list > SCR.HOLD_SF_MAX_PRICE) why.push(`single-family buy & hold over ${scrMoney(SCR.HOLD_SF_MAX_PRICE)} needs a cash offer, and only seller carryback offers are made for now`);
-  if (lowEquity) why.push(`owner equity ${ownerEquityPct.toFixed(0)}% < ${SCR.cfg.minOwnerEquityPct}%`);
+  if (lowEquity) why.push(`owner equity ${ownerEquityPct.toFixed(0)}% < ${SCR.cfg.minOwnerEquityPct}%` + (equityInfo && equityInfo.mortgage !== null ? ` (mortgage ${scrMoney(equityInfo.mortgage)} against ${equityInfo.valueLabel} ${scrMoney(equityInfo.value)}${equityInfo.propwirePct !== null && equityInfo.propwirePct > ownerEquityPct + 1 ? `; Propwire says ${equityInfo.propwirePct.toFixed(0)}% on its own valuation` : ""})` : ""));
   const offerToList = list ? cashOffer / list * 100 : null;   // informational only: low and dual offers are fine
   return { ready: true, land, hold, dev, strategy: strat, rentLtr: f.rentLtr || 0, rentStr: f.rentStr || 0, arvMid, rehab, rehabSource, asIs, months, suite, mao, mao10: suite.maoHardMoney10 || 0, cashOffer, carryOffer, carryDown, hmLoan, hmMonthly, ltv, ltvNote, profit, priceNote, ceiling,
     holdPlan, holdLog, noteRate, monthlyPrincipal, devNote,
-    reserves: hold ? (modelCarry ? modelCarry.cashBack : 0) : hmMonthly * months, gutPlan, modelCarry, modelCash, ownerEquityPct, offerToList, equityAfterRehab: arvMid - list - rehab, qualifies: why.length === 0, why };
+    reserves: hold ? (modelCarry ? modelCarry.cashBack : 0) : hmMonthly * months, gutPlan, modelCarry, modelCash, ownerEquityPct, equityInfo, offerToList, equityAfterRehab: arvMid - list - rehab, qualifies: why.length === 0, why };
 }
 
 const SCR_STRAT_NAMES = { flip: "Fix & flip", hold: "Buy & hold", cash: "Land, cash offer", dev: "New development (land)" };
@@ -542,7 +556,8 @@ function scrNotes(d, f, p, loi, resume) {
   if (p.modelCarry) L.push(`- Estimated (check in the generator): carry offer -> seller nets ${scrMoney(p.modelCarry.sellerNet)} at closing after their half of closing costs, buyer cash back ${scrMoney(p.modelCarry.cashBack)}. Cash offer -> seller nets ${scrMoney(p.modelCash.sellerNet)}, buyer ${p.modelCash.cashBack >= 0 ? "cash back " + scrMoney(p.modelCash.cashBack) : "brings " + scrMoney(-p.modelCash.cashBack)}.`);
   if (!land && p.hold) L.push(`- DSCR loan: ${scrMoney(p.hmLoan)} at ${(p.ltv * 100).toFixed(1)}% LTV, ${SCR.HOLD.DSCR_RATE}% / ${SCR.HOLD.DSCR_AMORT_YEARS}-year amortization -> ${scrMoney(p.hmMonthly)}/mo; buyer cash at closing (reserves) ${scrMoney(p.reserves)}; balloon ${p.months / 12} years`);
   else if (!land) L.push(`- Hard money: ${scrMoney(p.hmLoan)} at ${(p.ltv * 100).toFixed(1)}% LTV, ${SCR.HM_RATE}% -> ${scrMoney(p.hmMonthly)}/mo interest; reserves for ${p.months} months: ${scrMoney(p.reserves)}`);
-  L.push(`- Owner equity (Propwire): ${p.ownerEquityPct === null ? "n/a" : p.ownerEquityPct.toFixed(0) + "%"}   Offer vs list: ${p.offerToList === null ? "n/a" : p.offerToList.toFixed(0) + "%"}`);
+  const ei = p.equityInfo;
+  L.push(`- Owner equity: ${p.ownerEquityPct === null ? "n/a" : p.ownerEquityPct.toFixed(0) + "%"}${ei && ei.mortgage !== null ? ` (mortgage ${scrMoney(ei.mortgage)} against the lowest value known: ${ei.valueLabel} ${scrMoney(ei.value)}; Propwire's own figure ${ei.propwirePct === null ? "n/a" : ei.propwirePct.toFixed(0) + "%"} rests on its valuation)` : ei ? ` (${ei.valueLabel})` : ""}   Offer vs list: ${p.offerToList === null ? "n/a" : p.offerToList.toFixed(0) + "%"}`);
   L.push(`- Screen: ${p.qualifies ? "QUALIFIES" : "DOES NOT QUALIFY (" + p.why.join("; ") + ")"}`);
   const who = f.contactRole === "seller" ? "Seller" : "Realtor / listing agent";
   const contact = [f.contactName, f.contactPhone, f.contactEmail].filter(Boolean).join(" · ");
@@ -951,11 +966,12 @@ function scrPrepare(id) {
 function scrRenderGate() {
   const f = SCR.sel.f, gate = document.getElementById("scr-gate"), after = document.getElementById("scr-after");
   if (!gate || !after) return;
-  const eq = scrEquityPct(f), min = SCR.cfg.minOwnerEquityPct;
+  const ei = scrEquityInfo(f, { list: d.price }), eq = ei ? ei.pct : null, min = SCR.cfg.minOwnerEquityPct;
+  const basis = ei && ei.mortgage !== null ? ` (mortgage ${scrMoney(ei.mortgage)} against ${ei.valueLabel} ${scrMoney(ei.value)}${ei.propwirePct !== null && ei.propwirePct > eq + 1 ? "; Propwire says " + ei.propwirePct.toFixed(0) + "% on its own, higher valuation" : ""})` : "";
   if (eq === null) { after.hidden = true; gate.innerHTML = `<div class="banner warn" style="text-align:left;">No Propwire equity yet. Enter the equity %, or the value and mortgage balance. If Propwire doesn't show equity, skip this one.</div><button type="button" class="btn secondary" id="scr-skip-gate" style="margin-top:6px;">Skip to next deal</button>`; document.getElementById("scr-skip-gate").onclick = () => scrSkipToNext("No Propwire equity shown"); return; }
-  if (eq < min) { after.hidden = true; gate.innerHTML = `<div class="banner warn" style="text-align:left;">Owner equity ${eq.toFixed(0)}% is under ${min}%. No comps or rehab needed: skip it.</div><button type="button" class="btn primary" id="scr-skip-gate" style="margin-top:6px;">Skip to next deal</button>`; document.getElementById("scr-skip-gate").onclick = () => scrSkipToNext(`Owner equity ${eq.toFixed(0)}% < ${min}%`); return; }
+  if (eq < min) { after.hidden = true; gate.innerHTML = `<div class="banner warn" style="text-align:left;">Owner equity ${eq.toFixed(0)}%${basis} is under ${min}%. No comps or rehab needed: skip it.</div><button type="button" class="btn primary" id="scr-skip-gate" style="margin-top:6px;">Skip to next deal</button>`; document.getElementById("scr-skip-gate").onclick = () => scrSkipToNext(`Owner equity ${eq.toFixed(0)}% < ${min}%`); return; }
   after.hidden = false;
-  gate.innerHTML = `<div class="banner info" style="text-align:left;">Owner equity ${eq.toFixed(0)}% passes (${min}% minimum). Now comps${SCR.cfg.asset === "land" || SCR.cfg.strategy === "hold" ? "" : " and rehab"}.</div>`;
+  gate.innerHTML = `<div class="banner info" style="text-align:left;">Owner equity ${eq.toFixed(0)}%${basis} passes (${min}% minimum). Now comps${SCR.cfg.asset === "land" || SCR.cfg.strategy === "hold" ? "" : " and rehab"}.</div>`;
 }
 
 function scrRenderCalc() {
