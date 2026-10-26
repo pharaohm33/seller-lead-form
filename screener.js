@@ -287,8 +287,8 @@ function scrPrice(d, f) {
     // minimum is not met at that price; it no longer lowers the price on its own.
     if (!hold) pick = solve(months, { noteRate: 0, noi: 0, fixedCarry: mao10 > 0 ? (list ? Math.min(list, mao10) : mao10) : undefined });
     else {
-      const noiL = (f.rentLtr || 0) * (1 - SCR.OPEX_LTR), noiS = (f.rentStr || 0) * (1 - SCR.OPEX_STR), noi = Math.max(noiL, noiS), rentKnown = noi > 0;
-      const basis = noiS > noiL ? "short-term" : "long-term";
+      const noiL = (f.rentLtr || 0) * (1 - SCR.OPEX_LTR), noiS = (f.rentStr || 0) * (1 - SCR.OPEX_STR), noi = f.noiAnnual ? f.noiAnnual / 12 : Math.max(noiL, noiS), rentKnown = noi > 0;   // multifamily / commercial: the listing's annual NOI, already net of expenses
+      const basis = f.noiAnnual ? "listing NOI" : noiS > noiL ? "short-term" : "long-term";
       const need = carry => carry <= SCR.HOLD_CF_PRICE_CAP ? SCR.HOLD_CF_MIN : carry * SCR.HOLD_CF_PCT_ABOVE;
       holdLog = [];
       const good = r => r.feasible && r.cfOk !== false;                     // profit minimum met and (when rent is known) cash flow floor met
@@ -388,7 +388,7 @@ function scrLogLines(p) {
 }
 
 /* ---------- links + notes ---------- */
-function scrLoiLink(d, p) {
+function scrLoiLink(d, p, extra) {
   const dualMode = SCR.cfg.offerMode === "dual";
   const t = scrLocalDate(SCR.OFFER_DAYS_FROM_TOMORROW + 1);   // the acceptance deadline: two weeks from TOMORROW (so today + 15), by the local calendar (toISOString is UTC, which is already tomorrow on a Phoenix evening)
   const q = {
@@ -410,6 +410,7 @@ function scrLoiLink(d, p) {
   }
   if (p.land && !p.dev) q.no_sc = 1; else if (dualMode || p.dev) q.dual_offer_active = 1;
   q.autogen = p.land && !p.dev ? 1 : (dualMode || p.dev ? 1 : "loi");     // carryback only: the single seller-carry LOI, no all-cash option                       // the LOI generator builds the LOI text itself on load
+  if (extra) Object.assign(q, extra);
   const u = new URLSearchParams();
   Object.entries(q).forEach(([k, v]) => { if (v !== "" && v !== null && v !== undefined) u.set(k, v); });
   return SCR.LOI_URL + "?" + u.toString();
@@ -595,6 +596,70 @@ function scrApplyRehab(text, msgId = "scr-msg-rehab") {
   const mid = (r.low + r.high) / 2, high = arvMid && mid > arvMid * 0.5;
   scrMsg(msgId, `Parsed rehab $${r.low.toLocaleString()} to $${r.high.toLocaleString()} from "…${r.ctx}". The offer uses the middle.${high ? " WARNING: that is over half the ARV, so check it's the total repair figure." : ""}`, !high);
   return true;
+}
+
+
+/* ---------- multifamily / commercial listings (LoopNet, Crexi) ---------- */
+// The text of a LoopNet or Crexi listing page -> the facts the offer needs. Crexi hides cap rate, NOI and units ("******") until you sign in: those come back empty and the agent asks Google AI for them.
+function scrParseCommercial(text) {
+  const t = String(text || ""), lines = t.split("\n").map(l => l.replace(/\u00a0/g, " "));
+  const num = v => { const n = Number(String(v || "").replace(/[^0-9.]/g, "")); return isNaN(n) ? 0 : n; };
+  const clean = v => /^[*\s]*$/.test(v || "") ? "" : String(v).trim();
+  const val = (...labels) => {
+    for (const lab of labels) {
+      const L = lab.toLowerCase();
+      for (let i = 0; i < lines.length; i++) {
+        const raw = lines[i].trim(), low = raw.toLowerCase().replace(/:$/, "");
+        if (low === L) { const nx = lines.slice(i + 1, i + 4).map(x => x.trim()).find(x => x && x !== "|"); if (nx !== undefined && nx.toLowerCase().replace(/:$/, "") !== L) return clean(nx); }
+        const m = raw.match(new RegExp("^" + lab.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*[\\t:]\\s*(.+)$", "i"));
+        if (m) return clean(m[1]);
+      }
+    }
+    return "";
+  };
+  const r = {};
+  const head = t.match(/\$([\d,]+)\s*\(\$[\d,]+\/Unit\)\s*([\d.]+)%\s*Cap Rate/i);
+  r.price = num(val("Price", "Asking Price")) || (head ? num(head[1]) : 0) || num((t.match(/^\s*\$([\d,]{6,})\s*$/m) || [])[1]);
+  r.capRate = num(val("Cap Rate")) || (head ? num(head[2]) : 0);
+  const noiX = num(val("NOI", "Net Operating Income"));
+  r.noi = noiX || (r.price && r.capRate ? Math.round(r.price * r.capRate / 100) : 0);
+  r.noiSource = noiX ? "listing NOI" : r.noi ? "price x cap rate" : "";
+  r.units = num(val("No. Units", "Units", "Number of Units")) || num((t.match(/(\d+)\s*Unit\s+(?:Apartment|Multifamily|Building)/i) || [])[1]);
+  r.sqft = num(val("Building Size", "Square Footage", "Building SqFt"));
+  r.acres = num(val("Lot Size", "Acreage"));
+  r.yearBuilt = num(val("Year Built")) || 0;
+  r.occupancy = num(val("Average Occupancy", "Occupancy"));
+  r.type = val("Property Type"); r.subtype = val("Property Subtype", "Sub Type"); r.buildingClass = val("Building Class");
+  const am = t.match(/Address:\s*([^\n]+)/);
+  const hm = t.match(/(\d{1,6}[^\n,]*?),\s*([A-Za-z .]+),\s*([A-Z]{2})\s+(\d{5})/);
+  r.address = am ? am[1].trim() : (hm ? hm[0].trim() : "");
+  const ap = r.address.split(",").map(x => x.trim()); r.street = ap[0] || ""; r.city = ap[1] || ""; const sz = (ap[2] || "").match(/([A-Z]{2})\s+(\d{5})/); r.state = sz ? sz[1] : ""; r.zip = sz ? sz[2] : "";
+  const ci = lines.findIndex(l => /^(contacts|listing brokers?|listing contacts)$/i.test(l.trim()));
+  r.contacts = ci < 0 ? [] : lines.slice(ci + 1, ci + 8).map(l => l.trim()).filter(l => l && !/^(listing id|call|message|date on market|last updated|\|)/i.test(l) && !/\b(LOI|Submit|Request|View|Share|Save|Sign|Call|Message|Contact|Info)\b/i.test(l) && /^[A-Z][A-Za-z'.-]+(?: [A-Z][A-Za-z'.-]+)+$/.test(l)).slice(0, 3);
+  const bm = t.match(/Contact\s+([^\n]+?)\s+for more information/i);
+  r.brokerage = bm ? bm[1].trim() : "";
+  r.isMultifamily = /multifamily|apartment/i.test(r.type + " " + r.subtype) || r.units >= 5;
+  return r;
+}
+
+// Cap-rate valuation + the offer. The value is NOI / the middle of the cap-rate range Google AI gives for the same kind of property; it is both the ARV and the as-is value
+// (a rent-ready building has no rehab). Then the buy & hold solver prices the seller carryback with the listing NOI instead of rent x expenses.
+function scrCommercialPrice(c, o) {
+  o = o || {};
+  const capMid = ((Number(o.capLow) || 0) + (Number(o.capHigh) || Number(o.capLow) || 0)) / 2 || c.capRate || 0;
+  const noi = Number(o.noi) || c.noi || 0;
+  if (!noi || !capMid) return { ready: false, why: !noi ? "no NOI" : "no cap rate" };
+  const value = Math.round(noi / (capMid / 100) / 1000) * 1000;
+  const d = { address: c.address, street: c.street, city: c.city, state: c.state, zip: c.zip, price: c.price || 0, sqft: c.sqft || 0, units: c.units || 0 };
+  const f = { pwEquityPct: o.equityPct === undefined || o.equityPct === "" || o.equityPct === null ? 100 : Number(o.equityPct), arvLow: value, arvHigh: value, noiAnnual: noi, rentLtr: 0, rehab: 0 };
+  const keep = { asset: SCR.cfg.asset, strategy: SCR.cfg.strategy };
+  SCR.cfg.asset = "sf"; SCR.cfg.strategy = "hold";
+  try {
+    const p = scrPrice(d, f);
+    if (!p.ready) return { ready: false, why: "the solver could not price it", p };
+    const loi = scrLoiLink(d, p, { prop_type: c.isMultifamily ? "multifamily" : "commercial", units: c.units || 1, sqft: c.sqft || "", noi_direct: Math.round(noi), cap_rate: Math.round(capMid * 100) / 100, res_rent: "" });
+    return { ready: true, p, d, f, value, capMid, noi, loi, equityChecked: !(o.equityPct === undefined || o.equityPct === "" || o.equityPct === null) };
+  } finally { SCR.cfg.asset = keep.asset; SCR.cfg.strategy = keep.strategy; }
 }
 
 // Propwire: the bookmarklet's JSON, or the raw text of the property page (select all, copy)
