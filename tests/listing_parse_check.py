@@ -19,5 +19,8 @@ with sync_playwright() as p:
         r = pg.evaluate("t => parseListingText(t)", open(path).read())
         ok = all(str(r.get(k)) == v for k, v in want.items()); bad += not ok
         print("PASS" if ok else "FAIL", fn, {k: r.get(k) for k in want})
+    r = pg.evaluate("t => parseListingText(t)", "Buy\n3 bd 2 ba 828 sq ft 3720 E Monte Vista Dr, Tucson, AZ 85716\n$250,000")
+    ok = r.get("street") == "3720 E Monte Vista Dr" and r.get("zip") == "85716"; bad += not ok
+    print("PASS" if ok else "FAIL", "street after a sq ft figure", r.get("street"), r.get("zip"))
     b.close()
 print(bad, "failed"); sys.exit(1 if bad else 0)

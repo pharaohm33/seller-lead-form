@@ -218,7 +218,7 @@ function parseListingText(text) {
   const addrM = clean.match(/(?<![0-9,])(\d{1,6}\s+[A-Za-z0-9 .#'-]+(?:St|Ave|Rd|Dr|Blvd|Boulevard|Ln|Way|Ct|Pl|Cir|Hwy|Pkwy|Trail|Terrace|Loop|Pass|Run|Path|Trl)[.,]?\s+[A-Za-z ]+,\s+(?:[A-Z]{2}|[A-Za-z ]+)\s+(\d{5}))/i);
   if (addrM) {
     const parts = addrM[1].split(",").map(s => s.trim());
-    r.street = parts[0] || "";
+    r.street = (parts[0] || "").replace(/^.*\b(?:sq\.?\s*ft\.?|sqft)\s+(?=\d)/i, "");   // "828 sq ft 3720 E Monte Vista Dr": the house number is the one after the sq ft
     if (parts[1]) {
       const seg = parts[1].trim();
       const abbrM = seg.match(/^(.*?)\s+([A-Z]{2})$/);
