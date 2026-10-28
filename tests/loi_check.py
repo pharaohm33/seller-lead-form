@@ -60,7 +60,7 @@ with sync_playwright() as p:
             assert "loan_type=dscr" in info["url"] and "rehab=0" in info["url"] and "Don+Ava+Capital" in info["url"] and "res_rent=3500" in info["url"], "buy & hold: rehab 0, DSCR loan, admin template terms, rent"
             print("   hold link: DSCR loan, rehab 0, admin template buyer, rent 3500 OK | LOI mentions DSCR:", "DSCR" in text, "| Don Ava in LOI:", "Don Ava" in text)
         if name in ("vande", "flip", "hold"):
-            assert exp == [want.isoformat()] and pretty in text, "expiry must be tomorrow + 14 days"
+            assert exp == [want.isoformat()] and pretty in text, "expiry must be tomorrow + 14 days (single family)"
             assert "dual_offer_active" not in info["url"] and "DUAL" not in text, "seller carryback only: no dual offer"
         lp.close()
     b.close()

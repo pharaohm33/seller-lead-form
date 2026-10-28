@@ -56,7 +56,9 @@ const SCR = {
   LOGIC_VERSION: 1, LOG_KEY: "scrHoldLog", LOG_MAX: 300,
   // New development (land): dual offer = cash, or the full asking price paid at sale/refinance within 24 months with $0 at closing.
   DEV_MONTHS: 24,
-  OFFER_DAYS_FROM_TOMORROW: 14       // the seller has two weeks, counted from the day after today
+  OFFER_DAYS_FROM_TOMORROW: 14,      // the seller has two weeks, counted from the day after today
+  OFFER_DAYS_LARGE_FROM_TOMORROW: 30, // 5+ units, or commercial over $1M: thirty days from the day after today
+  LARGE_COMMERCIAL_PRICE: 1000000
 };
 
 /* ---------- CSV ---------- */
@@ -476,9 +478,14 @@ function scrLogLines(p) {
 }
 
 /* ---------- links + notes ---------- */
+// Days the seller has to accept, counted from TOMORROW (so today + days + 1): two weeks for single family and small multifamily; thirty days for 5+ units or commercial over $1M
+function scrOfferDays(units, propType, price) {
+  const large = Number(units) >= 5 || (String(propType) === "commercial" && Number(price) > SCR.LARGE_COMMERCIAL_PRICE);
+  return large ? SCR.OFFER_DAYS_LARGE_FROM_TOMORROW : SCR.OFFER_DAYS_FROM_TOMORROW;
+}
+
 function scrLoiLink(d, p, extra) {
   const dualMode = SCR.cfg.offerMode === "dual";
-  const t = scrLocalDate(SCR.OFFER_DAYS_FROM_TOMORROW + 1);   // the acceptance deadline: two weeks from TOMORROW (so today + 15), by the local calendar (toISOString is UTC, which is already tomorrow on a Phoenix evening)
   const q = {
     address: d.address, units: 1, prop_type: p.land ? "land" : "residential", sqft: d.sqft || "", appreciation: 3, noi_growth: 2,
     purchase_price: p.land && !p.dev ? p.cashOffer : p.carryOffer, cash_at_closing: p.land && !p.dev ? p.cashOffer : p.carryDown,
@@ -488,7 +495,7 @@ function scrLoiLink(d, p, extra) {
     esc1_pct: 2, esc2_pct: 1.5, acq_pct: 50, broker_pct: 0, taf_pct: 2.5, park_escrow: "N", exit_type: "sale", exit_sale_costs: 6,
     exit_refi_ltv: 75, exit_refi_rate: 7.5, exit_dscr_req: 1.25, exit_amort: 30, exit_refi_costs: 2.5, exit_refi_fees: 15000,
     exit_reserve_mo: p.months, ac_phone: "520 633 6437", ac_email1: "SuedeBuffaloOfficial@gmail.com", buyer_company: "Suede Buffalo LLC",
-    offer_expiry: t, loi_agent_fee: 3, loi_agent_fee_type: "pct", closing_cost_party: "split", appraisal_contingency: "on", cash_financing: "hard_money_appraisal",
+    offer_expiry: "", loi_agent_fee: 3, loi_agent_fee_type: "pct", closing_cost_party: "split", appraisal_contingency: "on", cash_financing: "hard_money_appraisal",
     acq_fee_basis: "at_closing", seller_security_type: "equity", mode: p.noteRate ? "interest_only" : "principal_only", loan_type: "hard_money", static_cf: 1
   };
   if (p.hold) {          // Buy & hold: rehab 0, a DSCR senior loan and the generator's "Admin Template" terms (not the cash template the flips use)
@@ -499,6 +506,7 @@ function scrLoiLink(d, p, extra) {
   if (p.land && !p.dev) q.no_sc = 1; else if (dualMode || p.dev) q.dual_offer_active = 1;
   q.autogen = p.land && !p.dev ? 1 : (dualMode || p.dev ? 1 : "loi");     // carryback only: the single seller-carry LOI, no all-cash option                       // the LOI generator builds the LOI text itself on load
   if (extra) Object.assign(q, extra);
+  q.offer_expiry = scrLocalDate(scrOfferDays(q.units, q.prop_type, d.price || q.purchase_price) + 1);   // by the local calendar (toISOString is UTC, which is already tomorrow on a Phoenix evening)
   const u = new URLSearchParams();
   Object.entries(q).forEach(([k, v]) => { if (v !== "" && v !== null && v !== undefined) u.set(k, v); });
   return SCR.LOI_URL + "?" + u.toString();
