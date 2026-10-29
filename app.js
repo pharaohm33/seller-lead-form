@@ -215,10 +215,14 @@ function parseListingText(text) {
   const US_STATE_ABBR_MAP = {alabama:"AL",alaska:"AK",arizona:"AZ",arkansas:"AR",california:"CA",colorado:"CO",connecticut:"CT",delaware:"DE",florida:"FL",georgia:"GA",hawaii:"HI",idaho:"ID",illinois:"IL",indiana:"IN",iowa:"IA",kansas:"KS",kentucky:"KY",louisiana:"LA",maine:"ME",maryland:"MD",massachusetts:"MA",michigan:"MI",minnesota:"MN",mississippi:"MS",missouri:"MO",montana:"MT",nebraska:"NE",nevada:"NV","new hampshire":"NH","new jersey":"NJ","new mexico":"NM","new york":"NY","north carolina":"NC","north dakota":"ND",ohio:"OH",oklahoma:"OK",oregon:"OR",pennsylvania:"PA","rhode island":"RI","south carolina":"SC","south dakota":"SD",tennessee:"TN",texas:"TX",utah:"UT",vermont:"VT",virginia:"VA",washington:"WA","west virginia":"WV",wisconsin:"WI",wyoming:"WY"};
   // Negative lookbehind (?<![0-9,]) stops the regex from latching onto trailing digits of a price
   // (e.g. "000" from "$475,000") as a house number. Max 6 digits covers all real addresses.
-  const addrM = clean.match(/(?<![0-9,])(\d{1,6}\s+[A-Za-z0-9 .#'-]+(?:St|Ave|Rd|Dr|Blvd|Boulevard|Ln|Way|Ct|Pl|Cir|Hwy|Pkwy|Trail|Terrace|Loop|Pass|Run|Path|Trl)[.,]?\s+[A-Za-z ]+,\s+(?:[A-Z]{2}|[A-Za-z ]+)\s+(\d{5}))/i);
+  const addrStd = clean.match(/(?<![0-9,])(\d{1,6}\s+[A-Za-z0-9 .#'-]+(?:St|Ave|Rd|Dr|Blvd|Boulevard|Ln|Way|Ct|Pl|Cir|Hwy|Pkwy|Trail|Terrace|Loop|Pass|Run|Path|Trl)[.,]?\s+[A-Za-z ]+,\s+(?:[A-Z]{2}|[A-Za-z ]+)\s+(\d{5}))/i);
+  // Many Tucson streets end in no suffix word at all ("5640 E Calle Aurora", "3297 W Avenida Manana", "6892 E Via Rancho Rosario"), so the suffix pattern above skips the subject and
+  // lands on a nearby home further down the page. This one only needs "number words, City, ST zip"; whichever address comes first in the text is the subject's.
+  const addrAny = clean.match(/(?<![0-9,])(\d{1,6}\s+[A-Za-z0-9 .#'-]+?,\s+[A-Za-z ]+,\s+(?:[A-Z]{2}|[A-Za-z ]+)\s+(\d{5}))/);
+  const addrM = addrAny && (!addrStd || addrAny.index < addrStd.index) ? addrAny : addrStd;
   if (addrM) {
     const parts = addrM[1].split(",").map(s => s.trim());
-    r.street = (parts[0] || "").replace(/^.*\b(?:sq\.?\s*ft\.?|sqft)\s+(?=\d)/i, "");   // "828 sq ft 3720 E Monte Vista Dr": the house number is the one after the sq ft
+    r.street = (parts[0] || "").replace(/^.*\b(?:sq\.?\s*ft\.?|sqft|ba|baths?|bd|beds?)\s+(?=\d)/i, "");   // "828 sq ft 3720 E Monte Vista Dr": the house number is the one after the sq ft
     if (parts[1]) {
       const seg = parts[1].trim();
       const abbrM = seg.match(/^(.*?)\s+([A-Z]{2})$/);

@@ -4,7 +4,8 @@ from playwright.sync_api import sync_playwright
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CASES = [("redfin_5211_e_20th.txt", {"beds": "3", "baths": "2", "sqft": "1798", "street": "5211 E 20th St", "price": "294000", "assetType": "Residential Property (1-4 units)"}),
-         ("redfin_3021_w_vande_loo.txt", {"beds": "3", "baths": "2", "sqft": "1496", "street": "3021 W Vande Loo St", "price": "325000", "assetType": "Residential Property (1-4 units)"})]
+         ("redfin_3021_w_vande_loo.txt", {"beds": "3", "baths": "2", "sqft": "1496", "street": "3021 W Vande Loo St", "price": "325000", "assetType": "Residential Property (1-4 units)"}),
+         ("redfin_5640_calle_aurora.txt", {"beds": "4", "baths": "2", "sqft": "1760", "street": "5640 E Calle Aurora", "price": "329000", "zip": "85711", "city": "Tucson"})]
 class Q(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *a): pass
 srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Q, directory=ROOT)); threading.Thread(target=srv.serve_forever, daemon=True).start()
