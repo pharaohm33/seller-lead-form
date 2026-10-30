@@ -37,7 +37,7 @@ const SCR = {
   HOLD: { LTV_START: 0.75, LTV_MIN: 0.30, LTV_STEP: 0.01, DSCR_RATE: 8, DSCR_AMORT_YEARS: 30, DSCR_MIN: 1.25, DOWN_START: 0.50, DOWN_MIN: 0.10, DOWN_STEP: 0.025,
           BALLOON_MIN_YEARS: 5, BALLOON_MAX_YEARS: 15, NOTE_RATE_IO: 0.03, PRICE_BUMP: 0.10, NOI_GROWTH: 0.02,
           RESERVE_MIN_MONTHS: 3, RESERVE_TARGET_MONTHS: 6, WHOLESALE_MIN: 25000, WHOLESALE_PCT: 0.03, MIN_PROFIT_PCT_OF_PRICE: 0.10, APPRAISAL_TOLERANCE: 0 },
-  GEN: { esc1: 0.02, esc2: 0.015, pts: 0.02, agent: 0.03, acq: 0.50, taf: 0.025, sellerClosingShare: 0.5 },
+  GEN: { esc1: 0.02, esc2: 0.015, pts: 0.02, agent: 0,   /* no realtor commission paid at closing */ acq: 0.50, taf: 0.025, sellerClosingShare: 0.5 },
   // Full rehab / gut: cash back to the buyer at closing = the full holding cost (24 months of hard money
   // interest) + the greater of $30,000 or 6% of ARV, so there is room for the assignment fee and extra cash
   // for the buyer. Seller cash at closing is whatever is left of the loan after that and closing costs.
@@ -495,14 +495,16 @@ function scrLoiLink(d, p, extra) {
     esc1_pct: 2, esc2_pct: 1.5, acq_pct: 50, broker_pct: 0, taf_pct: 2.5, park_escrow: "N", exit_type: "sale", exit_sale_costs: 6,
     exit_refi_ltv: 75, exit_refi_rate: 7.5, exit_dscr_req: 1.25, exit_amort: 30, exit_refi_costs: 2.5, exit_refi_fees: 15000,
     exit_reserve_mo: p.months, ac_phone: "520 633 6437", ac_email1: "SuedeBuffaloOfficial@gmail.com", buyer_company: "Suede Buffalo LLC",
-    offer_expiry: "", loi_agent_fee: 3, loi_agent_fee_type: "pct", closing_cost_party: "split", appraisal_contingency: "on", cash_financing: "hard_money_appraisal",
+    offer_expiry: "", loi_agent_fee: "", loi_agent_fee_type: "pct", closing_cost_party: "split", appraisal_contingency: "on", cash_financing: "hard_money_appraisal",
     acq_fee_basis: "at_closing", seller_security_type: "equity", mode: p.noteRate ? "interest_only" : "principal_only", loan_type: "hard_money", static_cf: 1
   };
   if (p.hold) {          // Buy & hold: rehab 0, a DSCR senior loan and the generator's "Admin Template" terms (not the cash template the flips use)
-    Object.assign(q, { loan_type: "dscr", rehab: 0, sr_rate: SCR.HOLD.DSCR_RATE, sr_ltv: Math.round(p.ltv * 1000) / 10, sr_amort: SCR.HOLD.DSCR_AMORT_YEARS, sr_term: 360, sr_points: 2, sr_dscr: 1.25, acq_pct: 6, esc1_pct: 2, esc2_pct: 1.5, taf_pct: 2.5,
+    Object.assign(q, { loan_type: "dscr", rehab: 0, sr_rate: SCR.HOLD.DSCR_RATE, sr_ltv: Math.round(p.ltv * 1000) / 10, sr_amort: SCR.HOLD.DSCR_AMORT_YEARS, sr_term: 360, sr_points: 2, sr_dscr: 1.25, acq_pct: 50, esc1_pct: 2, esc2_pct: 1.5, taf_pct: 2.5,
       exit_reserve_mo: 6, ac_name: "Suede Buffalo LLC", ac_email1: "suedebuffalofficial@gmail.com", ac_email2: "montanoemmanuel@gmail.com", buyer_company: "Don Ava Capital LLC",
       res_rent: Math.round(p.rentLtr || 0) || "" });
   }
+  // A principal-only note whose monthly payment would be under $100 is not worth the seller's bookkeeping: no payments, the whole balance comes due at the balloon (Deferred-To-Exit).
+  if (!p.land && !p.noteRate && (p.monthlyPrincipal || 0) < 100) { q.mode = "deferred_exit"; q.monthly_principal = 0; }
   if (p.land && !p.dev) q.no_sc = 1; else if (dualMode || p.dev) q.dual_offer_active = 1;
   q.autogen = p.land && !p.dev ? 1 : (dualMode || p.dev ? 1 : "loi");     // carryback only: the single seller-carry LOI, no all-cash option                       // the LOI generator builds the LOI text itself on load
   if (extra) Object.assign(q, extra);
