@@ -49,5 +49,14 @@ with sync_playwright() as p:
     check("the 15% counter-raise is reported (not required)", isinstance(ltr["ceilOk"], bool) and isinstance(mf["ceilOk"], bool))
     flip = run(600000, 900000, 0, 0, 0, None, "flip")
     check("fix & flip over $450,000 is untouched", not any("cash offer" in w or "cash flow" in w or "appraisal" in w for w in flip["why"]), flip["why"])
+    SALE = """([price, arv, ltr, req]) => { SCR.HOLD.SALE_EXIT_REQUIRED = req; SCR.cfg.minDom = 0; SCR.cfg.asset = 'sf'; SCR.cfg.strategy = 'hold';
+      const d = { address: '1 A St, Tucson, AZ 85701', street: '1 A St', price, sqft: 1500, dom: 300 }; const f = { pwEquityPct: 100, arvLow: arv, arvHigh: arv, rentLtr: ltr, rentStr: 0, rehabLow: 20000, rehabHigh: 30000, tier: 'moderate' };
+      const p = scrPrice(d, f), x = (p.holdPlan || {}).saleExit || {}; SCR.HOLD.SALE_EXIT_REQUIRED = true; return { q: p.qualifies, years: p.months / 12, ltv: p.ltv, down: p.carryDown / p.carryOffer, surplus: x.surplus, log: p.holdLog[0] }; }"""
+    strongRent = [330000, 340000, 4500]
+    off, on = pg.evaluate(SALE, strongRent + [False]), pg.evaluate(SALE, strongRent + [True])
+    check("without the safeguard a strong-rent deal can leave the sale exit short (the problem it fixes)", off["surplus"] < 0, off["surplus"])
+    check("Sale Exit - CF pocketed (appreciation) is above 0 at the balloon: the sale off appreciation alone clears the DSCR loan and the seller note", on["q"] and on["surplus"] > 0 and on["log"]["saleOk"] is True, on["surplus"])
+    check("to get there the LTV comes down and/or the balloon gets longer / the seller keeps more cash up front", on["ltv"] < off["ltv"] or on["years"] > off["years"] or on["down"] > off["down"], (on, off))
+    check("every qualifying deal in a sweep has a sale exit above 0", all((lambda r: (not r["q"]) or r["surplus"] > 0)(pg.evaluate(SALE, [pr, ar, rent, True])) for pr, ar, rent in [(330000, 360000, 2500), (330000, 401500, 2308), (300000, 318000, 1800), (320000, 330000, 2600), (250000, 255000, 3000), (400000, 405000, 5000), (330000, 345000, 4000)]))
     check("no script errors", not errs, errs[:2]); b.close()
 sys.exit(1 if bad else 0)

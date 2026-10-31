@@ -35,7 +35,7 @@ const SCR = {
   // lowers the LTV (and, only when the loan cannot fund the cash at closing, the seller's cash) until the DSCR, the cash flow floor, the buyer's reserves and the buyer profit all work,
   // and takes the soonest balloon (5 to 15 years) that does. Single family: proforma rent, long-term or short-term, whichever cash flows more. Multifamily / commercial: the in-place NOI.
   HOLD: { LTV_START: 0.75, LTV_MIN: 0.30, LTV_STEP: 0.01, DSCR_RATE: 8, DSCR_AMORT_YEARS: 30, DSCR_MIN: 1.25, DOWN_START: 0.50, DOWN_MIN: 0.10, DOWN_STEP: 0.025,
-          BALLOON_MIN_YEARS: 1, BALLOON_MAX_YEARS: 15, DOWN_TARGET: 0.35, DOWN_TRADE_YEARS: 2, ACQ_SPLIT: 0.50, NOTE_RATE_IO: 0.03, PRICE_BUMP: 0.10, NOI_GROWTH: 0.02,
+          BALLOON_MIN_YEARS: 1, BALLOON_MAX_YEARS: 15, SALE_EXIT_REQUIRED: true, DOWN_TARGET: 0.35, DOWN_TRADE_YEARS: 2, ACQ_SPLIT: 0.50, NOTE_RATE_IO: 0.03, PRICE_BUMP: 0.10, NOI_GROWTH: 0.02,
           RESERVE_MIN_MONTHS: 3, RESERVE_TARGET_MONTHS: 6, WHOLESALE_MIN: 25000, WHOLESALE_PCT: 0.03, MIN_PROFIT_PCT_OF_PRICE: 0.10, MIN_PROFIT_PCT_SHORT: 0.05, SHORT_BALLOON_UNDER_YEARS: 5, APPRAISAL_TOLERANCE: 0 },
   GEN: { esc1: 0.02, esc2: 0.015, pts: 0.02, agent: 0,   /* no realtor commission paid at closing */ acq: 0.50, taf: 0.025, sellerClosingShare: 0.5 },
   // Full rehab / gut: cash back to the buyer at closing = the full holding cost (24 months of hard money
@@ -343,11 +343,12 @@ function scrPrice(d, f) {
         const W = Math.max(0, avail) * H.ACQ_SPLIT / (1 + H.ACQ_SPLIT * t), B = avail - W * (1 + t);
         const loanBal = scrLoanBalance(L, H.DSCR_RATE, H.DSCR_AMORT_YEARS, T * 12), sale = V * Math.pow(1 + SCR.APPRECIATION, T) * (1 - SCR.SALE_COSTS);
         let cumNoi = 0; for (let y = 0; y < T; y++) cumNoi += noi * 12 * Math.pow(1 + H.NOI_GROWTH, y);
+        const saleSurplus = sale - loanBal - noteBal;       // the LOI generator's "Sale Exit - CF pocketed (appreciation)": the sale at the balloon pays the DSCR loan and the seller note, no cash flow counted ("Sale Viable (no CF)")
         const profit = sale - loanBal - noteBal + (rentKnown ? cumNoi - M * 12 * T : 0), minProfit = (T < H.SHORT_BALLOON_UNDER_YEARS ? H.MIN_PROFIT_PCT_SHORT : H.MIN_PROFIT_PCT_OF_PRICE) * P;     // a balloon under 5 years is worth a thinner buyer profit (the equity from renting a rent-ready home covers the payoff)
-        return { P, structure, dpct, ltv, T, dn, Nn, L, pmt, notePmt, nRate, noteBal, loanBal, cf, reqCf, dscr, closing, avail, F, W, B, M, Rmin, Rtgt, profit, minProfit,
-          cfOk: !rentKnown || cf >= reqCf - 0.5, dscrOk: !rentKnown || dscr >= H.DSCR_MIN - 1e-9, cashOk: W >= F - 0.5 && B >= Rmin - 0.5, profitOk: profit >= minProfit };
+        return { P, structure, dpct, ltv, T, dn, Nn, L, pmt, notePmt, nRate, noteBal, loanBal, cf, reqCf, dscr, closing, avail, F, W, B, M, Rmin, Rtgt, profit, minProfit, sale, saleSurplus,
+          saleOk: !H.SALE_EXIT_REQUIRED || saleSurplus > 0, cfOk: !rentKnown || cf >= reqCf - 0.5, dscrOk: !rentKnown || dscr >= H.DSCR_MIN - 1e-9, cashOk: W >= F - 0.5 && B >= Rmin - 0.5, profitOk: profit >= minProfit };
       };
-      const good = e => e.cfOk && e.dscrOk && e.cashOk && e.profitOk;
+      const good = e => e.cfOk && e.dscrOk && e.cashOk && e.profitOk && e.saleOk;       // saleOk: selling off appreciation alone must clear both debts; the LTV comes down until it does
       // The balloon is checked year by year, soonest first (1, 2, 3 ... 15): for each year the seller's cash starts at 50% and comes down only as far as it must, and the LTV comes down as little as possible.
       // The seller's cash should ideally stay at 35% or more: the soonest balloon that works at 35%+ wins, unless a balloon more than DOWN_TRADE_YEARS shorter works with less down.
       const soonest = (P, structure, dpHi, dpLo) => {
@@ -364,11 +365,11 @@ function scrPrice(d, f) {
       };
       // Why nothing works: which rule cannot be met anywhere on the grid.
       const diagnose = (P, structure) => {
-        let anyCf = false, anyCash = false, anyProfit = false, anyCfCash = false;
+        let anyCf = false, anyCash = false, anyProfit = false, anyCfCash = false, anySale = false, anyCfCashSale = false;
         for (let dp = H.DOWN_START; dp >= H.DOWN_MIN - 1e-9; dp -= H.DOWN_STEP)
           for (let lt = H.LTV_START; lt >= H.LTV_MIN - 1e-9; lt -= H.LTV_STEP)
-            for (let T = H.BALLOON_MIN_YEARS; T <= H.BALLOON_MAX_YEARS; T += 5) { const e = ev(P, structure, dp, lt, T); anyCf = anyCf || (e.cfOk && e.dscrOk); anyCash = anyCash || e.cashOk; anyProfit = anyProfit || e.profitOk; anyCfCash = anyCfCash || (e.cfOk && e.dscrOk && e.cashOk); }
-        return { anyCf, anyCash, anyProfit, anyCfCash };
+            for (let T = H.BALLOON_MIN_YEARS; T <= H.BALLOON_MAX_YEARS; T += 5) { const e = ev(P, structure, dp, lt, T); anyCf = anyCf || (e.cfOk && e.dscrOk); anyCash = anyCash || e.cashOk; anyProfit = anyProfit || e.profitOk; anyCfCash = anyCfCash || (e.cfOk && e.dscrOk && e.cashOk); anySale = anySale || e.saleOk; anyCfCashSale = anyCfCashSale || (e.cfOk && e.dscrOk && e.cashOk && e.saleOk); }
+        return { anyCf, anyCash, anyProfit, anyCfCash, anySale, anyCfCashSale };
       };
       const appraisalOk = !list || V >= list * (1 - H.APPRAISAL_TOLERANCE);       // the lender sizes the loan on the appraised value: it has to support the asking price
       const stepP = Math.max(1000, Math.round(V * 0.005 / 1000) * 1000), start = list ? (SCR.HOLD_ASKING_FIRST ? list : Math.min(list, carryRaw)) : carryRaw, floorP = SCR.MIN_CARRY_PCT_OF_ARV * V;
@@ -390,17 +391,22 @@ function scrPrice(d, f) {
         if (!dg.anyCf) holdWhy.push(`no cash flow: NOI ${scrMoney(noi)}/mo cannot cover the DSCR loan at ${H.DSCR_MIN} DSCR and the seller note down to ${H.LTV_MIN * 100}% LTV (minimum ${scrMoney(need(start))}/mo)`);
         else if (!dg.anyCash) holdWhy.push(`the DSCR loan cannot fund the seller's cash, the closing costs, ${H.RESERVE_MIN_MONTHS} months of buyer reserves and your ${scrMoney(F)} fee, even at ${H.DOWN_MIN * 100}% down to the seller`);
         else if (!dg.anyCfCash) holdWhy.push(`the loan that cash flows is too small to fund the cash at closing (seller's cash, costs, ${H.RESERVE_MIN_MONTHS} months of reserves and your fee)`);
+        else if (!dg.anySale) holdWhy.push(`selling off appreciation alone (${SCR.APPRECIATION * 100}% a year, ${SCR.SALE_COSTS * 100}% costs) never covers the DSCR loan and the seller note at any balloon from ${H.BALLOON_MIN_YEARS} to ${H.BALLOON_MAX_YEARS} years, even at ${H.LTV_MIN * 100}% LTV`);
+        else if (!dg.anyCfCashSale) holdWhy.push(`a loan small enough for the sale exit to clear both debts is too small to cash flow and fund the cash at closing`);
         else holdWhy.push(`buyer profit is under the ${H.MIN_PROFIT_PCT_OF_PRICE * 100}% minimum at every balloon from ${H.BALLOON_MIN_YEARS} to ${H.BALLOON_MAX_YEARS} years`);
       }
       const e = shown, levers = [];
       if (found) {
         if (e.dpct < H.DOWN_START - 1e-9) levers.push(`seller cash at closing ${H.DOWN_START * 100}% -> ${(e.dpct * 100).toFixed(1)}% because the loan could not fund the cash at closing (appraisal contingency at the asking price)`);
-        if (e.ltv < H.LTV_START - 1e-9) levers.push(`LTV ${H.LTV_START * 100}% -> ${(e.ltv * 100).toFixed(0)}% for cash flow and the ${H.DSCR_MIN} DSCR`);
+        if (e.ltv < H.LTV_START - 1e-9) {
+          const up = Math.round((e.ltv + H.LTV_STEP) * 100) / 100, x = up <= H.LTV_START + 1e-9 ? ev(e.P, e.structure, e.dpct, up, e.T) : null, saleBinds = !!x && x.cfOk && x.dscrOk && x.cashOk && x.profitOk && !x.saleOk;
+          levers.push(`LTV ${H.LTV_START * 100}% -> ${(e.ltv * 100).toFixed(0)}% for cash flow, the ${H.DSCR_MIN} DSCR${saleBinds ? " and so that selling off appreciation clears the loan and the seller note (Sale Viable, no cash flow)" : ""}`);
+        }
         levers.push(`balloon ${e.T} year${e.T === 1 ? "" : "s"} (soonest that works, checked year by year)`);
         if (e.dpct < H.DOWN_TARGET - 1e-9) levers.push(`seller cash is ${(e.dpct * 100).toFixed(1)}%, under the ${H.DOWN_TARGET * 100}% target: no balloon within ${H.DOWN_TRADE_YEARS} years of this one works at ${H.DOWN_TARGET * 100}%+`);
       }
       holdLog.push({ s: structure, term: e.T * 12, carry: e.P, down: e.dn, downPct: +(e.dpct).toFixed(3), ltv: +e.ltv.toFixed(2), cash: scrRound(SCR.HOLD_CASH_PCT * e.P), cashCapped: false, hmInt: Math.round(e.pmt), pay: Math.round(e.notePmt), noi: Math.round(noi),
-        cf: rentKnown ? Math.round(e.cf) : null, need: rentKnown ? Math.round(e.reqCf) : null, cfOk: rentKnown ? e.cfOk : null, profit: Math.round(e.profit), minProfit: Math.round(e.minProfit), ok: !!found, ceilOk: !!ceilFound,
+        cf: rentKnown ? Math.round(e.cf) : null, need: rentKnown ? Math.round(e.reqCf) : null, cfOk: rentKnown ? e.cfOk : null, profit: Math.round(e.profit), minProfit: Math.round(e.minProfit), saleSurplus: Math.round(e.saleSurplus), saleOk: e.saleOk, ok: !!found, ceilOk: !!ceilFound,
         carryNote: tries > 0 ? `price stepped down ${tries} time(s)` : "", notes: levers.concat(holdWhy) });
       const cashRaw = scrRound(SCR.HOLD_CASH_PCT * e.P), cashCapped = mao > 0 && cashRaw > scrRound(mao), cashO = cashCapped ? scrRound(mao) : cashRaw;
       const cE = ceilFound;
@@ -411,6 +417,7 @@ function scrPrice(d, f) {
       holdPlan = { structure, feasible: !!found, rentKnown, noi, basis, cashflow: e.cf, cfNeed: e.reqCf, cfOk: rentKnown ? (e.cfOk && e.dscrOk) : null, dscr: e.dscr, dscrMin: H.DSCR_MIN,
         ioPmt: e.notePmt, hmInt: e.pmt, seniorPmt: e.pmt, seniorLoan: e.L, ltv: e.ltv, balloonYears: e.T, levers, ioCashflow: structure === "io" ? e.cf : null, cashCapped: false, appraisalOk,
         cashAtClose: { avail: e.avail, wholesaler: e.W, buyer: e.B, fee: e.F, buyerMonths: e.M ? e.B / e.M : 0, minMonths: H.RESERVE_MIN_MONTHS, targetMonths: H.RESERVE_TARGET_MONTHS, closing: e.closing },
+        saleExit: { years: e.T, value: V * Math.pow(1 + SCR.APPRECIATION, e.T), net: e.sale, loanBal: e.loanBal, noteBal: e.noteBal, surplus: e.saleSurplus },
         firstTry: !!found && structure === "io" && !levers.length };
     }
     months = pick.months;
@@ -615,6 +622,7 @@ function scrNotes(d, f, p, loi, resume) {
   if (p.profit) L.push(`- Buyer profit at the ${p.profit.years}-year balloon exit (sale at 3% appreciation less 6% costs, less carry, loan and interest): ${scrMoney(p.profit.sale)}; minimum is the greater of ${scrMoney(SCR.MIN_PROFIT_PER_YEAR * p.profit.years)} or ${SCR.MIN_PROFIT_PCT_OF_PRICE * 100}% of price = ${scrMoney(p.profit.min)} -> ${p.profit.ok ? "OK" : "BELOW MINIMUM"}. With cash back at closing: ${scrMoney(p.profit.withCashBack)}.${p.priceNote ? " " + p.priceNote + "." : ""}`);
   if (p.ceiling) L.push(`- Room to go up (${SCR.NEGOTIATION_ROOM * 100}%): carry to ${scrMoney(p.ceiling.carry)} with ${scrMoney(p.ceiling.down)} at closing, cash offer to ${scrMoney(p.ceiling.cash)}; buyer profit there ${scrMoney(p.ceiling.profit)} (${p.ceiling.ok ? "still meets the minimum" : "BELOW the minimum"}). Seller cash at closing floor: ${SCR.MIN_SELLER_CASH_PCT * 100}% of the carry price.`);
   if (p.modelCarry) L.push(`- Estimated (check in the generator): carry offer -> seller nets ${scrMoney(p.modelCarry.sellerNet)} at closing after their half of closing costs, buyer cash back ${scrMoney(p.modelCarry.cashBack)}. Cash offer -> seller nets ${scrMoney(p.modelCash.sellerNet)}, buyer ${p.modelCash.cashBack >= 0 ? "cash back " + scrMoney(p.modelCash.cashBack) : "brings " + scrMoney(-p.modelCash.cashBack)}.`);
+  if (p.holdPlan && p.holdPlan.saleExit) { const x = p.holdPlan.saleExit; L.push(`- Sale exit at year ${x.years}, off appreciation alone (${SCR.APPRECIATION * 100}% a year, ${SCR.SALE_COSTS * 100}% sale costs, no cash flow counted): value ${scrMoney(x.value)} -> ${scrMoney(x.net)} after costs, less the DSCR loan balance ${scrMoney(x.loanBal)} and the seller note ${scrMoney(x.noteBal)} = ${x.surplus >= 0 ? "+" : "-"}${scrMoney(Math.abs(x.surplus))} ${x.surplus > 0 ? "(Sale Viable, no CF)" : "(NOT viable)"}`); }
   if (!land && p.hold) L.push(`- DSCR loan: ${scrMoney(p.hmLoan)} at ${(p.ltv * 100).toFixed(1)}% LTV, ${SCR.HOLD.DSCR_RATE}% / ${SCR.HOLD.DSCR_AMORT_YEARS}-year amortization -> ${scrMoney(p.hmMonthly)}/mo; buyer cash at closing (reserves) ${scrMoney(p.reserves)}; balloon ${p.months / 12} years`);
   else if (!land) L.push(`- Hard money: ${scrMoney(p.hmLoan)} at ${(p.ltv * 100).toFixed(1)}% LTV, ${SCR.HM_RATE}% -> ${scrMoney(p.hmMonthly)}/mo interest; reserves for ${p.months} months: ${scrMoney(p.reserves)}`);
   const ei = p.equityInfo;
