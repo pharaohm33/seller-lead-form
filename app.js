@@ -6077,7 +6077,7 @@ function preLoiDetailHtml(e) {
   const skip = { preLoiNotes: 1, holdLog: 1, loiUrl: 1 };
   const answerPairs = Object.keys(a).filter(k => !skip[k] && k.charAt(0) !== "_" && a[k] !== "" && a[k] !== null && a[k] !== undefined).sort().map(k => [human(k), a[k]]);
   const sec = (title, body, open) => `<details ${open ? "open" : ""} style="margin-top:10px;"><summary style="cursor:pointer;font-weight:600;">${esc(title)}</summary><div style="margin-top:8px;">${body}</div></details>`;
-  const facts = [["Status", (PRELOI_BADGE[e.status] || [e.status])[0]], ["Updated", formatDate(e.updatedAt)], ["Property", [e.street, e.city, e.state, e.zip].filter(Boolean).join(", ")], ["Asking", e.askingPrice],
+  const facts = [["Status", e.status ? (PRELOI_BADGE[e.status] || [e.status])[0] : ""], ["Updated", e.updatedAt ? formatDate(e.updatedAt) : ""], ["Property", [e.street, e.city, e.state, e.zip].filter(Boolean).join(", ")], ["Asking", e.askingPrice],
     ["Offer strategy", a.preLoiStrategy], ["ARV", a.arv], ["Rehab", a.rehabEstimate], ["Seller / realtor", [e.sellerContactName, e.sellerContactPhone, e.sellerContactEmail].filter(Boolean).join(" · ")]].filter(([, v]) => v);
   return `<div class="card" style="text-align:left;margin:6px 0;">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;"><h3 class="step-title" style="font-size:17px;margin:0;">Full deal details</h3>
@@ -6232,8 +6232,16 @@ async function openSubmission(id) {
       <button type="button" class="btn primary" id="sub-save">Save</button>
       ${s.loiLink ? `<button type="button" class="btn secondary" id="sub-open-loi">Open the LOI generator</button>` : ""}
       <button type="button" class="btn secondary" id="sub-copy">Copy all answers (JSON)</button>
-    </div><p id="sub-msg" class="small-muted"></p></div>`;
+    </div><p id="sub-msg" class="small-muted"></p></div>
+    <div id="sub-full" style="margin-top:14px;"></div>`;
   box.querySelector("#sub-close").onclick = () => { box.innerHTML = ""; };
+  // The same full deal view as the Auto Pre-LOI list (notes, every LOI generator variable, solver attempts, all answers), built from this submission's saved answers.
+  const full = box.querySelector("#sub-full"), fullLoi = a.loiUrl || s.loiLink || "";
+  full.innerHTML = preLoiDetailHtml({ street: s.street, city: s.city, state: s.state, zip: s.zip, askingPrice: s.askingPrice, sellerContactName: s.sellerContactName, sellerContactPhone: s.sellerContactPhone,
+    sellerContactEmail: s.sellerContactEmail, answers: Object.assign({}, a, fullLoi ? { loiUrl: fullLoi } : {}) });
+  const fo = full.querySelector("[data-pd-loi]"); if (fo) fo.onclick = () => window.open(fullLoi, "_blank", "noopener");
+  full.querySelector("[data-pd-close]").onclick = () => { full.innerHTML = ""; };
+  full.querySelector("[data-pd-copy]").onclick = () => navigator.clipboard.writeText(JSON.stringify(s, null, 2)).then(() => { full.querySelector("[data-pd-msg]").textContent = "Copied."; });
   const openLoi = box.querySelector("#sub-open-loi"); if (openLoi) openLoi.onclick = () => window.open(s.loiLink, "_blank", "noopener");
   box.querySelector("#sub-copy").onclick = () => navigator.clipboard.writeText(JSON.stringify(a, null, 2)).then(() => { box.querySelector("#sub-msg").textContent = "Copied."; });
   box.querySelector("#sub-save").onclick = async () => {
