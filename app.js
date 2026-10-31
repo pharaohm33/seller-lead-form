@@ -6047,6 +6047,50 @@ const PRELOI_BADGE = {
   "Auto Pre-LOI LOI Sent": ["LOI sent", "#6d28d9"], "Auto Pre-LOI Deleted": ["Deleted", "#991b1b"]
 };
 
+// Names for the LOI generator link's parameters, so the Details view reads as a deal sheet. A parameter without a name here shows under its raw key.
+const PRELOI_LOI_LABELS = {
+  address: "Address", purchase_price: "Purchase price (seller carry)", cash_at_closing: "Cash to seller at closing", dual_cash_price: "All-cash price (dual offer)",
+  as_is_value: "As-is value", arv: "ARV", rehab: "Rehab", prop_type: "Property type", units: "Units", sqft: "Sq ft", res_rent: "Rent per month (long-term)", noi_direct: "NOI per year (direct)",
+  res_taxes: "Property taxes per year", res_insurance: "Insurance per year", res_vacancy: "Vacancy %", appreciation: "Appreciation %", noi_growth: "NOI growth %",
+  loan_type: "Senior loan type", sr_rate: "Senior rate %", sr_ltv: "Senior LTV %", sr_amort: "Senior amortization (years)", sr_term: "Senior term (months)", sr_points: "Senior points %", sr_dscr: "DSCR required",
+  hm_ltc: "Hard money LTC %", hm_arv_pct: "Hard money % of ARV", hm_rehab_pct: "Hard money rehab %", hm_rehab_months: "Hard money months",
+  mode: "Seller note mode", sc_rate: "Seller note rate %", sc_term: "Balloon (years)", monthly_principal: "Monthly principal to seller",
+  acq_pct: "Acq / Bird Dog Fee %", acq_fee_basis: "Acq fee basis", loi_agent_fee: "Realtor commission", loi_agent_fee_type: "Realtor commission type", broker_pct: "Broker %", taf_pct: "TAF %",
+  esc1_pct: "Escrow 1 %", esc2_pct: "Escrow 2 %", closing_cost_party: "Closing costs paid by", park_escrow: "Park escrow", seller_security_type: "Seller security",
+  exit_type: "Exit type", exit_sale_costs: "Exit sale costs %", exit_refi_ltv: "Exit refi LTV %", exit_refi_rate: "Exit refi rate %", exit_dscr_req: "Exit DSCR", exit_amort: "Exit amortization",
+  exit_refi_costs: "Exit refi costs %", exit_refi_fees: "Exit refi fees", exit_reserve_mo: "Buyer reserve (months)", offer_expiry: "Offer expires",
+  appraisal_contingency: "Appraisal contingency", cash_financing: "Cash financing", buyer_company: "Buyer", ac_name: "Contact name", ac_phone: "Contact phone", ac_email1: "Contact email 1", ac_email2: "Contact email 2"
+};
+
+// Everything saved on one Pre-LOI, laid out for checking the whole deal: the underwriting notes, each variable in the LOI generator link, the buy & hold solver's attempts
+// and every saved form answer.
+function preLoiDetailHtml(e) {
+  const a = e.answers || {}, esc = escapeHtml;
+  const human = k => k.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/_/g, " ").replace(/^./, c => c.toUpperCase());
+  const show = v => typeof v === "object" && v !== null ? JSON.stringify(v) : (typeof v === "number" && Math.abs(v) >= 1000 ? v.toLocaleString() : String(v));
+  const grid = pairs => pairs.length ? `<dl class="review-grid">${pairs.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd style="overflow-wrap:anywhere;">${esc(show(v))}</dd></div>`).join("")}</dl>` : `<p class="small-muted">Nothing saved.</p>`;
+  const loiUrl = a.loiUrl || (String(a.preLoiNotes || "").match(/LOI Generator[^\n]*?: (https:\/\/\S+)/) || [])[1] || "";
+  const params = [];
+  try { if (loiUrl) new URL(loiUrl).searchParams.forEach((v, k) => { if (v !== "") params.push([PRELOI_LOI_LABELS[k] ? `${PRELOI_LOI_LABELS[k]} (${k})` : k, v]); }); } catch (_) { /* a link that will not parse just shows no variables */ }
+  let hold = []; try { hold = a.holdLog ? JSON.parse(a.holdLog) : []; } catch (_) { hold = []; }
+  const holdKeys = []; hold.forEach(h => Object.keys(h).forEach(k => { if (holdKeys.indexOf(k) < 0) holdKeys.push(k); }));
+  const skip = { preLoiNotes: 1, holdLog: 1, loiUrl: 1 };
+  const answerPairs = Object.keys(a).filter(k => !skip[k] && k.charAt(0) !== "_" && a[k] !== "" && a[k] !== null && a[k] !== undefined).sort().map(k => [human(k), a[k]]);
+  const sec = (title, body, open) => `<details ${open ? "open" : ""} style="margin-top:10px;"><summary style="cursor:pointer;font-weight:600;">${esc(title)}</summary><div style="margin-top:8px;">${body}</div></details>`;
+  const facts = [["Status", (PRELOI_BADGE[e.status] || [e.status])[0]], ["Updated", formatDate(e.updatedAt)], ["Property", [e.street, e.city, e.state, e.zip].filter(Boolean).join(", ")], ["Asking", e.askingPrice],
+    ["Offer strategy", a.preLoiStrategy], ["ARV", a.arv], ["Rehab", a.rehabEstimate], ["Seller / realtor", [e.sellerContactName, e.sellerContactPhone, e.sellerContactEmail].filter(Boolean).join(" · ")]].filter(([, v]) => v);
+  return `<div class="card" style="text-align:left;margin:6px 0;">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;"><h3 class="step-title" style="font-size:17px;margin:0;">Full deal details</h3>
+      <span style="display:flex;gap:8px;flex-wrap:wrap;">${loiUrl ? `<button type="button" class="btn secondary" data-pd-loi>Open LOI</button>` : ""}<button type="button" class="btn secondary" data-pd-copy>Copy everything (JSON)</button><button type="button" class="link-btn" data-pd-close>Close</button></span></div>
+    ${grid(facts)}
+    ${sec("Underwriting notes (everything that led to the offer)", `<pre style="white-space:pre-wrap;user-select:text;margin:0;font-size:13px;">${esc(a.preLoiNotes || "No notes saved on this lead.")}</pre>`, true)}
+    ${sec(`LOI generator variables (${params.length})`, grid(params), true)}
+    ${hold.length ? sec(`Buy & hold solver attempts (${hold.length})`, `<div style="overflow-x:auto;"><table class="crm-table"><thead><tr>${holdKeys.map(k => `<th>${esc(k)}</th>`).join("")}</tr></thead><tbody>${hold.map(h =>
+      `<tr style="cursor:default">${holdKeys.map(k => `<td style="font-variant-numeric:tabular-nums;">${esc(Array.isArray(h[k]) ? h[k].join("; ") : h[k] === undefined || h[k] === null ? "" : show(h[k]))}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`, true) : ""}
+    ${sec(`All saved form answers (${answerPairs.length})`, grid(answerPairs), true)}
+    <p class="small-muted" data-pd-msg></p></div>`;
+}
+
 async function loadPreLoi() {
   const wrap = document.getElementById("preloi-entries");
   const showDeleted = document.getElementById("preloi-show-deleted").checked;
@@ -6064,6 +6108,7 @@ async function loadPreLoi() {
       <td>${escapeHtml(String(e.askingPrice || ""))}</td>
       <td>${escapeHtml(e.sellerContactName || "")}<br><span class="small-muted">${escapeHtml([e.sellerContactPhone, e.sellerContactEmail].filter(Boolean).join(" · "))}</span></td>
       <td style="white-space:nowrap">
+        <button type="button" class="btn secondary" data-pl-details="${id}" title="Every saved variable for this deal, untruncated">Details</button>
         ${gone ? `<button type="button" class="btn secondary" data-pl-restore="${id}">Restore</button>
                   <button type="button" class="link-btn" data-pl-purge="${id}">Delete forever</button>`
                : `<button type="button" class="btn secondary" data-pl-notes="${id}">Notes</button>
@@ -6075,6 +6120,20 @@ async function loadPreLoi() {
     }).join("")}
   </tbody></table><pre id="preloi-notes-box" class="small-muted" style="white-space:pre-wrap; margin-top:10px; user-select:text;" hidden></pre>`;
   const entry = async id => { const r = await api("adminGetPreLoiEntry", { token: sessionToken, crmId: id }); if (!r.ok) alert(r.error || "Couldn't open that lead."); return r.ok ? r.entry : null; };
+  wrap.querySelectorAll("[data-pl-details]").forEach(b => b.onclick = async () => {
+    const tr = b.closest("tr"), open = tr.nextElementSibling;
+    if (open && open.classList.contains("pl-detail-row")) { open.remove(); return; }         // second click closes it
+    wrap.querySelectorAll(".pl-detail-row").forEach(r => r.remove());
+    b.disabled = true; const e = await entry(b.dataset.plDetails); b.disabled = false; if (!e) return;
+    const row = document.createElement("tr"); row.className = "pl-detail-row"; row.style.cursor = "default";
+    row.innerHTML = `<td colspan="6">${preLoiDetailHtml(e)}</td>`;
+    tr.after(row);
+    const loiUrl = e.answers.loiUrl || (String(e.answers.preLoiNotes || "").match(/LOI Generator[^\n]*?: (https:\/\/\S+)/) || [])[1];
+    const o = row.querySelector("[data-pd-loi]"); if (o) o.onclick = () => window.open(loiUrl, "_blank", "noopener");
+    row.querySelector("[data-pd-close]").onclick = () => row.remove();
+    row.querySelector("[data-pd-copy]").onclick = () => navigator.clipboard.writeText(JSON.stringify(e, null, 2)).then(() => { row.querySelector("[data-pd-msg]").textContent = "Copied."; });
+    row.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  });
   wrap.querySelectorAll("[data-pl-notes]").forEach(b => b.onclick = async () => {
     const e = await entry(b.dataset.plNotes); if (!e) return;
     const box = document.getElementById("preloi-notes-box");
