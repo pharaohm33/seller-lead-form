@@ -525,6 +525,45 @@ function scrLoiLink(d, p, extra) {
   return SCR.LOI_URL + "?" + u.toString();
 }
 
+// How the rental income behind an offer was worked out, so the deal sheet (answers, notes, Details, the CRM row) says whether it was long-term rent, short-term rent, the listing's
+// in-place NOI, or none at all (a fix & flip sells, and land has no rent). The numbers also go in the regular form's own rent fields (monthly rent, expense ratio, NOI, STR revenue and NOI).
+function scrRentalIncome(p) {
+  const ltr = Number(p.rentLtr) || 0, str = Number(p.rentStr) || 0, ox = SCR.OPEX_LTR, os = SCR.OPEX_STR, m = n => scrMoney(Math.round(n));
+  const noiL = ltr * (1 - ox), noiS = str * (1 - os), h = p.holdPlan;
+  const entered = [ltr ? `long-term rent ${m(ltr)}/mo` : "", str ? `short-term rent ${m(str)}/mo` : ""].filter(Boolean).join(" and ");
+  const out = {
+    rentcastMonthlyRent: ltr ? String(Math.round(ltr)) : "", expenseRatio: ltr ? String(Math.round(ox * 100)) : "", residentialNOI: ltr ? String(Math.round(noiL * 12)) : "",
+    strAnnualRevenue: str ? String(Math.round(str * 12)) : "", strNOI: str ? String(Math.round(noiS * 12)) : ""
+  };
+  const expenses = pct => `${Math.round(pct * 100)}% operating expenses (taxes, insurance, vacancy, maintenance, management)`;
+  if (!p.hold) {
+    out.rentalIncomeMethod = p.land ? "None: vacant land (no rental income used)" : "None: fix & flip (the buyer sells, so no rental income is used)";
+    out.rentalIncomeDetail = out.rentalIncomeMethod + "." + (entered ? ` Rent found but not used in the offer: ${entered}.` : "");
+    return out;
+  }
+  if (!h || !h.rentKnown) {
+    out.rentalIncomeMethod = "Buy & hold, but no rent was entered (cash flow was not tested)";
+    out.rentalIncomeDetail = out.rentalIncomeMethod + ". Enter long-term and/or short-term rent for this deal to test cash flow.";
+    return out;
+  }
+  const annual = m(h.noi * 12);
+  if (h.basis === "in-place listing NOI") {
+    out.rentalIncomeMethod = "In-place NOI from the listing (multifamily / commercial)";
+    out.rentalIncomeDetail = `${out.rentalIncomeMethod}: ${annual}/yr (${m(h.noi)}/mo), taken as listed. No long-term vs short-term comparison.`;
+    out.residentialNOI = String(Math.round(h.noi * 12));
+    return out;
+  }
+  const useStr = noiS > noiL;
+  out.rentalIncomeMethod = useStr ? "Short-term rental (STR)" : "Long-term rental (LTR)";
+  out.rentalIncomeDetail = [
+    ltr ? `LTR: rent ${m(ltr)}/mo less ${expenses(ox)} = NOI ${m(noiL)}/mo (${m(noiL * 12)}/yr).` : "LTR: no long-term rent entered.",
+    str ? `STR: gross ${m(str)}/mo less ${expenses(os)} = NOI ${m(noiS)}/mo (${m(noiS * 12)}/yr).` : "STR: no short-term rent entered.",
+    ltr && str ? `Used ${useStr ? "STR" : "LTR"}, the higher NOI.` : `Used ${useStr ? "STR" : "LTR"}, the only rent entered.`,
+    `NOI used for the DSCR and cash flow tests: ${annual}/yr (${m(h.noi)}/mo).`
+  ].join(" ");
+  return out;
+}
+
 function scrAnswers(d, f, p) {
   const land = p.land;
   return {
@@ -544,6 +583,7 @@ function scrAnswers(d, f, p) {
     // Cash Deal Details wants pictures, a rehab estimate, an assessed value or a note: the listing link covers the pictures, and the note covers a listing without a link.
     picturesLink: d.url || "", cashDealNotes: d.url ? "" : "Pre-LOI from the screener: priced from AI comps; no listing link in the list.",
     preLoiStrategy: SCR_STRAT_NAMES[p.strategy], holdLog: p.holdLog ? JSON.stringify(p.holdLog) : "",
+    ...scrRentalIncome(p),
     sellerContactName: f.contactName || (f.contactRole === "seller" ? f.owner || "" : ""),
     sellerContactPhone: f.contactPhone || "", sellerContactEmail: f.contactEmail || "",
     contactRole: f.contactRole === "seller" ? "Seller" : "Realtor / listing agent", ownerName: f.owner || ""
@@ -566,7 +606,7 @@ function scrNotes(d, f, p, loi, resume) {
     land ? `- Cash offer (land): ${scrMoney(p.cashOffer)}   [site MAO: ${scrMoney(p.mao)}]` + (p.dev ? `\n- Offer B, full asking price: ${scrMoney(p.carryOffer)}, $0 at closing, paid at sale or refinance of the property within ${p.months} months (${p.devNote})` : "")
          : `- Hard Money Buyer MAO (10% down): ${scrMoney(p.mao10)}   (20% down): ${scrMoney(p.mao)}${SCR.cfg.offerMode === "dual" ? `\n- Offer A, all cash (${(SCR.CASH_PCT_OF_CARRY * 100).toFixed(1)}% of the carry price): ${scrMoney(p.cashOffer)}` : `\n- (All cash would be ${scrMoney(p.cashOffer)}: not offered, seller carryback only)`}\n- ${SCR.cfg.offerMode === "dual" ? "Offer B" : "Offer"}, seller carry (${p.hold && p.holdPlan.structure === "principal" ? SCR.HOLD.PRICE_BUMP * 100 + "% over asking" : p.hold ? (SCR.CARRY_PCT_OF_ARV * 100).toFixed(1) + "% of value, capped at list" : "Hard Money Buyer MAO (10% down) " + scrMoney(p.mao10) + ", capped at list"}): ${scrMoney(p.carryOffer)} (${scrMoney(p.carryDown)} at closing, balance carried ${p.months} months at ${p.noteRate * 100}%${p.hold ? (p.noteRate ? " interest-only" : ", principal-only") : ""})`,
   ];
-  L.splice(L.indexOf("UNDERWRITING") + 1, 0, `- Strategy: ${SCR_STRAT_NAMES[p.strategy]}`);
+  L.splice(L.indexOf("UNDERWRITING") + 1, 0, `- Strategy: ${SCR_STRAT_NAMES[p.strategy]}`, `- Rental income: ${scrRentalIncome(p).rentalIncomeDetail}`);
   if (p.holdPlan) L.push(`- Buy & hold: ${scrHoldText(p)}`);
   if (p.gutPlan) {
     const g = p.gutPlan;

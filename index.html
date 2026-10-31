@@ -363,10 +363,11 @@
   </div>
   <div id="submissions-panel" hidden>
     <div class="banner info" style="text-align:left;">Every submission, kept for you to check and cross reference: real form submissions and Pre-LOI forms you finished (those send no email and are not added to Leads).
-      The Matches column counts what else is on file for the same address: <strong>L</strong> real leads, <strong>P</strong> Pre-LOIs, <strong>C</strong> CRM entries.</div>
+      The Matches column counts what else is on file for the same address: <strong>L</strong> real leads, <strong>P</strong> Pre-LOIs, <strong>C</strong> CRM entries. <strong>View</strong> shows the full deal and lets you file it in the normal CRM (Leads tab) at a stage. <strong>Delete</strong> hides a submission (tick 'show deleted' to restore it).</div>
     <div style="display:flex; gap:8px; margin-bottom:10px;">
       <input type="text" id="sub-search" placeholder="Search address, name, email..." style="flex:1; width:auto; margin-bottom:0;">
       <select id="sub-source" style="flex:0 0 auto; width:auto;"><option value="">All sources</option><option value="Public">Public form</option><option value="Pre-LOI">Pre-LOI form</option></select>
+      <label style="align-self:center;white-space:nowrap;font-size:13px;"><input type="checkbox" id="sub-show-deleted" style="width:auto;"> show deleted</label>
     </div>
     <div id="submissions-list"></div>
     <div id="submission-detail"></div>
@@ -423,7 +424,7 @@
 </div>
 
 <script src="config.js?v=158"></script>
-<script src="app.js?v=171"></script>
-<script src="screener.js?v=30"></script>
+<script src="app.js?v=172"></script>
+<script src="screener.js?v=31"></script>
 </body>
 </html>

@@ -73,5 +73,40 @@ function tests(M) {
   const huge = Object.assign({}, dealA, { street: '5 Big Rd', zip: '85710', preLoiNotes: 'x'.repeat(200000) });
   const fh = adminFinishPreLoi({ email: EMAIL, answers: huge });
   check('a very large form still saves (long AI text is trimmed)', fh.ok === true || /too much data/.test(String(fh.error)), { fh: fh.error });
+
+  // 9. submissions can be deleted (reversibly) and filed in the normal CRM at a pipeline stage
+  const dealC = Object.assign({}, dealA, { street: '7 Pine Rd', zip: '85703', role: 'Wholesaler', units: '1', rentalIncomeMethod: 'Long-term rental (LTR)', rentalIncomeDetail: 'LTR rent $1,975/mo less 35% = NOI', rentcastMonthlyRent: '1975', expenseRatio: '35', residentialNOI: '15405', strAnnualRevenue: '30000', strNOI: '15000' });
+  const c1 = adminFinishPreLoi({ email: EMAIL, answers: dealC, loiUrl: 'https://x.io/?a=1' });
+  const subList = inc => adminGetSubmissions({ includeDeleted: !!inc }).submissions;
+  check('delete hides a submission but keeps its row', adminDeleteSubmission({ submissionId: c1.submissionId }).ok && !subList().some(x => x.submissionId === c1.submissionId) && subList(true).some(x => x.submissionId === c1.submissionId && x.deletedAt), {});
+  check('a deleted submission no longer counts as a match', !adminGetSubmissions({ includeDeleted: true }).submissions.some(x => x.matches && x.submissionId !== c1.submissionId && x.street === '7 Pine Rd' && x.matches.submissions > 1), {});
+  check('add to CRM refuses a deleted submission', adminAddSubmissionToCrm({ submissionId: c1.submissionId, status: 'New' }).ok === false, {});
+  check('restore brings a submission back', adminRestoreSubmission({ submissionId: c1.submissionId }).ok && subList().some(x => x.submissionId === c1.submissionId), {});
+  check('purge refuses a live submission', adminPurgeSubmission({ submissionId: c1.submissionId }).ok === false, {});
+  check('add to CRM refuses an unknown stage', adminAddSubmissionToCrm({ submissionId: c1.submissionId, status: 'Bogus' }).ok === false, {});
+  const leadsBefore = M.sheets['Leads'] ? M.sheets['Leads'].data.length : 0, mailsBefore = M.mails(), fetchesBefore = M.fetches();
+  const add = adminAddSubmissionToCrm({ submissionId: c1.submissionId, status: 'Offer Sent' });
+  const leadRows = () => { const sh = M.sheets['Leads'], h = sh.data[0]; return sh.data.slice(1).map(r => { const o = {}; h.forEach((k, i) => o[k] = r[i]); return o; }); };
+  const lr = add.ok ? leadRows().find(l => l['Lead ID'] === add.leadId) : null;
+  check('add to CRM writes a Leads row at the chosen stage', add.ok && add.how === 'added' && lr && lr['Status'] === 'Offer Sent' && lr['Street Address'] === '7 Pine Rd', { add, lr });
+  check('the CRM row carries the rental income method and the rent / NOI numbers', lr && lr['Rental Income Method'] === 'Long-term rental (LTR)' && /35%/.test(lr['Rental Income Detail']) && lr['Monthly Rent Estimate'] === '1975' && lr['NOI'] === '15405' && lr['STR Annual Revenue'] === '30000' && lr['Expense Ratio %'] === '35', { lr: lr && [lr['Rental Income Method'], lr['Monthly Rent Estimate'], lr['NOI'], lr['STR Annual Revenue']] });
+  check('add to CRM sends no email and no beehiiv call', M.mails() === mailsBefore && M.fetches() === fetchesBefore, {});
+  check('the submission now points at its CRM lead and shows its stage', subList().find(x => x.submissionId === c1.submissionId).leadId === add.leadId && subList().find(x => x.submissionId === c1.submissionId).leadStatus === 'Offer Sent', {});
+  const move = adminAddSubmissionToCrm({ submissionId: c1.submissionId, status: 'Negotiation' });
+  check('adding again just moves the same lead to the new stage', move.ok && move.how === 'moved' && move.leadId === add.leadId && leadRows().filter(l => l['Street Address'] === '7 Pine Rd').length === 1 && leadRows().find(l => l['Lead ID'] === add.leadId)['Status'] === 'Negotiation', { move });
+  const dealD = Object.assign({}, dealC, { street: '7 PINE ROAD', rentalIncomeMethod: 'None: fix & flip' });
+  const d1 = adminFinishPreLoi({ email: EMAIL, answers: dealD, loiUrl: 'https://x.io/?a=2' });
+  const dup = adminAddSubmissionToCrm({ submissionId: d1.submissionId, status: 'New' });
+  check('the same property already in the CRM is reported first', dup.ok === false && dup.duplicate && dup.duplicate.leadId === add.leadId && leadRows().filter(l => /pine/i.test(l['Street Address'])).length === 1, { dup });
+  const forced = adminAddSubmissionToCrm({ submissionId: d1.submissionId, status: 'New', force: true });
+  check('force adds it anyway', forced.ok && forced.how === 'added' && leadRows().filter(l => /pine/i.test(l['Street Address'])).length === 2, { forced });
+  const noRole = adminFinishPreLoi({ email: EMAIL, answers: Object.assign({}, dealC, { street: '8 Elm Ct', zip: '85704', role: '' }), loiUrl: '' });
+  const nr = adminAddSubmissionToCrm({ submissionId: noRole.submissionId, status: 'New' });
+  check('a submission missing a required CRM field is refused and says which', nr.ok === false && /role/.test(nr.error), { nr });
+  adminDeleteSubmission({ submissionId: d1.submissionId });
+  check('purge removes a deleted submission for good', adminPurgeSubmission({ submissionId: d1.submissionId }).ok && !subList(true).some(x => x.submissionId === d1.submissionId), {});
+  const log2 = M.sheets['Pre-LOI Log'].data.slice(1).map(r => r[1]);
+  check('the audit log records submission delete / restore / purge / to-crm', ['delete submission', 'restore submission', 'purge submission', 'to-crm submission'].every(a => log2.indexOf(a) !== -1), { log2 });
+  check('the public CRM sheet of cold leads is untouched by all of this', getCrmEntries({ email: EMAIL }).entries.length === 1, {});
   return results.join('\n') + '\n' + results.filter(r => r.startsWith('FAIL')).length + ' failed of ' + results.length;
 }

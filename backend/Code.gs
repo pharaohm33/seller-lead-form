@@ -44,7 +44,7 @@ const LEAD_COLUMNS = [
   'Year Built', 'Purchase Year', 'Months Behind On Payments', 'Annual Maintenance Spend', 'Property Photo URLs', 'Property Photos Link',
   'Rent Ready', 'Buyer Intends To Sell', 'Occupied Status', 'Has Rent Rolls', 'Has P&L', 'Deliverable Vacant', 'Current Lease Term',
   'Lease End Date', 'Tenant Would Move Early', 'STR NOI Per Unit',
-  'Monthly Rent Estimate', 'STR Annual Revenue', 'Annual Property Taxes', 'Annual Insurance', 'Expense Ratio %',
+  'Monthly Rent Estimate', 'STR Annual Revenue', 'Annual Property Taxes', 'Annual Insurance', 'Expense Ratio %', 'Rental Income Method', 'Rental Income Detail',
   'NOI', 'Commercial Occupancy Status', 'Commercial Occupancy %', 'NOI Research Notes', 'STR NOI', 'Business Revenue', 'Business Earnings Type', 'Business Earnings',
   'Total Debt', 'Senior Loan Willing', 'Payment Structure Willing',
   'Price Sought', 'Price Reasoning', 'Down Payment Intent', 'Down Payment Needed', 'Down Payment Non-Negotiable',
@@ -171,6 +171,14 @@ function doPost(e) {
         return jsonOut(withSession(body, adminGetSubmission));
       case 'adminUpdateSubmission':
         return jsonOut(withSession(body, adminUpdateSubmission));
+      case 'adminDeleteSubmission':
+        return jsonOut(withSession(body, adminDeleteSubmission));
+      case 'adminRestoreSubmission':
+        return jsonOut(withSession(body, adminRestoreSubmission));
+      case 'adminPurgeSubmission':
+        return jsonOut(withSession(body, adminPurgeSubmission));
+      case 'adminAddSubmissionToCrm':
+        return jsonOut(withSession(body, adminAddSubmissionToCrm));
       case 'adminGetPreLoi':
         return jsonOut(withSession(body, adminGetPreLoi));
       case 'adminGetPreLoiEntry':
@@ -376,30 +384,9 @@ function blockedPhoneReason(raw) {
   return '';
 }
 
-function submitLead(body) {
-  const d = body.data || {};
-  const required = ['role', 'name', 'email', 'phone', 'street', 'city', 'state', 'zip', 'units', 'assetType', 'marketStatus'];
-  for (const key of required) {
-    if (d[key] === undefined || d[key] === null || d[key] === '') {
-      return { ok: false, error: 'Missing required field: ' + key };
-    }
-  }
-
-  const maoError = checkMaoCap(d);
-  if (maoError) {
-    return { ok: false, error: maoError };
-  }
-
-  const offMarketError = checkOffMarketAgreement(d);
-  if (offMarketError) {
-    return { ok: false, error: offMarketError };
-  }
-
-  const phoneError = d.sellerContactPhone ? blockedPhoneReason(d.sellerContactPhone) : '';
-  if (phoneError) {
-    return { ok: false, error: phoneError };
-  }
-
+// Writes one row to Leads from the form's flat answers and returns its Lead ID. The public form (submitLead) and "Add to CRM" on a Submission both use it,
+// so a deal lands with the same columns whichever way it gets there. It sends nothing: no email, no beehiiv.
+function writeLeadRow(d, status) {
   const sheet = getSheet(LEADS_SHEET, LEAD_COLUMNS);
   const leadId = Utilities.getUuid();
   const submittedAt = new Date().toISOString();
@@ -469,6 +456,7 @@ function submitLead(body) {
     'STR Annual Revenue': d.strAnnualRevenue || '',
     'Annual Property Taxes': d.annualPropertyTaxes || '', 'Annual Insurance': d.annualInsurance || '',
     'Expense Ratio %': d.expenseRatio || '',
+    'Rental Income Method': d.rentalIncomeMethod || '', 'Rental Income Detail': d.rentalIncomeDetail || '',
     // Commercial NOI has an explicit "I don't know" toggle on the front end (unlike Residential's
     // required NOI) -- a blank value there always means unknown, not not-applicable, so it's worth
     // persisting as 'Unknown' the same way Total Debt already does below, rather than leaving it
@@ -485,7 +473,7 @@ function submitLead(body) {
     'Down Payment Needed': (d.downPaymentNeeded === undefined || d.downPaymentNeeded === '') ? 'Skipped' : d.downPaymentNeeded,
     'Down Payment Non-Negotiable': d.downPaymentNonNegotiable || 'N/A',
     'Market Status': d.marketStatus, 'Source Link': d.sourceLink || '',
-    'Status': 'New', 'Sort Priority': getSortPriority('New'), 'Team': inheritedTeam
+    'Status': status, 'Sort Priority': getSortPriority(status), 'Team': inheritedTeam
   });
 
   // Google Sheets can misread a leading "+" (e.g. "+1 520-633-6437") as the
@@ -498,6 +486,34 @@ function submitLead(body) {
   forceTextValue(sheet, newRow, 'Seller Contact Phone', sellerContactPhone);
   forceTextValue(sheet, newRow, 'Referrer Phone', referrerPhone);
   forceTextValue(sheet, newRow, 'Zip', d.zip);
+  return leadId;
+}
+
+function submitLead(body) {
+  const d = body.data || {};
+  const required = ['role', 'name', 'email', 'phone', 'street', 'city', 'state', 'zip', 'units', 'assetType', 'marketStatus'];
+  for (const key of required) {
+    if (d[key] === undefined || d[key] === null || d[key] === '') {
+      return { ok: false, error: 'Missing required field: ' + key };
+    }
+  }
+
+  const maoError = checkMaoCap(d);
+  if (maoError) {
+    return { ok: false, error: maoError };
+  }
+
+  const offMarketError = checkOffMarketAgreement(d);
+  if (offMarketError) {
+    return { ok: false, error: offMarketError };
+  }
+
+  const phoneError = d.sellerContactPhone ? blockedPhoneReason(d.sellerContactPhone) : '';
+  if (phoneError) {
+    return { ok: false, error: phoneError };
+  }
+
+  const leadId = writeLeadRow(d, 'New');
 
   try { logSubmission('Public form', 'see Leads', d, { leadId: leadId }); } catch (err) { /* the log must never block a real submission */ }
 
@@ -745,7 +761,7 @@ const SUBMISSION_COLUMNS = [
   'Submission ID', 'Submitted At', 'Source', 'Admin Emailed',
   'Street Address', 'City', 'State', 'Zip', 'Asset Type', 'Asking Price',
   'Contact Name', 'Contact Email', 'Contact Phone', 'Seller Contact Name', 'Seller Contact Phone', 'Seller Contact Email',
-  'Lead ID', 'CRM ID', 'LOI Link', 'Doc URL', 'Draft Status', 'Notes'
+  'Lead ID', 'CRM ID', 'LOI Link', 'Doc URL', 'Draft Status', 'Notes', 'Deleted At'
 ].concat(CRM_ANSWER_COLUMNS);
 
 // Same property written two ways ("123 N Main St." / "123 north main street") should match; zip narrows it when known.
@@ -810,7 +826,7 @@ function summarizeSubmission(r) {
     submissionId: r['Submission ID'], submittedAt: r['Submitted At'], source: r['Source'], adminEmailed: r['Admin Emailed'],
     street: r['Street Address'], city: r['City'], state: r['State'], zip: r['Zip'], assetType: r['Asset Type'], askingPrice: r['Asking Price'],
     contactName: r['Contact Name'], contactEmail: r['Contact Email'], sellerContactName: r['Seller Contact Name'], sellerContactPhone: r['Seller Contact Phone'],
-    sellerContactEmail: r['Seller Contact Email'], leadId: r['Lead ID'], crmId: r['CRM ID'], loiLink: r['LOI Link'], docUrl: r['Doc URL'], draftStatus: r['Draft Status'], notes: r['Notes']
+    sellerContactEmail: r['Seller Contact Email'], leadId: r['Lead ID'], crmId: r['CRM ID'], loiLink: r['LOI Link'], docUrl: r['Doc URL'], draftStatus: r['Draft Status'], notes: r['Notes'], deletedAt: r['Deleted At'] || ''
   };
 }
 
@@ -825,7 +841,7 @@ function relatedRecords(key, exceptSubmissionId) {
     if (addrKey(r['Street Address'], r['Zip'], r['City'], r['State']) === key) out.push({ kind: isPreLoiStatus(r['Status']) ? 'Pre-LOI' : 'CRM', id: r['CRM ID'], status: r['Status'], when: r['Updated At'], who: r['Owner Email'] });
   });
   sheetToObjects(getSheet(SUBMISSIONS_SHEET, SUBMISSION_COLUMNS)).forEach(function (r) {
-    if (r['Submission ID'] !== exceptSubmissionId && addrKey(r['Street Address'], r['Zip'], r['City'], r['State']) === key) out.push({ kind: 'Submission', id: r['Submission ID'], status: r['Source'], when: r['Submitted At'], who: r['Contact Email'] });
+    if (r['Submission ID'] !== exceptSubmissionId && !r['Deleted At'] && addrKey(r['Street Address'], r['Zip'], r['City'], r['State']) === key) out.push({ kind: 'Submission', id: r['Submission ID'], status: r['Source'], when: r['Submitted At'], who: r['Contact Email'] });
   });
   return out;
 }
@@ -955,9 +971,11 @@ function adminGetSubmissions(body) {
   const bump = function (key, kind) { if (!key) return; (count[key] = count[key] || { leads: 0, preLoi: 0, crm: 0, submissions: 0 })[kind]++; };
   leads.forEach(function (r) { bump(addrKey(r['Street Address'], r['Zip'], r['City'], r['State']), 'leads'); });
   crm.forEach(function (r) { bump(addrKey(r['Street Address'], r['Zip'], r['City'], r['State']), isPreLoiStatus(r['Status']) ? 'preLoi' : 'crm'); });
-  rows.forEach(function (r) { bump(addrKey(r['Street Address'], r['Zip'], r['City'], r['State']), 'submissions'); });
-  let out = rows.map(function (r) {
+  rows.forEach(function (r) { if (!r['Deleted At']) bump(addrKey(r['Street Address'], r['Zip'], r['City'], r['State']), 'submissions'); });
+  const leadStatus = {}; leads.forEach(function (l) { leadStatus[l['Lead ID']] = l['Status']; });
+  let out = rows.filter(function (r) { return body.includeDeleted || !r['Deleted At']; }).map(function (r) {
     const s = summarizeSubmission(r);
+    s.leadStatus = r['Lead ID'] ? (leadStatus[r['Lead ID']] || '') : '';
     s.matches = count[addrKey(r['Street Address'], r['Zip'], r['City'], r['State'])] || { leads: 0, preLoi: 0, crm: 0, submissions: 1 };
     return s;
   });
@@ -975,8 +993,91 @@ function adminGetSubmission(body) {
   if (!row) return { ok: false, error: 'Not found.' };
   const s = summarizeSubmission(row);
   s.answers = columnsToAnswers(row);
+  if (row['Lead ID']) { const lead = sheetToObjects(getSheet(LEADS_SHEET, LEAD_COLUMNS)).filter(function (l) { return l['Lead ID'] === row['Lead ID']; })[0]; s.leadStatus = lead ? lead['Status'] : ''; }
   s.related = relatedRecords(addrKey(row['Street Address'], row['Zip'], row['City'], row['State']), row['Submission ID']);
   return { ok: true, submission: s };
+}
+
+// "Delete" hides a submission (it keeps its row and the audit log records it); "show deleted" brings it back for Restore, and only a deleted one can be erased for good.
+function setSubmissionDeleted(submissionId, deleted, action) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const sheet = getSheet(SUBMISSIONS_SHEET, SUBMISSION_COLUMNS);
+    const row = sheetToObjects(sheet).filter(function (r) { return r['Submission ID'] === submissionId; })[0];
+    if (!row) return { ok: false, error: 'Not found.' };
+    writeCrmRow(sheet, row._row, { 'Deleted At': deleted ? new Date().toISOString() : '' });
+    logPreLoi(action + ' submission', { crmId: row['CRM ID'], street: row['Street Address'], city: row['City'], state: row['State'], zip: row['Zip'] }, deleted ? 'Submission deleted' : 'Submission restored', 'submission ' + submissionId);
+    return { ok: true };
+  } finally {
+    lock.releaseLock();
+  }
+}
+function adminDeleteSubmission(body) { return setSubmissionDeleted(String(body.submissionId || ''), true, 'delete'); }
+function adminRestoreSubmission(body) { return setSubmissionDeleted(String(body.submissionId || ''), false, 'restore'); }
+
+function adminPurgeSubmission(body) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const sheet = getSheet(SUBMISSIONS_SHEET, SUBMISSION_COLUMNS);
+    const row = sheetToObjects(sheet).filter(function (r) { return r['Submission ID'] === body.submissionId; })[0];
+    if (!row) return { ok: false, error: 'Not found.' };
+    if (!row['Deleted At']) return { ok: false, error: 'Only a deleted submission can be removed permanently.' };
+    sheet.deleteRow(row._row);
+    logPreLoi('purge submission', { crmId: row['CRM ID'], street: row['Street Address'], city: row['City'], state: row['State'], zip: row['Zip'] }, 'Submission erased', 'submission ' + body.submissionId);
+    return { ok: true };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// The wizard's saved answers use a few different names and shapes than the flat object the public form posts (submitLead); this maps them so the same Leads columns fill.
+function leadDataFromAnswers(a) {
+  const d = Object.assign({}, a);
+  ['cmaScreenshotUrls', 'payoffStatementUrls', 'propertyPhotoUrls'].forEach(function (k) { if (Array.isArray(a[k])) d[k] = a[k].join('\n'); });
+  ['sellerDeclinedCash', 'sellerDeclinedSellerFinancing', 'landSellerDeclinedDeferred', 'buyerIntendsToSell'].forEach(function (k) { if (a[k] === true) d[k] = 'Yes'; });
+  d.occupiedStatus = a.occupiedStatus || a.residentialOccupied || '';
+  d.monthlyRentEstimate = a.monthlyRentEstimate || a.rentcastMonthlyRent || '';
+  d.noi = a.noi || a.residentialNOI || a.commercialNOI || '';
+  if (a.debtUnknown) d.totalDebt = '';
+  if (a.dpSkipped) { d.downPaymentIntent = ''; d.downPaymentNeeded = ''; }
+  return d;
+}
+
+// "Add to CRM": files a submission in the normal CRM (the Leads tab) at a pipeline stage so it can be worked with the other deals. Sends nothing (no email, no beehiiv).
+// A submission already in Leads (every public one is) just moves to the chosen stage. The same property already in Leads is reported back first, and added anyway only with force.
+function adminAddSubmissionToCrm(body) {
+  if (STATUS_SORT_ORDER.indexOf(body.status) === -1) return { ok: false, error: 'Pick one of the CRM stages.' };
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const subSheet = getSheet(SUBMISSIONS_SHEET, SUBMISSION_COLUMNS);
+    const row = sheetToObjects(subSheet).filter(function (r) { return r['Submission ID'] === body.submissionId; })[0];
+    if (!row) return { ok: false, error: 'Not found.' };
+    if (row['Deleted At']) return { ok: false, error: 'Restore this submission first.' };
+    const leadSheet = getSheet(LEADS_SHEET, LEAD_COLUMNS);
+    const leads = sheetToObjects(leadSheet);
+    const linked = row['Lead ID'] ? leads.filter(function (l) { return l['Lead ID'] === row['Lead ID']; })[0] : null;
+    if (linked) {
+      const r = updateStatus({ leadId: linked['Lead ID'], status: body.status });
+      return r.ok ? { ok: true, leadId: linked['Lead ID'], how: 'moved' } : r;
+    }
+    const key = addrKey(row['Street Address'], row['Zip'], row['City'], row['State']);
+    const same = key ? leads.filter(function (l) { return addrKey(l['Street Address'], l['Zip'], l['City'], l['State']) === key; })[0] : null;
+    if (same && !body.force) return { ok: false, duplicate: { leadId: same['Lead ID'], status: same['Status'] }, error: 'This property is already in the CRM (stage: ' + same['Status'] + ').' };
+    const d = leadDataFromAnswers(columnsToAnswers(row));
+    const required = ['role', 'name', 'email', 'phone', 'street', 'city', 'state', 'zip', 'units', 'assetType', 'marketStatus'];
+    for (let i = 0; i < required.length; i++) {
+      if (d[required[i]] === undefined || d[required[i]] === null || d[required[i]] === '') return { ok: false, error: 'This submission is missing "' + required[i] + '", which a CRM entry needs.' };
+    }
+    const leadId = writeLeadRow(d, body.status);
+    writeCrmRow(subSheet, row._row, { 'Lead ID': leadId });
+    logPreLoi('to-crm submission', { crmId: row['CRM ID'], street: row['Street Address'], city: row['City'], state: row['State'], zip: row['Zip'] }, body.status, 'submission ' + body.submissionId + ' -> lead ' + leadId);
+    return { ok: true, leadId: leadId, how: 'added' };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // Where the finished LOI went: the Google Doc link and the email-draft status (written by you or by the browser agent).

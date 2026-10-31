@@ -4405,6 +4405,7 @@ function buildAnswerRows() {
       ["Rehab Estimate — High", answers.rehabEstimateHigh || "—"],
       ["Rehab Estimate (average)", answers.rehabEstimate || "—"],
       ["Rehab AI Response", answers.rehabAiText || "—"],
+      ...(answers.rentalIncomeMethod ? [["Rental Income Method", answers.rentalIncomeMethod], ["Rental Income Calculation", answers.rentalIncomeDetail || "—"]] : []),
       ["County Assessed Value", answers.countyAssessedValue || "—"],
       ["CMA Screenshots", (answers.cmaScreenshotUrls || []).join("\n") || "—"],
       [answers.assetType === "Land" ? "As-Is Value Range (AI Comps)" : "ARV Range (AI Comps)", answers.arvRange || "—"],
@@ -5157,7 +5158,7 @@ async function submitLead(container) {
         occupiedStatus: answers.residentialOccupied, monthlyRentEstimate: answers.rentcastMonthlyRent,
         strAnnualRevenue: answers.strAnnualRevenue, strNOI: answers.strNOI,
         annualPropertyTaxes: answers.annualPropertyTaxes, annualInsurance: answers.annualInsurance,
-        expenseRatio: answers.expenseRatio,
+        expenseRatio: answers.expenseRatio, rentalIncomeMethod: answers.rentalIncomeMethod || "", rentalIncomeDetail: answers.rentalIncomeDetail || "",
         hasRentRolls: answers.hasRentRolls, hasProfitLoss: answers.hasProfitLoss,
         deliverableVacant: answers.deliverableVacant, currentLeaseTerm: answers.currentLeaseTerm,
         leaseEndDate: answers.leaseEndDate, tenantWouldMoveEarly: answers.tenantWouldMoveEarly,
@@ -5581,6 +5582,7 @@ function buildLeadFields(lead) {
       ["Rehab Estimate — Low", lead["Rehab Estimate Low"] || "—"],
       ["Rehab Estimate — High", lead["Rehab Estimate High"] || "—"],
       ["Rehab Estimate (average)", lead["Rehab Estimate"] || "—"],
+      ...(lead["Rental Income Method"] ? [["Rental Income Method", lead["Rental Income Method"]], ["Rental Income Calculation", lead["Rental Income Detail"] || "—"]] : []),
       ["County Assessed Value", lead["County Assessed Value"] || "—"],
       ["CMA Screenshots", lead["CMA Screenshot URLs"] || "—"],
       ["ARV Range (AI Comps)", lead["ARV Range"] || "—"],
@@ -6078,7 +6080,7 @@ function preLoiDetailHtml(e) {
   const answerPairs = Object.keys(a).filter(k => !skip[k] && k.charAt(0) !== "_" && a[k] !== "" && a[k] !== null && a[k] !== undefined).sort().map(k => [human(k), a[k]]);
   const sec = (title, body, open) => `<details ${open ? "open" : ""} style="margin-top:10px;"><summary style="cursor:pointer;font-weight:600;">${esc(title)}</summary><div style="margin-top:8px;">${body}</div></details>`;
   const facts = [["Status", e.status ? (PRELOI_BADGE[e.status] || [e.status])[0] : ""], ["Updated", e.updatedAt ? formatDate(e.updatedAt) : ""], ["Property", [e.street, e.city, e.state, e.zip].filter(Boolean).join(", ")], ["Asking", e.askingPrice],
-    ["Offer strategy", a.preLoiStrategy], ["ARV", a.arv], ["Rehab", a.rehabEstimate], ["Seller / realtor", [e.sellerContactName, e.sellerContactPhone, e.sellerContactEmail].filter(Boolean).join(" · ")]].filter(([, v]) => v);
+    ["Offer strategy", a.preLoiStrategy], ["Rental income", a.rentalIncomeMethod], ["ARV", a.arv], ["Rehab", a.rehabEstimate], ["Seller / realtor", [e.sellerContactName, e.sellerContactPhone, e.sellerContactEmail].filter(Boolean).join(" · ")]].filter(([, v]) => v);
   return `<div class="card" style="text-align:left;margin:6px 0;">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;"><h3 class="step-title" style="font-size:17px;margin:0;">Full deal details</h3>
       <span style="display:flex;gap:8px;flex-wrap:wrap;">${loiUrl ? `<button type="button" class="btn secondary" data-pd-loi>Open LOI</button>` : ""}<button type="button" class="btn secondary" data-pd-copy>Copy everything (JSON)</button><button type="button" class="link-btn" data-pd-close>Close</button></span></div>
@@ -6187,25 +6189,39 @@ async function loadPreLoi() {
 let subSearchTimer = null;
 document.getElementById("sub-search").oninput = () => { clearTimeout(subSearchTimer); subSearchTimer = setTimeout(loadSubmissions, 300); };
 document.getElementById("sub-source").onchange = () => loadSubmissions();
+document.getElementById("sub-show-deleted").onchange = () => loadSubmissions();
 
 async function loadSubmissions() {
   const wrap = document.getElementById("submissions-list");
   wrap.innerHTML = `<p class="small-muted">Loading...</p>`;
-  const res = await api("adminGetSubmissions", { token: sessionToken, q: document.getElementById("sub-search").value.trim(), source: document.getElementById("sub-source").value });
+  const res = await api("adminGetSubmissions", { token: sessionToken, q: document.getElementById("sub-search").value.trim(), source: document.getElementById("sub-source").value, includeDeleted: document.getElementById("sub-show-deleted").checked });
   if (!res.ok) { wrap.innerHTML = `<p class="small-muted">${escapeHtml(res.error || "Couldn't load.")}</p>`; return; }
   if (!res.submissions.length) { wrap.innerHTML = `<p class="small-muted" style="padding:12px;">No submissions yet.</p>`; return; }
   wrap.innerHTML = `<p class="small-muted">${res.total} submission${res.total === 1 ? "" : "s"}${res.total > res.submissions.length ? " (showing the newest " + res.submissions.length + ")" : ""}</p>
-    <table class="crm-table"><thead><tr><th>When</th><th>Source</th><th>Address</th><th>Contact</th><th>Admin emailed</th><th>Matches</th><th>LOI / Doc / Draft</th><th></th></tr></thead><tbody>
-    ${res.submissions.map(s => `<tr style="cursor:default">
+    <table class="crm-table"><thead><tr><th>When</th><th>Source</th><th>Address</th><th>Contact</th><th>Admin emailed</th><th>Matches</th><th>LOI / Doc / Draft</th><th>CRM stage</th><th></th></tr></thead><tbody>
+    ${res.submissions.map(s => `<tr style="cursor:default${s.deletedAt ? ";opacity:.6" : ""}">
       <td>${formatDate(s.submittedAt)}</td><td>${escapeHtml(s.source)}</td>
       <td>${escapeHtml(s.street || "")}<br><span class="small-muted">${escapeHtml(s.city || "")}, ${escapeHtml(s.state || "")} ${escapeHtml(s.zip || "")}</span></td>
       <td>${escapeHtml(s.sellerContactName || s.contactName || "")}<br><span class="small-muted">${escapeHtml(s.sellerContactEmail || s.contactEmail || "")}</span></td>
       <td>${escapeHtml(s.adminEmailed || "")}</td>
       <td class="small-muted">L ${s.matches.leads} · P ${s.matches.preLoi} · C ${s.matches.crm}${s.matches.submissions > 1 ? " · " + s.matches.submissions + " subs" : ""}</td>
       <td class="small-muted">${s.loiLink ? "LOI ✓" : "—"} · ${s.docUrl ? `<a href="${escapeHtml(s.docUrl)}" target="_blank" rel="noopener">Doc</a>` : "no doc"} · ${escapeHtml(s.draftStatus || "no draft")}</td>
-      <td><button type="button" class="btn secondary" data-sub="${escapeHtml(s.submissionId)}">View</button></td></tr>`).join("")}
+      <td>${s.deletedAt ? `<span style="color:#991b1b;font-weight:600;font-size:12px;">Deleted</span>` : s.leadId ? escapeHtml(s.leadStatus || "In CRM") : `<span class="small-muted">not in CRM</span>`}</td>
+      <td style="white-space:nowrap"><button type="button" class="btn secondary" data-sub="${escapeHtml(s.submissionId)}">View</button>
+        ${s.deletedAt ? `<button type="button" class="btn secondary" data-sub-restore="${escapeHtml(s.submissionId)}">Restore</button> <button type="button" class="link-btn" data-sub-purge="${escapeHtml(s.submissionId)}">Delete forever</button>`
+                      : `<button type="button" class="link-btn" data-sub-delete="${escapeHtml(s.submissionId)}">Delete</button>`}</td></tr>`).join("")}
     </tbody></table>`;
   wrap.querySelectorAll("[data-sub]").forEach(b => b.onclick = () => openSubmission(b.dataset.sub));
+  const act = async (id, action, confirmText) => {
+    if (confirmText && !confirm(confirmText)) return;
+    const r = await api(action, { token: sessionToken, submissionId: id });
+    if (!r.ok) { alert(r.error || "That didn't work."); return; }
+    document.getElementById("submission-detail").innerHTML = "";
+    loadSubmissions();
+  };
+  wrap.querySelectorAll("[data-sub-delete]").forEach(b => b.onclick = () => act(b.dataset.subDelete, "adminDeleteSubmission", "Hide this submission? It is not erased: tick 'show deleted' to restore it. A CRM lead made from it stays in the CRM."));
+  wrap.querySelectorAll("[data-sub-restore]").forEach(b => b.onclick = () => act(b.dataset.subRestore, "adminRestoreSubmission"));
+  wrap.querySelectorAll("[data-sub-purge]").forEach(b => b.onclick = () => act(b.dataset.subPurge, "adminPurgeSubmission", "Erase this deleted submission permanently? This cannot be undone."));
 }
 
 async function openSubmission(id) {
@@ -6216,12 +6232,19 @@ async function openSubmission(id) {
   const s = res.submission, a = s.answers || {};
   const keyFacts = [["Source", s.source], ["Submitted", formatDate(s.submittedAt)], ["Admin emailed", s.adminEmailed], ["Property", [s.street, s.city, s.state, s.zip].filter(Boolean).join(", ")],
     ["Asset", s.assetType], ["Asking", s.askingPrice], ["Seller / realtor", [s.sellerContactName, s.sellerContactPhone, s.sellerContactEmail].filter(Boolean).join(" · ")],
-    ["Submitted by", [s.contactName, s.contactEmail].filter(Boolean).join(" · ")], ["ARV", a.arv], ["Rehab", a.rehabEstimate], ["Offer strategy", a.preLoiStrategy]];
+    ["Submitted by", [s.contactName, s.contactEmail].filter(Boolean).join(" · ")], ["ARV", a.arv], ["Rehab", a.rehabEstimate], ["Offer strategy", a.preLoiStrategy], ["Rental income", a.rentalIncomeMethod]];
   box.innerHTML = `<div class="card" style="margin-top:14px;">
     <div style="display:flex;justify-content:space-between;"><h3 class="step-title" style="font-size:17px;">Submission ${escapeHtml(s.submissionId)}</h3><button type="button" class="link-btn" id="sub-close">Close</button></div>
     <dl class="review-grid">${keyFacts.filter(([, v]) => v).map(([k, v]) => `<div><dt>${escapeHtml(k)}</dt><dd>${escapeHtml(String(v))}</dd></div>`).join("")}</dl>
     <h4>Cross reference: everything on file for this address</h4>
     ${s.related.length ? `<table class="crm-table"><thead><tr><th>Kind</th><th>Status / source</th><th>When</th><th>Who</th></tr></thead><tbody>${s.related.map(r => `<tr style="cursor:default"><td>${escapeHtml(r.kind)}</td><td>${escapeHtml(r.status || "")}</td><td>${formatDate(r.when)}</td><td>${escapeHtml(r.who || "")}</td></tr>`).join("")}</tbody></table>` : `<p class="small-muted">Nothing else on file for this address.</p>`}
+    <h4>Normal CRM</h4>
+    <p class="small-muted" style="margin-top:0;">${s.leadId ? "This deal is in the CRM (Leads tab). Pick a stage to move it." : "File this deal in the CRM (Leads tab) at a stage so it is worked with the other deals. Nothing is emailed."}</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+      <select id="sub-stage" style="flex:0 0 auto;width:auto;">${ADMIN_STATUS_SORT_ORDER.map(st => `<option value="${escapeHtml(st)}">${escapeHtml(st)}</option>`).join("")}</select>
+      <button type="button" class="btn primary" id="sub-to-crm">${s.leadId ? "Move to stage" : "Add to CRM"}</button>
+      <span id="sub-crm-msg" class="small-muted"></span>
+    </div>
     <h4>Where the LOI went</h4>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;">
       <div><label>Google Doc link</label><input type="text" id="sub-doc" value="${escapeHtml(s.docUrl || "")}"></div>
@@ -6244,6 +6267,19 @@ async function openSubmission(id) {
   full.querySelector("[data-pd-copy]").onclick = () => navigator.clipboard.writeText(JSON.stringify(s, null, 2)).then(() => { full.querySelector("[data-pd-msg]").textContent = "Copied."; });
   const openLoi = box.querySelector("#sub-open-loi"); if (openLoi) openLoi.onclick = () => window.open(s.loiLink, "_blank", "noopener");
   box.querySelector("#sub-copy").onclick = () => navigator.clipboard.writeText(JSON.stringify(a, null, 2)).then(() => { box.querySelector("#sub-msg").textContent = "Copied."; });
+  const stageSel = box.querySelector("#sub-stage"), crmMsg = box.querySelector("#sub-crm-msg"), toCrm = box.querySelector("#sub-to-crm");
+  if (s.leadStatus && ADMIN_STATUS_SORT_ORDER.indexOf(s.leadStatus) !== -1) stageSel.value = s.leadStatus; else stageSel.value = "New";
+  toCrm.onclick = async () => {
+    toCrm.disabled = true; crmMsg.textContent = "Saving...";
+    let r = await api("adminAddSubmissionToCrm", { token: sessionToken, submissionId: id, status: stageSel.value });
+    if (!r.ok && r.duplicate && confirm(`${r.error}\n\nAdd this one as another entry anyway?`)) r = await api("adminAddSubmissionToCrm", { token: sessionToken, submissionId: id, status: stageSel.value, force: true });
+    toCrm.disabled = false;
+    if (!r.ok) { crmMsg.textContent = r.error || "Couldn't add it."; return; }
+    crmMsg.textContent = (r.how === "moved" ? "Moved to " : "Added to the CRM at ") + stageSel.value + ".";
+    toCrm.textContent = "Move to stage";
+    loadSubmissions();
+    if (typeof loadLeads === "function") loadLeads();
+  };
   box.querySelector("#sub-save").onclick = async () => {
     const r = await api("adminUpdateSubmission", { token: sessionToken, submissionId: id, docUrl: box.querySelector("#sub-doc").value.trim(), draftStatus: box.querySelector("#sub-draft").value.trim(), notes: box.querySelector("#sub-notes").value });
     box.querySelector("#sub-msg").textContent = r.ok ? "Saved." : (r.error || "Couldn't save.");
