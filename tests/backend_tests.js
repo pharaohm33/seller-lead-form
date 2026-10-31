@@ -108,5 +108,18 @@ function tests(M) {
   const log2 = M.sheets['Pre-LOI Log'].data.slice(1).map(r => r[1]);
   check('the audit log records submission delete / restore / purge / to-crm', ['delete submission', 'restore submission', 'purge submission', 'to-crm submission'].every(a => log2.indexOf(a) !== -1), { log2 });
   check('the public CRM sheet of cold leads is untouched by all of this', getCrmEntries({ email: EMAIL }).entries.length === 1, {});
+
+  // 10. the updated LOI generator link has its own spot (not the notes), shared by the Pre-LOI row and its submissions
+  const dealE = Object.assign({}, dealA, { street: '3 Cedar Ln', zip: '85705', role: 'Wholesaler' });
+  const e1 = adminFinishPreLoi({ email: EMAIL, answers: dealE, loiUrl: 'https://pharaohm33.github.io/loi-generator/?purchase_price=323000' });
+  const upd = 'https://pharaohm33.github.io/loi-generator/?purchase_price=295000&sc_term=1';
+  check('save updated LOI from the Pre-LOI side', adminSaveUpdatedLoi({ crmId: e1.crmId, loiUrl: upd }).ok, {});
+  check('the Pre-LOI row keeps it apart from the notes and the original link', adminGetPreLoiEntry({ crmId: e1.crmId }).entry.answers.updatedLoiUrl === upd && adminGetPreLoiEntry({ crmId: e1.crmId }).entry.answers.loiUrl.indexOf('323000') !== -1, {});
+  check('its Submission shows the same updated link', adminGetSubmission({ submissionId: e1.submissionId }).submission.updatedLoiLink === upd && !!adminGetSubmission({ submissionId: e1.submissionId }).submission.updatedLoiAt, {});
+  const upd2 = upd + '&acq_pct=50';
+  check('save updated LOI from the Submission side updates the Pre-LOI row too', adminSaveUpdatedLoi({ submissionId: e1.submissionId, loiUrl: upd2 }).ok && adminGetPreLoiEntry({ crmId: e1.crmId }).entry.answers.updatedLoiUrl === upd2, {});
+  check('a link that is not a link is refused', adminSaveUpdatedLoi({ crmId: e1.crmId, loiUrl: 'not a link' }).ok === false && adminGetPreLoiEntry({ crmId: e1.crmId }).entry.answers.updatedLoiUrl === upd2, {});
+  check('an empty link clears it everywhere', adminSaveUpdatedLoi({ crmId: e1.crmId, loiUrl: '' }).ok && !adminGetPreLoiEntry({ crmId: e1.crmId }).entry.answers.updatedLoiUrl && adminGetSubmission({ submissionId: e1.submissionId }).submission.updatedLoiLink === '', {});
+  check('an unknown deal is refused', adminSaveUpdatedLoi({ crmId: 'nope', loiUrl: upd }).ok === false, {});
   return results.join('\n') + '\n' + results.filter(r => r.startsWith('FAIL')).length + ' failed of ' + results.length;
 }

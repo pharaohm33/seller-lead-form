@@ -6072,8 +6072,11 @@ function preLoiDetailHtml(e) {
   const show = v => typeof v === "object" && v !== null ? JSON.stringify(v) : (typeof v === "number" && Math.abs(v) >= 1000 ? v.toLocaleString() : String(v));
   const grid = pairs => pairs.length ? `<dl class="review-grid">${pairs.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd style="overflow-wrap:anywhere;">${esc(show(v))}</dd></div>`).join("")}</dl>` : `<p class="small-muted">Nothing saved.</p>`;
   const loiUrl = a.loiUrl || (String(a.preLoiNotes || "").match(/LOI Generator[^\n]*?: (https:\/\/\S+)/) || [])[1] || "";
-  const params = [];
-  try { if (loiUrl) new URL(loiUrl).searchParams.forEach((v, k) => { if (v !== "") params.push([PRELOI_LOI_LABELS[k] ? `${PRELOI_LOI_LABELS[k]} (${k})` : k, v]); }); } catch (_) { /* a link that will not parse just shows no variables */ }
+  const params = [], label = k => PRELOI_LOI_LABELS[k] ? `${PRELOI_LOI_LABELS[k]} (${k})` : k;
+  const readParams = url => { const m = {}; try { if (url) new URL(url).searchParams.forEach((v, k) => { if (k !== "sub" && v !== "") m[k] = v; }); } catch (_) { /* a link that will not parse just shows no variables */ } return m; };
+  const origMap = readParams(loiUrl); Object.keys(origMap).forEach(k => params.push([label(k), origMap[k]]));
+  const updUrl = a.updatedLoiUrl || e.updatedLoiLink || "", updMap = readParams(updUrl);
+  const changes = Object.keys(Object.assign({}, origMap, updMap)).filter(k => origMap[k] !== updMap[k]).map(k => [label(k), `${origMap[k] === undefined ? "(not set)" : origMap[k]}  →  ${updMap[k] === undefined ? "(removed)" : updMap[k]}`]);
   let hold = []; try { hold = a.holdLog ? JSON.parse(a.holdLog) : []; } catch (_) { hold = []; }
   const holdKeys = []; hold.forEach(h => Object.keys(h).forEach(k => { if (holdKeys.indexOf(k) < 0) holdKeys.push(k); }));
   const skip = { preLoiNotes: 1, holdLog: 1, loiUrl: 1 };
@@ -6083,14 +6086,31 @@ function preLoiDetailHtml(e) {
     ["Offer strategy", a.preLoiStrategy], ["Rental income", a.rentalIncomeMethod], ["ARV", a.arv], ["Rehab", a.rehabEstimate], ["Seller / realtor", [e.sellerContactName, e.sellerContactPhone, e.sellerContactEmail].filter(Boolean).join(" · ")]].filter(([, v]) => v);
   return `<div class="card" style="text-align:left;margin:6px 0;">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;"><h3 class="step-title" style="font-size:17px;margin:0;">Full deal details</h3>
-      <span style="display:flex;gap:8px;flex-wrap:wrap;">${loiUrl ? `<button type="button" class="btn secondary" data-pd-loi>Open LOI</button>` : ""}<button type="button" class="btn secondary" data-pd-copy>Copy everything (JSON)</button><button type="button" class="link-btn" data-pd-close>Close</button></span></div>
+      <span style="display:flex;gap:8px;flex-wrap:wrap;">${updUrl ? `<button type="button" class="btn secondary" data-pd-loi-upd>Open updated LOI</button>` : ""}${loiUrl ? `<button type="button" class="btn secondary" data-pd-loi>${updUrl ? "Open original LOI" : "Open LOI"}</button>` : ""}<button type="button" class="btn secondary" data-pd-copy>Copy everything (JSON)</button><button type="button" class="link-btn" data-pd-close>Close</button></span></div>
     ${grid(facts)}
+    ${sec("Updated LOI generator link (your changes)", `<p class="small-muted" style="margin:0 0 6px;">Changed something in the LOI generator? Paste its link here instead of in the notes. ${e.updatedLoiAt || a.updatedLoiAt ? "Saved " + esc(formatDate(e.updatedLoiAt || a.updatedLoiAt)) + "." : ""}</p>
+      <textarea data-pd-ul-input rows="2" style="width:100%;" placeholder="https://pharaohm33.github.io/loi-generator/?...">${esc(updUrl)}</textarea>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin:6px 0;align-items:center;"><button type="button" class="btn primary" data-pd-ul-save>Save updated LOI</button>${updUrl ? `<button type="button" class="btn secondary" data-pd-ul-clear>Clear</button>` : ""}<span class="small-muted" data-pd-ul-msg></span></div>
+      ${updUrl ? `<strong style="font-size:13px;">What changed from the generated LOI (${changes.length})</strong>${changes.length ? grid(changes) : `<p class="small-muted">No variable differs from the generated link.</p>`}` : ""}`, true)}
     ${sec("Underwriting notes (everything that led to the offer)", `<pre style="white-space:pre-wrap;user-select:text;margin:0;font-size:13px;">${esc(a.preLoiNotes || "No notes saved on this lead.")}</pre>`, true)}
     ${sec(`LOI generator variables (${params.length})`, grid(params), true)}
     ${hold.length ? sec(`Buy & hold solver attempts (${hold.length})`, `<div style="overflow-x:auto;"><table class="crm-table"><thead><tr>${holdKeys.map(k => `<th>${esc(k)}</th>`).join("")}</tr></thead><tbody>${hold.map(h =>
       `<tr style="cursor:default">${holdKeys.map(k => `<td style="font-variant-numeric:tabular-nums;">${esc(Array.isArray(h[k]) ? h[k].join("; ") : h[k] === undefined || h[k] === null ? "" : show(h[k]))}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`, true) : ""}
     ${sec(`All saved form answers (${answerPairs.length})`, grid(answerPairs), true)}
     <p class="small-muted" data-pd-msg></p></div>`;
+}
+
+// Save / clear the updated LOI generator link from a Details view. ids = { crmId } or { submissionId }; onSaved re-opens the view so it shows the new link and what changed.
+function preLoiWireUpdatedLoi(root, ids, onSaved) {
+  const input = root.querySelector("[data-pd-ul-input]"), msg = root.querySelector("[data-pd-ul-msg]");
+  const save = async url => {
+    msg.textContent = "Saving...";
+    const r = await api("adminSaveUpdatedLoi", Object.assign({ token: sessionToken, loiUrl: url }, ids));
+    if (!r.ok) { msg.textContent = r.error || "Couldn't save."; return; }
+    if (onSaved) onSaved(); else msg.textContent = url ? "Saved." : "Cleared.";
+  };
+  root.querySelector("[data-pd-ul-save]").onclick = () => { const v = input.value.trim(); if (!v) { msg.textContent = "Paste the updated link first."; return; } save(v); };
+  const clr = root.querySelector("[data-pd-ul-clear]"); if (clr) clr.onclick = () => { if (confirm("Remove the saved updated LOI link?")) save(""); };
 }
 
 async function loadPreLoi() {
@@ -6111,10 +6131,11 @@ async function loadPreLoi() {
       <td>${escapeHtml(e.sellerContactName || "")}<br><span class="small-muted">${escapeHtml([e.sellerContactPhone, e.sellerContactEmail].filter(Boolean).join(" · "))}</span></td>
       <td style="white-space:nowrap">
         <button type="button" class="btn secondary" data-pl-details="${id}" title="Every saved variable for this deal, untruncated">Details</button>
+        <button type="button" class="btn secondary" data-pl-updloi="${id}" title="Save the link from the LOI generator after you change something there">Save updated LOI</button>
         ${gone ? `<button type="button" class="btn secondary" data-pl-restore="${id}">Restore</button>
                   <button type="button" class="link-btn" data-pl-purge="${id}">Delete forever</button>`
                : `<button type="button" class="btn secondary" data-pl-notes="${id}">Notes</button>
-                  <button type="button" class="btn secondary" data-pl-loi="${id}" title="Opens the LOI generator with this deal's saved link">Open LOI</button>
+                  <button type="button" class="btn secondary" data-pl-loi="${id}" title="Opens the LOI generator with this deal's saved link (your updated one if you saved it)">Open LOI</button>
                   <button type="button" class="btn primary" data-pl-resume="${id}" title="Walk it through the whole form, pre-filled">Resume</button>
                   <button type="button" class="btn secondary" data-pl-sent="${id}" title="Keeps this row and files a copy in your CRM as Offer sent to cold lead. No email is sent.">LOI sent</button>
                   <button type="button" class="link-btn" data-pl-delete="${id}">Delete</button>`}
@@ -6122,20 +6143,24 @@ async function loadPreLoi() {
     }).join("")}
   </tbody></table><pre id="preloi-notes-box" class="small-muted" style="white-space:pre-wrap; margin-top:10px; user-select:text;" hidden></pre>`;
   const entry = async id => { const r = await api("adminGetPreLoiEntry", { token: sessionToken, crmId: id }); if (!r.ok) alert(r.error || "Couldn't open that lead."); return r.ok ? r.entry : null; };
-  wrap.querySelectorAll("[data-pl-details]").forEach(b => b.onclick = async () => {
-    const tr = b.closest("tr"), open = tr.nextElementSibling;
-    if (open && open.classList.contains("pl-detail-row")) { open.remove(); return; }         // second click closes it
+  const showDetails = async (id, focusLink) => {
+    const b = wrap.querySelector(`[data-pl-details="${id}"]`), tr = b.closest("tr"), open = tr.nextElementSibling;
+    if (open && open.classList.contains("pl-detail-row")) { if (focusLink) { open.querySelector("[data-pd-ul-input]").focus(); return; } open.remove(); return; }         // second click on Details closes it
     wrap.querySelectorAll(".pl-detail-row").forEach(r => r.remove());
-    b.disabled = true; const e = await entry(b.dataset.plDetails); b.disabled = false; if (!e) return;
+    b.disabled = true; const e = await entry(id); b.disabled = false; if (!e) return;
     const row = document.createElement("tr"); row.className = "pl-detail-row"; row.style.cursor = "default";
     row.innerHTML = `<td colspan="6">${preLoiDetailHtml(e)}</td>`;
     tr.after(row);
-    const loiUrl = e.answers.loiUrl || (String(e.answers.preLoiNotes || "").match(/LOI Generator[^\n]*?: (https:\/\/\S+)/) || [])[1];
-    const o = row.querySelector("[data-pd-loi]"); if (o) o.onclick = () => window.open(loiUrl, "_blank", "noopener");
+    const orig = e.answers.loiUrl || (String(e.answers.preLoiNotes || "").match(/LOI Generator[^\n]*?: (https:\/\/\S+)/) || [])[1], upd = e.answers.updatedLoiUrl;
+    const o = row.querySelector("[data-pd-loi]"); if (o) o.onclick = () => window.open(orig, "_blank", "noopener");
+    const ou = row.querySelector("[data-pd-loi-upd]"); if (ou) ou.onclick = () => window.open(upd, "_blank", "noopener");
     row.querySelector("[data-pd-close]").onclick = () => row.remove();
     row.querySelector("[data-pd-copy]").onclick = () => navigator.clipboard.writeText(JSON.stringify(e, null, 2)).then(() => { row.querySelector("[data-pd-msg]").textContent = "Copied."; });
-    row.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  });
+    preLoiWireUpdatedLoi(row, { crmId: id }, () => { row.remove(); showDetails(id, false); });
+    if (focusLink) row.querySelector("[data-pd-ul-input]").focus(); else row.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  };
+  wrap.querySelectorAll("[data-pl-details]").forEach(b => b.onclick = () => showDetails(b.dataset.plDetails, false));
+  wrap.querySelectorAll("[data-pl-updloi]").forEach(b => b.onclick = () => showDetails(b.dataset.plUpdloi, true));
   wrap.querySelectorAll("[data-pl-notes]").forEach(b => b.onclick = async () => {
     const e = await entry(b.dataset.plNotes); if (!e) return;
     const box = document.getElementById("preloi-notes-box");
@@ -6144,7 +6169,7 @@ async function loadPreLoi() {
   });
   wrap.querySelectorAll("[data-pl-loi]").forEach(b => b.onclick = async () => {
     const e = await entry(b.dataset.plLoi); if (!e) return;
-    const saved = e.answers.loiUrl || (String(e.answers.preLoiNotes || "").match(/LOI Generator[^\n]*?: (https:\/\/\S+)/) || [])[1];
+    const saved = e.answers.updatedLoiUrl || e.answers.loiUrl || (String(e.answers.preLoiNotes || "").match(/LOI Generator[^\n]*?: (https:\/\/\S+)/) || [])[1];
     if (!saved) { alert("This Pre-LOI has no saved LOI link. Re-save it from the screener."); return; }
     window.open(saved, "_blank", "noopener");
   });
@@ -6253,7 +6278,7 @@ async function openSubmission(id) {
     <label>Notes</label><textarea id="sub-notes" rows="2">${escapeHtml(s.notes || "")}</textarea>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
       <button type="button" class="btn primary" id="sub-save">Save</button>
-      ${s.loiLink ? `<button type="button" class="btn secondary" id="sub-open-loi">Open the LOI generator</button>` : ""}
+      ${s.loiLink || s.updatedLoiLink ? `<button type="button" class="btn secondary" id="sub-open-loi">Open the LOI generator${s.updatedLoiLink ? " (your updated link)" : ""}</button>` : ""}
       <button type="button" class="btn secondary" id="sub-copy">Copy all answers (JSON)</button>
     </div><p id="sub-msg" class="small-muted"></p></div>
     <div id="sub-full" style="margin-top:14px;"></div>`;
@@ -6261,11 +6286,13 @@ async function openSubmission(id) {
   // The same full deal view as the Auto Pre-LOI list (notes, every LOI generator variable, solver attempts, all answers), built from this submission's saved answers.
   const full = box.querySelector("#sub-full"), fullLoi = a.loiUrl || s.loiLink || "";
   full.innerHTML = preLoiDetailHtml({ street: s.street, city: s.city, state: s.state, zip: s.zip, askingPrice: s.askingPrice, sellerContactName: s.sellerContactName, sellerContactPhone: s.sellerContactPhone,
-    sellerContactEmail: s.sellerContactEmail, answers: Object.assign({}, a, fullLoi ? { loiUrl: fullLoi } : {}) });
+    sellerContactEmail: s.sellerContactEmail, updatedLoiLink: s.updatedLoiLink, updatedLoiAt: s.updatedLoiAt, answers: Object.assign({}, a, fullLoi ? { loiUrl: fullLoi } : {}) });
   const fo = full.querySelector("[data-pd-loi]"); if (fo) fo.onclick = () => window.open(fullLoi, "_blank", "noopener");
+  const fu = full.querySelector("[data-pd-loi-upd]"); if (fu) fu.onclick = () => window.open(s.updatedLoiLink, "_blank", "noopener");
+  preLoiWireUpdatedLoi(full, { submissionId: id }, () => { openSubmission(id); loadSubmissions(); });
   full.querySelector("[data-pd-close]").onclick = () => { full.innerHTML = ""; };
   full.querySelector("[data-pd-copy]").onclick = () => navigator.clipboard.writeText(JSON.stringify(s, null, 2)).then(() => { full.querySelector("[data-pd-msg]").textContent = "Copied."; });
-  const openLoi = box.querySelector("#sub-open-loi"); if (openLoi) openLoi.onclick = () => window.open(s.loiLink, "_blank", "noopener");
+  const openLoi = box.querySelector("#sub-open-loi"); if (openLoi) openLoi.onclick = () => window.open(s.updatedLoiLink || s.loiLink, "_blank", "noopener");
   box.querySelector("#sub-copy").onclick = () => navigator.clipboard.writeText(JSON.stringify(a, null, 2)).then(() => { box.querySelector("#sub-msg").textContent = "Copied."; });
   const stageSel = box.querySelector("#sub-stage"), crmMsg = box.querySelector("#sub-crm-msg"), toCrm = box.querySelector("#sub-to-crm");
   if (s.leadStatus && ADMIN_STATUS_SORT_ORDER.indexOf(s.leadStatus) !== -1) stageSel.value = s.leadStatus; else stageSel.value = "New";

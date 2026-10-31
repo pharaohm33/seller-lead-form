@@ -171,6 +171,8 @@ function doPost(e) {
         return jsonOut(withSession(body, adminGetSubmission));
       case 'adminUpdateSubmission':
         return jsonOut(withSession(body, adminUpdateSubmission));
+      case 'adminSaveUpdatedLoi':
+        return jsonOut(withSession(body, adminSaveUpdatedLoi));
       case 'adminDeleteSubmission':
         return jsonOut(withSession(body, adminDeleteSubmission));
       case 'adminRestoreSubmission':
@@ -761,7 +763,7 @@ const SUBMISSION_COLUMNS = [
   'Submission ID', 'Submitted At', 'Source', 'Admin Emailed',
   'Street Address', 'City', 'State', 'Zip', 'Asset Type', 'Asking Price',
   'Contact Name', 'Contact Email', 'Contact Phone', 'Seller Contact Name', 'Seller Contact Phone', 'Seller Contact Email',
-  'Lead ID', 'CRM ID', 'LOI Link', 'Doc URL', 'Draft Status', 'Notes', 'Deleted At'
+  'Lead ID', 'CRM ID', 'LOI Link', 'Doc URL', 'Draft Status', 'Notes', 'Deleted At', 'Updated LOI Link', 'Updated LOI At'
 ].concat(CRM_ANSWER_COLUMNS);
 
 // Same property written two ways ("123 N Main St." / "123 north main street") should match; zip narrows it when known.
@@ -826,7 +828,7 @@ function summarizeSubmission(r) {
     submissionId: r['Submission ID'], submittedAt: r['Submitted At'], source: r['Source'], adminEmailed: r['Admin Emailed'],
     street: r['Street Address'], city: r['City'], state: r['State'], zip: r['Zip'], assetType: r['Asset Type'], askingPrice: r['Asking Price'],
     contactName: r['Contact Name'], contactEmail: r['Contact Email'], sellerContactName: r['Seller Contact Name'], sellerContactPhone: r['Seller Contact Phone'],
-    sellerContactEmail: r['Seller Contact Email'], leadId: r['Lead ID'], crmId: r['CRM ID'], loiLink: r['LOI Link'], docUrl: r['Doc URL'], draftStatus: r['Draft Status'], notes: r['Notes'], deletedAt: r['Deleted At'] || ''
+    sellerContactEmail: r['Seller Contact Email'], leadId: r['Lead ID'], crmId: r['CRM ID'], loiLink: r['LOI Link'], docUrl: r['Doc URL'], draftStatus: r['Draft Status'], notes: r['Notes'], deletedAt: r['Deleted At'] || '', updatedLoiLink: r['Updated LOI Link'] || '', updatedLoiAt: r['Updated LOI At'] || ''
   };
 }
 
@@ -996,6 +998,42 @@ function adminGetSubmission(body) {
   if (row['Lead ID']) { const lead = sheetToObjects(getSheet(LEADS_SHEET, LEAD_COLUMNS)).filter(function (l) { return l['Lead ID'] === row['Lead ID']; })[0]; s.leadStatus = lead ? lead['Status'] : ''; }
   s.related = relatedRecords(addrKey(row['Street Address'], row['Zip'], row['City'], row['State']), row['Submission ID']);
   return { ok: true, submission: s };
+}
+
+// "Save updated LOI": the link you get after changing things in the LOI generator, kept apart from the generated link and from the notes. It is saved on the Pre-LOI row and on every
+// Submission of that deal, so either screen shows it. An empty link clears it.
+function adminSaveUpdatedLoi(body) {
+  const url = String(body.loiUrl || '').trim();
+  if (url && !/^https?:\/\/\S+$/.test(url)) return { ok: false, error: 'That does not look like a link.' };
+  if (url.length > 8000) return { ok: false, error: 'That link is too long to keep.' };
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const subSheet = getSheet(SUBMISSIONS_SHEET, SUBMISSION_COLUMNS), crmSheet = getSheet(CRM_SHEET, CRM_COLUMNS), now = new Date().toISOString(), at = url ? now : '';
+    let crmId = String(body.crmId || ''), subRow = null;
+    if (body.submissionId) {
+      subRow = sheetToObjects(subSheet).filter(function (r) { return r['Submission ID'] === body.submissionId; })[0];
+      if (!subRow) return { ok: false, error: 'Not found.' };
+      crmId = crmId || subRow['CRM ID'] || '';
+    }
+    let pre = crmId ? findCrmRow(crmSheet, crmId) : null;
+    if (pre && !isPreLoiStatus(pre['Status'])) pre = null;
+    if (!subRow && !pre) return { ok: false, error: 'Not found.' };
+    if (pre) {
+      const a = columnsToAnswers(pre);
+      if (url) { a.updatedLoiUrl = url; a.updatedLoiAt = at; } else { delete a.updatedLoiUrl; delete a.updatedLoiAt; }
+      const fields = answersToColumns(a); fields['Updated At'] = now;
+      writeCrmRow(crmSheet, pre._row, fields);
+    }
+    sheetToObjects(subSheet).forEach(function (r) {
+      if ((subRow && r['Submission ID'] === subRow['Submission ID']) || (crmId && r['CRM ID'] === crmId)) writeCrmRow(subSheet, r._row, { 'Updated LOI Link': url, 'Updated LOI At': at });
+    });
+    const who = pre || subRow;
+    logPreLoi(url ? 'save updated loi' : 'clear updated loi', { crmId: crmId, street: who['Street Address'], city: who['City'], state: who['State'], zip: who['Zip'] }, url ? 'Updated LOI saved' : 'Updated LOI cleared', '');
+    return { ok: true, updatedAt: at };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // "Delete" hides a submission (it keeps its row and the audit log records it); "show deleted" brings it back for Restore, and only a deleted one can be erased for good.
