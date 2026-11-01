@@ -360,6 +360,29 @@
     <button type="button" class="btn primary" id="admin-tab-leads">Leads</button>
     <button type="button" class="btn secondary" id="admin-tab-preloi">Auto Pre-LOI Before Contact</button>
     <button type="button" class="btn secondary" id="admin-tab-submissions">Submissions</button>
+    <button type="button" class="btn secondary" id="admin-tab-offers">Offers Sent</button>
+  </div>
+  <div id="offers-panel" hidden>
+    <div class="banner info" style="text-align:left;">Every LOI that actually went out, collected by the browser agent from the <strong>Sent</strong> folder of each Gmail account below (<code>./run.sh run sync_sent_offers</code>) or added by hand.
+      The agent will not build a second offer for an address while one is out and the seller has not answered. A reply it finds in the inbox (or <strong>Seller responded</strong> here) lifts that, so a counter can get a new offer.
+      <strong>Allow a new offer</strong> is your override: one new offer for any reason, used up by the next draft the agent saves.</div>
+    <div style="display:flex; gap:8px; margin-bottom:10px; align-items:flex-start; flex-wrap:wrap;">
+      <div style="flex:1; min-width:260px;"><label class="small-muted" for="offers-accounts">Gmail accounts to scan (add the old ones after you rotate to a new address)</label>
+        <input type="text" id="offers-accounts" placeholder="old@gmail.com, current@gmail.com" style="margin-bottom:0;"></div>
+      <button type="button" class="btn secondary" id="offers-accounts-save" style="align-self:flex-end;">Save accounts</button>
+    </div>
+    <details style="margin-bottom:10px;"><summary style="cursor:pointer;">Add an offer by hand (sent from your phone, another tool...)</summary>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
+        <input type="text" id="offers-add-address" placeholder="123 Main St, Tucson, AZ 85701" style="flex:2; min-width:220px; margin-bottom:0;">
+        <input type="text" id="offers-add-to" placeholder="sent to (email)" style="flex:1; min-width:160px; margin-bottom:0;">
+        <input type="text" id="offers-add-from" placeholder="from account" style="flex:1; min-width:160px; margin-bottom:0;">
+        <input type="date" id="offers-add-date" style="width:auto; margin-bottom:0;">
+        <button type="button" class="btn secondary" id="offers-add-btn">Add</button></div></details>
+    <div style="display:flex; gap:8px; margin-bottom:10px;">
+      <input type="text" id="offers-search" placeholder="Search address, recipient, account..." style="flex:1; width:auto; margin-bottom:0;">
+      <label style="align-self:center;white-space:nowrap;font-size:13px;"><input type="checkbox" id="offers-show-deleted" style="width:auto;"> show deleted</label>
+    </div>
+    <div id="offers-list"></div>
   </div>
   <div id="submissions-panel" hidden>
     <div class="banner info" style="text-align:left;">Every submission, kept for you to check and cross reference: real form submissions and Pre-LOI forms you finished (those send no email and are not added to Leads).
@@ -428,7 +451,7 @@
 </div>
 
 <script src="config.js?v=158"></script>
-<script src="app.js?v=174"></script>
+<script src="app.js?v=175"></script>
 <script src="screener.js?v=32"></script>
 </body>
 </html>

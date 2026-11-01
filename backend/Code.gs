@@ -183,6 +183,28 @@ function doPost(e) {
         return jsonOut(withSession(body, adminBulkPreLoi));
       case 'adminBulkSubmissions':
         return jsonOut(withSession(body, adminBulkSubmissions));
+      case 'adminGetOfferAccounts':
+        return jsonOut(withSession(body, adminGetOfferAccounts));
+      case 'adminSetOfferAccounts':
+        return jsonOut(withSession(body, adminSetOfferAccounts));
+      case 'adminCheckOffer':
+        return jsonOut(withSession(body, adminCheckOffer));
+      case 'adminRecordOffers':
+        return jsonOut(withSession(body, adminRecordOffers));
+      case 'adminRecordResponses':
+        return jsonOut(withSession(body, adminRecordResponses));
+      case 'adminMarkOfferResponded':
+        return jsonOut(withSession(body, adminMarkOfferResponded));
+      case 'adminAllowNewOffer':
+        return jsonOut(withSession(body, adminAllowNewOffer));
+      case 'adminCancelOverride':
+        return jsonOut(withSession(body, adminCancelOverride));
+      case 'adminUseOfferPermit':
+        return jsonOut(withSession(body, adminUseOfferPermit));
+      case 'adminGetOffers':
+        return jsonOut(withSession(body, adminGetOffers));
+      case 'adminDeleteOffer':
+        return jsonOut(withSession(body, adminDeleteOffer));
       case 'adminAddSubmissionToCrm':
         return jsonOut(withSession(body, adminAddSubmissionToCrm));
       case 'adminGetPreLoi':
@@ -1236,6 +1258,233 @@ function adminUpdateSubmission(body) {
   } finally {
     lock.releaseLock();
   }
+}
+
+// ---------- Offers sent (from the Sent mail scan or added by hand), the "no second offer" gate and the admin override ----------
+// Every LOI that actually went out is one row in "Offers Sent". The browser agent fills it by scanning Sent in each Gmail account on the accounts list. The gate for a new offer on the same address:
+//   none      no offer on file: go ahead
+//   sent      an offer is out and the seller has not answered: NOT allowed (unless you give an override)
+//   responded the seller answered (counter, question...): allowed, the new offer is built from their feedback
+//   override  you allowed a new offer for any reason: allowed once, then the gate is back
+const OFFERS_SHEET = 'Offers Sent';
+const OFFER_COLUMNS = ['Offer ID', 'Created At', 'Street Address', 'City', 'State', 'Zip', 'Sent At', 'Sent To', 'From Account', 'Subject', 'Thread Link', 'Message Key', 'Source',
+  'Responded At', 'Response From', 'Response Note', 'Lead ID', 'CRM ID', 'Deleted At'];
+const OVERRIDES_SHEET = 'Offer Overrides';
+const OVERRIDE_COLUMNS = ['Permit ID', 'Created At', 'Street Address', 'City', 'State', 'Zip', 'Reason', 'Used At'];
+// Stages a reply or a sent offer may move a lead out of. Anything further along (accepted, signed, escrow, closed, dead) is never moved by a mail scan.
+const OFFER_MOVABLE_STAGES = ['New', 'Contacted', 'Under Review', 'Hold Off', 'Offer Sent'];
+
+// "1689 W Wood Bridge Ct, Tucson, AZ 85746" (the form of the LOI email subject) -> its parts. Anything it cannot split stays whole in street.
+function parseAddressLine(line) {
+  const s = String(line || '').replace(/\s+/g, ' ').trim();
+  const m = s.match(/^(.*?),\s*([^,]+?),\s*([A-Za-z]{2})\.?,?\s*(\d{5})?(?:-\d{4})?\s*$/);
+  return m ? { street: m[1].trim(), city: m[2].trim(), state: m[3].toUpperCase(), zip: m[4] || '' } : { street: s, city: '', state: '', zip: '' };
+}
+function offerAddress(o) {
+  const a = (o.street || !o.address) ? { street: o.street || '', city: o.city || '', state: o.state || '', zip: o.zip || '' } : parseAddressLine(o.address);
+  return a;
+}
+// A key is only usable with a city or zip after the street ("12 main|" would match every 12 Main St).
+function offerKeyOk(key) { return !!key && !/\|$/.test(key); }
+function normalizeEmailList(raw) {
+  const arr = Array.isArray(raw) ? raw : String(raw || '').split(/[\s,;]+/);
+  const out = [];
+  arr.forEach(function (e) { const x = String(e || '').trim().toLowerCase(); if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x) && out.indexOf(x) === -1) out.push(x); });
+  return out;
+}
+function getOfferAccounts() { return normalizeEmailList(PropertiesService.getScriptProperties().getProperty('OFFER_ACCOUNTS') || ''); }
+function adminGetOfferAccounts() { return { ok: true, accounts: getOfferAccounts() }; }
+// The Gmail accounts the agent scans for sent offers and replies; add the old ones too after you rotate to a new address so their history is still collected.
+function adminSetOfferAccounts(body) {
+  const list = normalizeEmailList(body.accounts);
+  PropertiesService.getScriptProperties().setProperty('OFFER_ACCOUNTS', list.join(','));
+  return { ok: true, accounts: list };
+}
+
+function offerSummary(r) {
+  return { offerId: r['Offer ID'], createdAt: r['Created At'], street: r['Street Address'], city: r['City'], state: r['State'], zip: r['Zip'], sentAt: r['Sent At'], sentTo: r['Sent To'], fromAccount: r['From Account'],
+    subject: r['Subject'], threadLink: r['Thread Link'], source: r['Source'], respondedAt: r['Responded At'] || '', responseFrom: r['Response From'] || '', responseNote: r['Response Note'] || '',
+    leadId: r['Lead ID'] || '', crmId: r['CRM ID'] || '', deletedAt: r['Deleted At'] || '' };
+}
+function offersForKey(key) {
+  if (!key) return [];
+  return sheetToObjects(getSheet(OFFERS_SHEET, OFFER_COLUMNS)).filter(function (r) { return !r['Deleted At'] && addrKey(r['Street Address'], r['Zip'], r['City'], r['State']) === key; })
+    .sort(function (a, b) { return String(b['Sent At']).localeCompare(String(a['Sent At'])); });
+}
+function unusedPermit(key) {
+  if (!key) return null;
+  return sheetToObjects(getSheet(OVERRIDES_SHEET, OVERRIDE_COLUMNS)).filter(function (r) { return !r['Used At'] && addrKey(r['Street Address'], r['Zip'], r['City'], r['State']) === key; })[0] || null;
+}
+function offerGate(key) {
+  const offers = offersForKey(key), permit = unusedPermit(key);
+  if (!offers.length) return { status: permit ? 'override' : 'none', allowed: true, offer: null, permit: permit };
+  if (permit) return { status: 'override', allowed: true, offer: offers[0], permit: permit };
+  if (offers[0]['Responded At']) return { status: 'responded', allowed: true, offer: offers[0], permit: null };
+  return { status: 'sent', allowed: false, offer: offers[0], permit: null };
+}
+// Used by the browser agent before it researches a property.
+function adminCheckOffer(body) {
+  const a = offerAddress(body), key = addrKey(a.street, a.zip, a.city, a.state);
+  if (!offerKeyOk(key)) return { ok: false, error: 'The address needs a street and a city or zip.' };
+  const g = offerGate(key);
+  return { ok: true, status: g.status, allowed: g.allowed, offer: g.offer ? offerSummary(g.offer) : null, permit: g.permit ? { permitId: g.permit['Permit ID'], reason: g.permit['Reason'] } : null, offerCount: offersForKey(key).length };
+}
+
+// The first Lead at this address; a mail scan moves it along only from an early stage.
+function leadAtKey(key) {
+  return sheetToObjects(getSheet(LEADS_SHEET, LEAD_COLUMNS)).filter(function (l) { return addrKey(l['Street Address'], l['Zip'], l['City'], l['State']) === key; })[0] || null;
+}
+function moveLeadForOffer(lead, stage) {
+  if (!lead || OFFER_MOVABLE_STAGES.indexOf(lead['Status'] || 'New') === -1 || lead['Status'] === stage) return 'unchanged';
+  const r = updateStatus({ leadId: lead['Lead ID'], status: stage });
+  return r.ok ? 'moved to ' + stage : 'unchanged';
+}
+
+function adminRecordOffers(body) {
+  const list = (Array.isArray(body.offers) ? body.offers : []).slice(0, BULK_MAX);
+  if (!list.length) return { ok: false, error: 'No offers.' };
+  // No script lock here on purpose: filing a Pre-LOI as sent (adminMarkPreLoiSent) takes the lock itself, and the agent records one batch at a time.
+  {
+    const sheet = getSheet(OFFERS_SHEET, OFFER_COLUMNS);
+    const have = {};
+    sheetToObjects(sheet).forEach(function (r) { if (r['Message Key']) have[r['Message Key']] = true; });
+    const results = [];
+    list.forEach(function (o) {
+      const a = offerAddress(o), key = addrKey(a.street, a.zip, a.city, a.state);
+      if (!offerKeyOk(key)) { results.push({ address: o.address || '', status: 'skipped', note: 'address needs a street and a city or zip' }); return; }
+      const sentAt = o.sentAt ? new Date(o.sentAt).toISOString() : new Date().toISOString();
+      const dupKey = o.messageKey || (key + '|' + String(o.sentTo || '').toLowerCase() + '|' + sentAt.slice(0, 16));
+      if (have[dupKey]) { results.push({ address: o.address || a.street, status: 'existing' }); return; }
+      have[dupKey] = true;
+      const lead = leadAtKey(key);
+      const pre = sheetToObjects(getSheet(CRM_SHEET, CRM_COLUMNS)).filter(function (r) { return isPreLoiStatus(r['Status']) && addrKey(r['Street Address'], r['Zip'], r['City'], r['State']) === key; })
+        .sort(function (x, y) { return String(y['Updated At']).localeCompare(String(x['Updated At'])); })[0] || null;
+      appendRowByHeaders(sheet, { 'Offer ID': Utilities.getUuid(), 'Created At': new Date().toISOString(), 'Street Address': a.street, 'City': a.city, 'State': a.state, 'Zip': a.zip, 'Sent At': sentAt,
+        'Sent To': o.sentTo || '', 'From Account': String(o.fromAccount || '').toLowerCase(), 'Subject': o.subject || '', 'Thread Link': o.threadLink || '', 'Message Key': dupKey, 'Source': o.source || 'Sent scan',
+        'Lead ID': lead ? lead['Lead ID'] : '', 'CRM ID': pre ? pre['CRM ID'] : '' });
+      const det = { address: o.address || a.street, status: 'added', lead: 'none', preLoi: 'none', submissions: 0 };
+      if (lead) det.lead = moveLeadForOffer(lead, 'Offer Sent');
+      if (pre && [PRELOI_STATUS, PRELOI_DONE_STATUS].indexOf(pre['Status']) !== -1) {
+        const r = adminMarkPreLoiSent({ crmId: pre['CRM ID'] });
+        det.preLoi = r.ok ? 'marked LOI sent' : 'not marked';
+      }
+      const subSheet = getSheet(SUBMISSIONS_SHEET, SUBMISSION_COLUMNS);
+      sheetToObjects(subSheet).forEach(function (s) {
+        if (!s['Deleted At'] && addrKey(s['Street Address'], s['Zip'], s['City'], s['State']) === key) {
+          writeCrmRow(subSheet, s._row, { 'Draft Status': 'Offer sent ' + sentAt.slice(0, 10) + (o.fromAccount ? ' from ' + o.fromAccount : '') });
+          det.submissions++;
+        }
+      });
+      logPreLoi('offer sent', { crmId: pre ? pre['CRM ID'] : '', street: a.street, city: a.city, state: a.state, zip: a.zip }, 'Offer sent', (o.fromAccount || '') + ' -> ' + (o.sentTo || '') + ' (' + (o.source || 'Sent scan') + ')');
+      results.push(det);
+    });
+    return { ok: true, added: results.filter(function (r) { return r.status === 'added'; }).length, existing: results.filter(function (r) { return r.status === 'existing'; }).length, results: results };
+  }
+}
+
+// Replies the scan found (mail in the inbox about "LOI for <address>" from someone other than your own accounts). The newest offer on that address with no answer yet is marked responded,
+// the reply is logged in the lead's notes, and an early-stage lead moves to Negotiation.
+function adminRecordResponses(body) {
+  const list = (Array.isArray(body.responses) ? body.responses : []).slice(0, BULK_MAX);
+  if (!list.length) return { ok: false, error: 'No replies.' };
+  const mine = getOfferAccounts();
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const sheet = getSheet(OFFERS_SHEET, OFFER_COLUMNS);
+    const results = [];
+    list.forEach(function (x) {
+      const from = String(x.from || '').toLowerCase();
+      if (mine.some(function (m) { return from.indexOf(m) !== -1; })) { results.push({ address: x.address, status: 'ignored', note: 'from your own account' }); return; }
+      const a = offerAddress(x), key = addrKey(a.street, a.zip, a.city, a.state);
+      if (!offerKeyOk(key)) { results.push({ address: x.address, status: 'unmatched' }); return; }
+      const offer = offersForKey(key).filter(function (o) { return !o['Responded At']; }).sort(function (p, q) { return String(p['Sent At']).localeCompare(String(q['Sent At'])); })
+        .filter(function (o) { return !x.receivedAt || String(o['Sent At']) <= new Date(x.receivedAt).toISOString(); }).pop();
+      if (!offer) { results.push({ address: x.address, status: 'unmatched' }); return; }
+      const at = x.receivedAt ? new Date(x.receivedAt).toISOString() : new Date().toISOString();
+      writeCrmRow(sheet, offer._row, { 'Responded At': at, 'Response From': x.from || '', 'Response Note': String(x.snippet || '').slice(0, 300) });
+      const det = { address: x.address, status: 'responded', lead: 'none' };
+      const lead = leadAtKey(key);
+      if (lead) {
+        addNote({ leadId: lead['Lead ID'], note: 'Seller/realtor replied to the offer (' + at.slice(0, 10) + (x.from ? ', ' + x.from : '') + '): ' + String(x.snippet || '').slice(0, 300) });
+        det.lead = moveLeadForOffer(lead, 'Negotiation');
+      }
+      logPreLoi('offer response', { street: a.street, city: a.city, state: a.state, zip: a.zip }, 'Seller responded', x.from || '');
+      results.push(det);
+    });
+    return { ok: true, responded: results.filter(function (r) { return r.status === 'responded'; }).length, results: results };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function adminMarkOfferResponded(body) {
+  const sheet = getSheet(OFFERS_SHEET, OFFER_COLUMNS);
+  const o = sheetToObjects(sheet).filter(function (r) { return r['Offer ID'] === body.offerId; })[0];
+  if (!o) return { ok: false, error: 'Not found.' };
+  const clear = body.responded === false;
+  writeCrmRow(sheet, o._row, clear ? { 'Responded At': '', 'Response From': '', 'Response Note': '' } : { 'Responded At': new Date().toISOString(), 'Response From': 'marked by admin', 'Response Note': String(body.note || '').slice(0, 300) });
+  if (!clear) {
+    const key = addrKey(o['Street Address'], o['Zip'], o['City'], o['State']), lead = leadAtKey(key);
+    if (lead) { if (body.note) addNote({ leadId: lead['Lead ID'], note: 'Seller responded: ' + String(body.note).slice(0, 300) }); moveLeadForOffer(lead, 'Negotiation'); }
+  }
+  return { ok: true };
+}
+
+// Admin override: one new offer on this address for any reason, even while the earlier one is unanswered. It is used up by the next draft the agent saves (adminUseOfferPermit).
+function adminAllowNewOffer(body) {
+  let a;
+  if (body.offerId) {
+    const o = sheetToObjects(getSheet(OFFERS_SHEET, OFFER_COLUMNS)).filter(function (r) { return r['Offer ID'] === body.offerId; })[0];
+    if (!o) return { ok: false, error: 'Not found.' };
+    a = { street: o['Street Address'], city: o['City'], state: o['State'], zip: o['Zip'] };
+  } else { a = offerAddress(body); }
+  const key = addrKey(a.street, a.zip, a.city, a.state);
+  if (!offerKeyOk(key)) return { ok: false, error: 'The address needs a street and a city or zip.' };
+  const sheet = getSheet(OVERRIDES_SHEET, OVERRIDE_COLUMNS);
+  const open = unusedPermit(key);
+  if (open) return { ok: true, permitId: open['Permit ID'], already: true };
+  const id = Utilities.getUuid();
+  appendRowByHeaders(sheet, { 'Permit ID': id, 'Created At': new Date().toISOString(), 'Street Address': a.street, 'City': a.city, 'State': a.state, 'Zip': a.zip, 'Reason': String(body.reason || '').trim().slice(0, 300) || 'No reason given' });
+  logPreLoi('offer override', { street: a.street, city: a.city, state: a.state, zip: a.zip }, 'New offer allowed', String(body.reason || '').slice(0, 300));
+  return { ok: true, permitId: id };
+}
+function adminCancelOverride(body) {
+  const sheet = getSheet(OVERRIDES_SHEET, OVERRIDE_COLUMNS);
+  const r = sheetToObjects(sheet).filter(function (x) { return x['Permit ID'] === body.permitId && !x['Used At']; })[0];
+  if (!r) return { ok: false, error: 'Not found.' };
+  sheet.deleteRow(r._row);
+  return { ok: true };
+}
+function adminUseOfferPermit(body) {
+  const a = offerAddress(body), key = addrKey(a.street, a.zip, a.city, a.state), p = unusedPermit(key);
+  if (!p) return { ok: true, used: false };
+  writeCrmRow(getSheet(OVERRIDES_SHEET, OVERRIDE_COLUMNS), p._row, { 'Used At': new Date().toISOString() });
+  return { ok: true, used: true };
+}
+
+function adminGetOffers(body) {
+  const q = String(body.q || '').toLowerCase();
+  let rows = sheetToObjects(getSheet(OFFERS_SHEET, OFFER_COLUMNS)).filter(function (r) { return body.includeDeleted || !r['Deleted At']; });
+  if (q) rows = rows.filter(function (r) { return [r['Street Address'], r['City'], r['Zip'], r['Sent To'], r['From Account'], r['Subject']].join(' ').toLowerCase().indexOf(q) !== -1; });
+  rows.sort(function (a, b) { return String(b['Sent At']).localeCompare(String(a['Sent At'])); });
+  const permits = sheetToObjects(getSheet(OVERRIDES_SHEET, OVERRIDE_COLUMNS)).filter(function (r) { return !r['Used At']; });
+  const permitKeys = {}; permits.forEach(function (p) { permitKeys[addrKey(p['Street Address'], p['Zip'], p['City'], p['State'])] = p; });
+  const out = rows.slice(0, 500).map(function (r) {
+    const s = offerSummary(r), key = addrKey(r['Street Address'], r['Zip'], r['City'], r['State']);
+    const p = permitKeys[key];
+    s.permit = p ? { permitId: p['Permit ID'], reason: p['Reason'] } : null;
+    s.gate = r['Deleted At'] ? 'deleted' : offerGate(key).status;
+    return s;
+  });
+  return { ok: true, total: rows.length, offers: out, accounts: getOfferAccounts(), permits: permits.map(function (p) { return { permitId: p['Permit ID'], street: p['Street Address'], city: p['City'], zip: p['Zip'], reason: p['Reason'], createdAt: p['Created At'] }; }) };
+}
+function adminDeleteOffer(body) {
+  const sheet = getSheet(OFFERS_SHEET, OFFER_COLUMNS);
+  const o = sheetToObjects(sheet).filter(function (r) { return r['Offer ID'] === body.offerId; })[0];
+  if (!o) return { ok: false, error: 'Not found.' };
+  writeCrmRow(sheet, o._row, { 'Deleted At': body.restore ? '' : new Date().toISOString() });
+  return { ok: true };
 }
 
 // ---------- Beehiiv sync ----------

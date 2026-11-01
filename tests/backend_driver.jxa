@@ -19,9 +19,10 @@ MockSheet.prototype = {
   appendRow(row) { this.data.push(row.slice()); }, deleteRow(n) { this.data.splice(n - 1, 1); }, deleteRows(n, k) { this.data.splice(n - 1, k); }, setFrozenRows() {}
 };
 const sheets = {};
+const props = { ADMIN_EMAIL: 'admin@example.com', ADMIN_PASSWORD: 'pw', SESSION_SECRET: 's' };
 const mocks = {
   SpreadsheetApp: { getActiveSpreadsheet: () => ({ getSheetByName: n => sheets[n] || null, insertSheet: n => (sheets[n] = new MockSheet(n)) }) },
-  PropertiesService: { getScriptProperties: () => ({ getProperty: k => ({ ADMIN_EMAIL: 'admin@example.com', ADMIN_PASSWORD: 'pw', SESSION_SECRET: 's' }[k] || null) }) },
+  PropertiesService: { getScriptProperties: () => ({ getProperty: k => (props[k] === undefined ? null : props[k]), setProperty: (k, v) => { props[k] = v; } }) },
   LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
   Utilities: { getUuid: () => 'id-' + (++uuid), computeHmacSha256Signature: () => [1, 2, 3] },
   UrlFetchApp: { fetch() { fetches++; return { getContentText: () => '{}' }; } },

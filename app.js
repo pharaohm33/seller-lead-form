@@ -6025,20 +6025,24 @@ async function showAdminView() {
 
 /* ---------- Admin: Auto Pre-LOI Before Contact tab (admin session only) ---------- */
 function showAdminTab(which) {
-  const pre = which === "preloi", subs = which === "submissions";
+  const pre = which === "preloi", subs = which === "submissions", offers = which === "offers", other = pre || subs || offers;
   document.getElementById("preloi-panel").hidden = !pre;
   document.getElementById("submissions-panel").hidden = !subs;
-  document.getElementById("crm-table-wrap").hidden = pre || subs;
-  document.getElementById("crm-search-input").parentElement.hidden = pre || subs;        // the leads search bar belongs to the Leads tab only
-  document.getElementById("admin-tab-leads").className = "btn " + (pre || subs ? "secondary" : "primary");
+  document.getElementById("offers-panel").hidden = !offers;
+  document.getElementById("crm-table-wrap").hidden = other;
+  document.getElementById("crm-search-input").parentElement.hidden = other;        // the leads search bar belongs to the Leads tab only
+  document.getElementById("admin-tab-leads").className = "btn " + (other ? "secondary" : "primary");
   document.getElementById("admin-tab-preloi").className = "btn " + (pre ? "primary" : "secondary");
   document.getElementById("admin-tab-submissions").className = "btn " + (subs ? "primary" : "secondary");
+  document.getElementById("admin-tab-offers").className = "btn " + (offers ? "primary" : "secondary");
   if (pre) loadPreLoi();
   if (subs) loadSubmissions();
+  if (offers) loadOffers();
 }
 document.getElementById("admin-tab-leads").onclick = () => showAdminTab("leads");
 document.getElementById("admin-tab-preloi").onclick = () => showAdminTab("preloi");
 document.getElementById("admin-tab-submissions").onclick = () => showAdminTab("submissions");
+document.getElementById("admin-tab-offers").onclick = () => showAdminTab("offers");
 document.getElementById("preloi-show-deleted").onchange = () => loadPreLoi();
 document.getElementById("preloi-show-archived").onchange = () => loadPreLoi();
 
@@ -6291,6 +6295,57 @@ async function loadPreLoi() {
     if (!r.ok) { alert(r.error || "Couldn't remove."); return; }
     loadPreLoi();
   });
+}
+
+/* ---------- Admin: Offers Sent (what actually went out, the no-second-offer gate and the admin override) ---------- */
+let offersSearchTimer = null;
+document.getElementById("offers-search").oninput = () => { clearTimeout(offersSearchTimer); offersSearchTimer = setTimeout(loadOffers, 300); };
+document.getElementById("offers-show-deleted").onchange = () => loadOffers();
+document.getElementById("offers-accounts-save").onclick = async () => {
+  const r = await api("adminSetOfferAccounts", { token: sessionToken, accounts: document.getElementById("offers-accounts").value });
+  if (!r.ok) { alert(r.error || "Couldn't save."); return; }
+  document.getElementById("offers-accounts").value = r.accounts.join(", ");
+  alert(r.accounts.length ? "Saved. The agent scans " + r.accounts.length + " account" + (r.accounts.length === 1 ? "" : "s") + ": " + r.accounts.join(", ") : "Saved (no accounts: the agent scans only the Gmail it drafts from).");
+};
+document.getElementById("offers-add-btn").onclick = async () => {
+  const address = document.getElementById("offers-add-address").value.trim(), d = document.getElementById("offers-add-date").value;
+  if (!address) { alert("Type the property address, like 123 Main St, Tucson, AZ 85701."); return; }
+  const r = await api("adminRecordOffers", { token: sessionToken, offers: [{ address, sentTo: document.getElementById("offers-add-to").value.trim(), fromAccount: document.getElementById("offers-add-from").value.trim(), sentAt: d ? new Date(d + "T12:00:00").toISOString() : "", source: "Manual", subject: "LOI for " + address }] });
+  if (!r.ok || (r.results && r.results[0].status === "skipped")) { alert((r.error || (r.results && r.results[0].note) || "That didn't work.")); return; }
+  ["offers-add-address", "offers-add-to", "offers-add-from", "offers-add-date"].forEach(id => document.getElementById(id).value = "");
+  loadOffers();
+};
+async function loadOffers() {
+  const wrap = document.getElementById("offers-list");
+  wrap.innerHTML = `<p class="small-muted">Loading...</p>`;
+  const res = await api("adminGetOffers", { token: sessionToken, q: document.getElementById("offers-search").value.trim(), includeDeleted: document.getElementById("offers-show-deleted").checked });
+  if (!res.ok) { wrap.innerHTML = `<p class="small-muted">${escapeHtml(res.error || "Couldn't load.")}</p>`; return; }
+  const acc = document.getElementById("offers-accounts"); if (document.activeElement !== acc) acc.value = (res.accounts || []).join(", ");
+  if (!res.offers.length) { wrap.innerHTML = `<p class="small-muted" style="padding:12px;">No offers recorded yet. Run the agent's sent-offer scan, or add one by hand.</p>`; return; }
+  const statusHtml = o => o.deletedAt ? `<span style="color:#991b1b;font-weight:600;font-size:12px;">Deleted</span>`
+    : o.permit ? `<span style="color:#1d4ed8;font-weight:600;font-size:12px;">New offer allowed</span><br><span class="small-muted">${escapeHtml(o.permit.reason)}</span>`
+    : o.respondedAt ? `<span style="color:#166534;font-weight:600;font-size:12px;">Seller responded</span><br><span class="small-muted">${escapeHtml(formatDate(o.respondedAt))}${o.responseNote ? " · " + escapeHtml(o.responseNote) : ""}</span>`
+    : `<span style="color:#92400e;font-weight:600;font-size:12px;">Waiting on seller</span><br><span class="small-muted">no second offer until they answer</span>`;
+  wrap.innerHTML = `<p class="small-muted">${res.total} offer${res.total === 1 ? "" : "s"}${res.permits.length ? " · " + res.permits.length + " override" + (res.permits.length === 1 ? "" : "s") + " waiting to be used" : ""}</p>
+    <table class="crm-table"><thead><tr><th>Sent</th><th>Address</th><th>Sent to</th><th>From account</th><th>Status</th><th></th></tr></thead><tbody>
+    ${res.offers.map(o => { const id = escapeHtml(o.offerId); return `<tr style="cursor:default${o.deletedAt ? ";opacity:.6" : ""}">
+      <td>${formatDate(o.sentAt)}<br><span class="small-muted">${escapeHtml(o.source || "")}</span></td>
+      <td>${escapeHtml(o.street || "")}<br><span class="small-muted">${escapeHtml(o.city || "")}, ${escapeHtml(o.state || "")} ${escapeHtml(o.zip || "")}</span></td>
+      <td>${escapeHtml(o.sentTo || "")}</td><td>${escapeHtml(o.fromAccount || "")}</td>
+      <td>${statusHtml(o)}</td>
+      <td style="white-space:nowrap">${o.deletedAt ? `<button type="button" class="btn secondary" data-of-restore="${id}">Restore</button>` : `
+        ${o.threadLink ? `<a class="btn secondary" href="${escapeHtml(o.threadLink)}" target="_blank" rel="noopener">Open mail</a>` : ""}
+        ${o.respondedAt ? `<button type="button" class="link-btn" data-of-reopen="${id}" title="Mark as waiting on the seller again">Not responded</button>` : `<button type="button" class="btn secondary" data-of-responded="${id}">Seller responded</button>`}
+        ${o.permit ? `<button type="button" class="link-btn" data-of-cancel="${escapeHtml(o.permit.permitId)}">Cancel override</button>` : `<button type="button" class="btn primary" data-of-allow="${id}" title="Override: allow one new offer on this address for any reason">Allow a new offer</button>`}
+        <button type="button" class="link-btn" data-of-delete="${id}" title="Takes a wrongly recorded offer out of the gate; Restore brings it back">Delete</button>`}</td></tr>`; }).join("")}
+    </tbody></table>`;
+  const call = async (action, extra) => { const r = await api(action, Object.assign({ token: sessionToken }, extra)); if (!r.ok) { alert(r.error || "That didn't work."); return false; } loadOffers(); return true; };
+  wrap.querySelectorAll("[data-of-responded]").forEach(b => b.onclick = () => { const note = prompt("What did they say? (optional, goes in the lead's notes)", ""); if (note !== null) call("adminMarkOfferResponded", { offerId: b.dataset.ofResponded, note }); });
+  wrap.querySelectorAll("[data-of-reopen]").forEach(b => b.onclick = () => call("adminMarkOfferResponded", { offerId: b.dataset.ofReopen, responded: false }));
+  wrap.querySelectorAll("[data-of-allow]").forEach(b => b.onclick = () => { const reason = prompt("Allow a new offer on this address. Why? (counter, price drop, new terms, anything)", ""); if (reason !== null) call("adminAllowNewOffer", { offerId: b.dataset.ofAllow, reason }); });
+  wrap.querySelectorAll("[data-of-cancel]").forEach(b => b.onclick = () => call("adminCancelOverride", { permitId: b.dataset.ofCancel }));
+  wrap.querySelectorAll("[data-of-delete]").forEach(b => b.onclick = () => { if (confirm("Remove this offer from the list? It stays on file (show deleted) and no longer blocks a new offer.")) call("adminDeleteOffer", { offerId: b.dataset.ofDelete }); });
+  wrap.querySelectorAll("[data-of-restore]").forEach(b => b.onclick = () => call("adminDeleteOffer", { offerId: b.dataset.ofRestore, restore: true }));
 }
 
 /* ---------- Admin: Submissions (every submission, for checking and cross referencing) ---------- */
