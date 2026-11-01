@@ -368,6 +368,7 @@
       <input type="text" id="sub-search" placeholder="Search address, name, email..." style="flex:1; width:auto; margin-bottom:0;">
       <select id="sub-source" style="flex:0 0 auto; width:auto;"><option value="">All sources</option><option value="Public">Public form</option><option value="Pre-LOI">Pre-LOI form</option></select>
       <label style="align-self:center;white-space:nowrap;font-size:13px;"><input type="checkbox" id="sub-show-deleted" style="width:auto;"> show deleted</label>
+      <label style="align-self:center;white-space:nowrap;font-size:13px;"><input type="checkbox" id="sub-show-archived" style="width:auto;"> show archived</label>
     </div>
     <div id="submissions-list"></div>
     <div id="submission-detail"></div>
@@ -378,7 +379,9 @@
       <strong>Resume</strong> walks the deal through the whole form with everything pre-filled; the last step finishes it (no email, nothing added to Leads), saves it under Submissions and opens the LOI generator.
       <strong>Details</strong> opens everything saved for the deal, untruncated: underwriting notes, every LOI generator variable, the buy &amp; hold solver attempts and all form answers.
       <strong>Notes</strong> holds the underwriting plus both labeled links.
-      <label style="margin-left:12px;"><input type="checkbox" id="preloi-show-deleted" style="width:auto;"> show deleted</label></div>
+      <label style="margin-left:12px;"><input type="checkbox" id="preloi-show-deleted" style="width:auto;"> show deleted</label>
+      <label style="margin-left:12px;"><input type="checkbox" id="preloi-show-archived" style="width:auto;"> show archived</label>
+      <strong>Clean up:</strong> tick rows (or use <em>Select rows</em>) and Archive or Delete them in one go. Archive sets a deal aside; both are reversible, and a sent offer is never touched.</div>
     <div id="preloi-entries"></div>
   </div>
   <div style="display:flex; gap:8px; margin-bottom:16px;">
@@ -386,13 +389,14 @@
     <select id="crm-sort-select" style="flex:0 0 auto; width:auto;">
       <option value="default">Sort: Default</option>
       <option value="newest">Sort: Newest</option>
+      <option value="updated">Sort: Recently updated</option>
     </select>
   </div>
   <div id="crm-table-wrap">
     <table class="crm-table">
       <thead>
         <tr>
-          <th>Submitted</th><th>Role</th><th>Contact</th><th>Team</th><th>Address</th><th>Asset Type</th><th>Senior Loan</th><th>Payment Structure</th><th>Price Sought</th><th>Score</th><th>Status</th>
+          <th>Submitted</th><th>Last updated</th><th>Role</th><th>Contact</th><th>Team</th><th>Address</th><th>Asset Type</th><th>Senior Loan</th><th>Payment Structure</th><th>Price Sought</th><th>Score</th><th>Status</th>
         </tr>
       </thead>
       <tbody id="crm-tbody"></tbody>
@@ -424,7 +428,7 @@
 </div>
 
 <script src="config.js?v=158"></script>
-<script src="app.js?v=173"></script>
+<script src="app.js?v=174"></script>
 <script src="screener.js?v=32"></script>
 </body>
 </html>

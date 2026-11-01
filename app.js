@@ -505,12 +505,13 @@ function adminStatusSortIndex(status) {
   return idx === -1 ? ADMIN_STATUS_SORT_ORDER.length : idx;
 }
 
-// "newest" ignores status entirely and sorts purely by submission date;
+// "newest" ignores status entirely and sorts purely by submission date; "updated" sorts by the latest activity on the lead (stage, notes, score, team, MAO);
 // "default" (or anything else) keeps the existing status-priority order,
 // falling back to newest-first as the tiebreak within the same status.
 function leadSortComparator(mode, statusIndexFn) {
   return (a, b) => {
     if (mode === "newest") return new Date(b["Submitted At"]) - new Date(a["Submitted At"]);
+    if (mode === "updated") return new Date(b["Last Updated"] || b["Submitted At"]) - new Date(a["Last Updated"] || a["Submitted At"]);
     const statusDiff = statusIndexFn(a["Status"]) - statusIndexFn(b["Status"]);
     if (statusDiff !== 0) return statusDiff;
     return new Date(b["Submitted At"]) - new Date(a["Submitted At"]);
@@ -5540,6 +5541,7 @@ function renderCrmEntries(email, entries) {
 function buildLeadFields(lead) {
   const fields = [
     ["Submitted", formatDate(lead["Submitted At"])],
+    ...(lead["Last Updated"] ? [["Last updated", formatDate(lead["Last Updated"])]] : []),
     ["Role", lead["Role"]], ["Name", lead["Contact Name"]], ["Email", lead["Contact Email"]], ["Phone", lead["Contact Phone"]],
     ["Social Link", lead["Social Link"] || "—"],
     ["Referred By", lead["Referrer Name"] || "—"], ["Referrer Phone", lead["Referrer Phone"] || "—"],
@@ -6038,6 +6040,7 @@ document.getElementById("admin-tab-leads").onclick = () => showAdminTab("leads")
 document.getElementById("admin-tab-preloi").onclick = () => showAdminTab("preloi");
 document.getElementById("admin-tab-submissions").onclick = () => showAdminTab("submissions");
 document.getElementById("preloi-show-deleted").onchange = () => loadPreLoi();
+document.getElementById("preloi-show-archived").onchange = () => loadPreLoi();
 
 // "LOI sent": the Pre-LOI row stays (status LOI Sent) and a copy is filed in your CRM as "Offer sent to cold lead". No email is sent.
 async function markPreLoiSent(crmId) {
@@ -6046,8 +6049,81 @@ async function markPreLoiSent(crmId) {
 
 const PRELOI_BADGE = {
   "Auto Pre-LOI Before Contact": ["Ready", "#1d4ed8"], "Auto Pre-LOI Form Completed": ["Form completed", "#166534"],
-  "Auto Pre-LOI LOI Sent": ["LOI sent", "#6d28d9"], "Auto Pre-LOI Deleted": ["Deleted", "#991b1b"]
+  "Auto Pre-LOI LOI Sent": ["LOI sent", "#6d28d9"], "Auto Pre-LOI Deleted": ["Deleted", "#991b1b"], "Auto Pre-LOI Archived": ["Archived", "#92400e"]
 };
+
+/* ---------- Bulk clean-up, shared by the Pre-LOI list and Submissions ---------- */
+// Archive = set aside, hidden until you tick "show archived"; Delete = the usual reversible hide. Nothing is erased, and an offer already sent (or a deal already filed in the CRM) is refused by the backend, which reports it back as skipped.
+const CLEANUP_OLD_DAYS = 14;
+function cleanupAddrKey(street, zip) {
+  const s = String(street || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\b(street|st|drive|dr|avenue|ave|road|rd|lane|ln|court|ct|place|pl|boulevard|blvd|circle|cir|way|terrace|ter)\b/g, "").replace(/\s+/g, " ").trim();
+  return s ? s + "|" + String(zip || "").replace(/\D/g, "").slice(0, 5) : "";
+}
+// rows: [{id, hidden, sent, inCrm, finished, hasDoc, when, key}]. Returns the ids to tick for a quick-select mode. Only rows that are shown, not sent and not in the CRM are ever ticked.
+function cleanupPick(rows, mode, now) {
+  now = now || Date.now();
+  const open = r => !r.hidden && !r.sent && !r.inCrm;
+  const newest = {};
+  rows.forEach(r => { if (!r.hidden && r.key && (!newest[r.key] || new Date(r.when) > new Date(newest[r.key]))) newest[r.key] = r.when; });
+  return rows.filter(r => {
+    if (!open(r)) return false;
+    if (mode === "unsent") return true;
+    if (mode === "stuck") return !r.finished;
+    if (mode === "nodoc") return !r.hasDoc;
+    if (mode === "old") return now - new Date(r.when).getTime() > CLEANUP_OLD_DAYS * 86400000;
+    if (mode === "dups") return !!r.key && new Date(r.when) < new Date(newest[r.key]);
+    return false;
+  }).map(r => r.id);
+}
+function cleanupBarHtml(kind, quick) {
+  return `<div data-cu-bar style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0;padding:8px 10px;border:1px solid #e5e7eb;border-radius:8px;">
+    <select data-cu-quick style="width:auto;margin:0;"><option value="">Select rows…</option>${quick.map(([v, l]) => `<option value="${v}">${l}</option>`).join("")}<option value="none">Clear selection</option></select>
+    <span data-cu-count class="small-muted">0 selected</span>
+    <button type="button" class="btn secondary" data-cu-act="archive" disabled title="Set aside: hidden until you tick show archived. Nothing is erased.">Archive selected</button>
+    <button type="button" class="btn secondary" data-cu-act="delete" disabled title="Hide (reversible with show deleted). Nothing is erased.">Delete selected</button>
+    <button type="button" class="btn secondary" data-cu-act="restore" disabled title="Bring archived or deleted rows back">Restore selected</button>
+    <span class="small-muted">Sent offers and deals already in the CRM are never touched.</span></div>`;
+}
+// rows is the same list the table was drawn from; ids are the checkbox values (data-cu-pick). reload() redraws the list after a change.
+function cleanupWire(wrap, kind, rows, reload) {
+  const picks = () => Array.from(wrap.querySelectorAll("[data-cu-pick]"));
+  const chosen = () => picks().filter(c => c.checked).map(c => c.dataset.cuPick);
+  const refresh = () => {
+    const n = chosen().length;
+    wrap.querySelector("[data-cu-count]").textContent = n + " selected";
+    wrap.querySelectorAll("[data-cu-act]").forEach(b => b.disabled = n === 0);
+  };
+  picks().forEach(c => c.onchange = refresh);
+  const all = wrap.querySelector("[data-cu-all]");
+  if (all) all.onchange = () => { picks().forEach(c => c.checked = all.checked); refresh(); };
+  wrap.querySelector("[data-cu-quick]").onchange = e => {
+    const mode = e.target.value; e.target.value = "";
+    if (!mode) return;
+    const ids = mode === "none" ? [] : cleanupPick(rows, mode);
+    picks().forEach(c => c.checked = ids.indexOf(c.dataset.cuPick) !== -1);
+    if (all) all.checked = false;
+    refresh();
+    if (mode !== "none" && !ids.length) alert("Nothing matches that.");
+  };
+  const NOUN = kind === "preloi" ? "Pre-LOI deal" : "submission";
+  const run = async (action, ids) => {
+    const verb = { archive: "Archive", delete: "Delete (hide)", restore: "Restore" }[action];
+    const note = action === "restore" ? "" : " Nothing is erased; you can restore " + (ids.length === 1 ? "it" : "them") + " later. Offers already sent are never touched.";
+    if (!confirm(verb + " " + ids.length + " " + NOUN + (ids.length === 1 ? "" : "s") + "?" + note)) return;
+    let done = 0; const skipped = [];
+    for (let i = 0; i < ids.length; i += 50) {
+      const chunk = ids.slice(i, i + 50);
+      const r = await api(kind === "preloi" ? "adminBulkPreLoi" : "adminBulkSubmissions", Object.assign({ token: sessionToken, action }, kind === "preloi" ? { crmIds: chunk } : { submissionIds: chunk }));
+      if (!r.ok) { alert((r.error || "That didn't work.") + (done ? " (" + done + " done before it stopped.)" : "")); break; }
+      done += r.done; (r.skipped || []).forEach(s => skipped.push(s));
+    }
+    if (skipped.length) alert(done + " done. " + skipped.length + " skipped:\n" + skipped.slice(0, 15).map(s => "• " + (s.street || s.id) + " — " + s.reason).join("\n") + (skipped.length > 15 ? "\n…and " + (skipped.length - 15) + " more" : ""));
+    reload();
+  };
+  wrap.querySelectorAll("[data-cu-act]").forEach(b => b.onclick = () => { const ids = chosen(); if (ids.length) run(b.dataset.cuAct, ids); });
+  wrap.querySelectorAll("[data-cu-one]").forEach(b => b.onclick = () => { const [action, id] = b.dataset.cuOne.split(":"); run(action, [id]); });
+  refresh();
+}
 
 // Names for the LOI generator link's parameters, so the Details view reads as a deal sheet. A parameter without a name here shows under its raw key.
 const PRELOI_LOI_LABELS = {
@@ -6115,15 +6191,18 @@ function preLoiWireUpdatedLoi(root, ids, onSaved) {
 
 async function loadPreLoi() {
   const wrap = document.getElementById("preloi-entries");
-  const showDeleted = document.getElementById("preloi-show-deleted").checked;
+  const showDeleted = document.getElementById("preloi-show-deleted").checked, showArchived = document.getElementById("preloi-show-archived").checked;
   wrap.innerHTML = `<p class="small-muted">Loading...</p>`;
-  const res = await api("adminGetPreLoi", { token: sessionToken, includeDeleted: showDeleted });
+  const res = await api("adminGetPreLoi", { token: sessionToken, includeDeleted: showDeleted, includeArchived: showArchived });
   if (!res.ok) { wrap.innerHTML = `<p class="small-muted">${escapeHtml(res.error || "Couldn't load.")}</p>`; return; }
   if (!res.entries.length) { wrap.innerHTML = `<p class="small-muted" style="padding:12px;">No pre-LOI deals yet.</p>`; return; }
-  wrap.innerHTML = `<table class="crm-table"><thead><tr><th>Updated</th><th>Status</th><th>Address</th><th>Asking</th><th>Seller / realtor contact</th><th></th></tr></thead><tbody>
+  const cuRows = res.entries.map(e => ({ id: e.crmId, hidden: e.status === "Auto Pre-LOI Deleted" || e.status === "Auto Pre-LOI Archived", sent: e.status === "Auto Pre-LOI LOI Sent", inCrm: false,
+    finished: e.status === "Auto Pre-LOI Form Completed" || e.status === "Auto Pre-LOI LOI Sent", hasDoc: true, when: e.updatedAt, key: cleanupAddrKey(e.street, e.zip) }));
+  wrap.innerHTML = cleanupBarHtml("preloi", [["unsent", "All not sent"], ["stuck", "Never finished (still Ready)"], ["old", "Not sent and older than " + CLEANUP_OLD_DAYS + " days"], ["dups", "Older duplicates of the same address"]]) + `<table class="crm-table"><thead><tr><th><input type="checkbox" data-cu-all style="width:auto" title="Tick every row shown"></th><th>Updated</th><th>Status</th><th>Address</th><th>Asking</th><th>Seller / realtor contact</th><th></th></tr></thead><tbody>
     ${res.entries.map(e => {
-      const badge = PRELOI_BADGE[e.status] || [e.status, "#374151"], gone = e.status === "Auto Pre-LOI Deleted", id = escapeHtml(e.crmId);
-      return `<tr style="cursor:default${gone ? ";opacity:.6" : ""}">
+      const badge = PRELOI_BADGE[e.status] || [e.status, "#374151"], gone = e.status === "Auto Pre-LOI Deleted", shelved = e.status === "Auto Pre-LOI Archived", id = escapeHtml(e.crmId);
+      return `<tr style="cursor:default${gone || shelved ? ";opacity:.6" : ""}">
+      <td><input type="checkbox" data-cu-pick="${id}" style="width:auto"></td>
       <td>${formatDate(e.updatedAt)}</td>
       <td><span style="color:${badge[1]};font-weight:600;font-size:12px;">${escapeHtml(badge[0])}</span></td>
       <td>${escapeHtml(e.street || "")}<br><span class="small-muted">${escapeHtml(e.city || "")}, ${escapeHtml(e.state || "")} ${escapeHtml(e.zip || "")}</span></td>
@@ -6134,14 +6213,18 @@ async function loadPreLoi() {
         <button type="button" class="btn secondary" data-pl-updloi="${id}" title="Save the link from the LOI generator after you change something there">Save updated LOI</button>
         ${gone ? `<button type="button" class="btn secondary" data-pl-restore="${id}">Restore</button>
                   <button type="button" class="link-btn" data-pl-purge="${id}">Delete forever</button>`
+               : shelved ? `<button type="button" class="btn secondary" data-cu-one="restore:${id}">Restore</button>
+                  <button type="button" class="link-btn" data-pl-delete="${id}">Delete</button>`
                : `<button type="button" class="btn secondary" data-pl-notes="${id}">Notes</button>
                   <button type="button" class="btn secondary" data-pl-loi="${id}" title="Opens the LOI generator with this deal's saved link (your updated one if you saved it)">Open LOI</button>
                   <button type="button" class="btn primary" data-pl-resume="${id}" title="Walk it through the whole form, pre-filled">Resume</button>
                   <button type="button" class="btn secondary" data-pl-sent="${id}" title="Keeps this row and files a copy in your CRM as Offer sent to cold lead. No email is sent.">LOI sent</button>
+                  ${e.status === "Auto Pre-LOI LOI Sent" ? "" : `<button type="button" class="link-btn" data-cu-one="archive:${id}" title="Set aside without erasing it">Archive</button>`}
                   <button type="button" class="link-btn" data-pl-delete="${id}">Delete</button>`}
       </td></tr>`;
     }).join("")}
   </tbody></table><pre id="preloi-notes-box" class="small-muted" style="white-space:pre-wrap; margin-top:10px; user-select:text;" hidden></pre>`;
+  cleanupWire(wrap, "preloi", cuRows, loadPreLoi);
   const entry = async id => { const r = await api("adminGetPreLoiEntry", { token: sessionToken, crmId: id }); if (!r.ok) alert(r.error || "Couldn't open that lead."); return r.ok ? r.entry : null; };
   const showDetails = async (id, focusLink) => {
     const b = wrap.querySelector(`[data-pl-details="${id}"]`), tr = b.closest("tr"), open = tr.nextElementSibling;
@@ -6149,7 +6232,7 @@ async function loadPreLoi() {
     wrap.querySelectorAll(".pl-detail-row").forEach(r => r.remove());
     b.disabled = true; const e = await entry(id); b.disabled = false; if (!e) return;
     const row = document.createElement("tr"); row.className = "pl-detail-row"; row.style.cursor = "default";
-    row.innerHTML = `<td colspan="6">${preLoiDetailHtml(e)}</td>`;
+    row.innerHTML = `<td colspan="7">${preLoiDetailHtml(e)}</td>`;
     tr.after(row);
     const orig = e.answers.loiUrl || (String(e.answers.preLoiNotes || "").match(/LOI Generator[^\n]*?: (https:\/\/\S+)/) || [])[1], upd = e.answers.updatedLoiUrl;
     const o = row.querySelector("[data-pd-loi]"); if (o) o.onclick = () => window.open(orig, "_blank", "noopener");
@@ -6215,27 +6298,34 @@ let subSearchTimer = null;
 document.getElementById("sub-search").oninput = () => { clearTimeout(subSearchTimer); subSearchTimer = setTimeout(loadSubmissions, 300); };
 document.getElementById("sub-source").onchange = () => loadSubmissions();
 document.getElementById("sub-show-deleted").onchange = () => loadSubmissions();
+document.getElementById("sub-show-archived").onchange = () => loadSubmissions();
 
 async function loadSubmissions() {
   const wrap = document.getElementById("submissions-list");
   wrap.innerHTML = `<p class="small-muted">Loading...</p>`;
-  const res = await api("adminGetSubmissions", { token: sessionToken, q: document.getElementById("sub-search").value.trim(), source: document.getElementById("sub-source").value, includeDeleted: document.getElementById("sub-show-deleted").checked });
+  const res = await api("adminGetSubmissions", { token: sessionToken, q: document.getElementById("sub-search").value.trim(), source: document.getElementById("sub-source").value, includeDeleted: document.getElementById("sub-show-deleted").checked, includeArchived: document.getElementById("sub-show-archived").checked });
   if (!res.ok) { wrap.innerHTML = `<p class="small-muted">${escapeHtml(res.error || "Couldn't load.")}</p>`; return; }
   if (!res.submissions.length) { wrap.innerHTML = `<p class="small-muted" style="padding:12px;">No submissions yet.</p>`; return; }
+  const sentLike = s => s.preLoiStatus === "Auto Pre-LOI LOI Sent" || /sent/i.test(String(s.draftStatus || "").replace(/not sent|never sent|unsent/ig, ""));
+  const cuRows = res.submissions.map(s => ({ id: s.submissionId, hidden: !!(s.deletedAt || s.archivedAt), sent: sentLike(s), inCrm: !!s.leadId, finished: true, hasDoc: !!(s.docUrl || s.draftStatus), when: s.submittedAt, key: cleanupAddrKey(s.street, s.zip) }));
   wrap.innerHTML = `<p class="small-muted">${res.total} submission${res.total === 1 ? "" : "s"}${res.total > res.submissions.length ? " (showing the newest " + res.submissions.length + ")" : ""}</p>
-    <table class="crm-table"><thead><tr><th>When</th><th>Source</th><th>Address</th><th>Contact</th><th>Admin emailed</th><th>Matches</th><th>LOI / Doc / Draft</th><th>CRM stage</th><th></th></tr></thead><tbody>
-    ${res.submissions.map(s => `<tr style="cursor:default${s.deletedAt ? ";opacity:.6" : ""}">
+    ${cleanupBarHtml("submissions", [["unsent", "All not sent and not in the CRM"], ["nodoc", "No Doc and no Gmail draft"], ["old", "Not sent and older than " + CLEANUP_OLD_DAYS + " days"], ["dups", "Older duplicates of the same address"]])}
+    <table class="crm-table"><thead><tr><th><input type="checkbox" data-cu-all style="width:auto" title="Tick every row shown"></th><th>When</th><th>Source</th><th>Address</th><th>Contact</th><th>Admin emailed</th><th>Matches</th><th>LOI / Doc / Draft</th><th>CRM stage</th><th></th></tr></thead><tbody>
+    ${res.submissions.map(s => `<tr style="cursor:default${s.deletedAt || s.archivedAt ? ";opacity:.6" : ""}">
+      <td><input type="checkbox" data-cu-pick="${escapeHtml(s.submissionId)}" style="width:auto"></td>
       <td>${formatDate(s.submittedAt)}</td><td>${escapeHtml(s.source)}</td>
       <td>${escapeHtml(s.street || "")}<br><span class="small-muted">${escapeHtml(s.city || "")}, ${escapeHtml(s.state || "")} ${escapeHtml(s.zip || "")}</span></td>
       <td>${escapeHtml(s.sellerContactName || s.contactName || "")}<br><span class="small-muted">${escapeHtml(s.sellerContactEmail || s.contactEmail || "")}</span></td>
       <td>${escapeHtml(s.adminEmailed || "")}</td>
       <td class="small-muted">L ${s.matches.leads} · P ${s.matches.preLoi} · C ${s.matches.crm}${s.matches.submissions > 1 ? " · " + s.matches.submissions + " subs" : ""}</td>
       <td class="small-muted">${s.loiLink ? "LOI ✓" : "—"} · ${s.docUrl ? `<a href="${escapeHtml(s.docUrl)}" target="_blank" rel="noopener">Doc</a>` : "no doc"} · ${escapeHtml(s.draftStatus || "no draft")}</td>
-      <td>${s.deletedAt ? `<span style="color:#991b1b;font-weight:600;font-size:12px;">Deleted</span>` : s.leadId ? escapeHtml(s.leadStatus || "In CRM") : `<span class="small-muted">not in CRM</span>`}</td>
+      <td>${s.deletedAt ? `<span style="color:#991b1b;font-weight:600;font-size:12px;">Deleted</span>` : s.archivedAt ? `<span style="color:#92400e;font-weight:600;font-size:12px;">Archived</span>` : s.leadId ? escapeHtml(s.leadStatus || "In CRM") : `<span class="small-muted">not in CRM</span>`}</td>
       <td style="white-space:nowrap"><button type="button" class="btn secondary" data-sub="${escapeHtml(s.submissionId)}">View</button>
         ${s.deletedAt ? `<button type="button" class="btn secondary" data-sub-restore="${escapeHtml(s.submissionId)}">Restore</button> <button type="button" class="link-btn" data-sub-purge="${escapeHtml(s.submissionId)}">Delete forever</button>`
-                      : `<button type="button" class="link-btn" data-sub-delete="${escapeHtml(s.submissionId)}">Delete</button>`}</td></tr>`).join("")}
+                      : s.archivedAt ? `<button type="button" class="btn secondary" data-cu-one="restore:${escapeHtml(s.submissionId)}">Restore</button> <button type="button" class="link-btn" data-sub-delete="${escapeHtml(s.submissionId)}">Delete</button>`
+                      : `${s.leadId || sentLike(s) ? "" : `<button type="button" class="link-btn" data-cu-one="archive:${escapeHtml(s.submissionId)}" title="Set aside without erasing it">Archive</button> `}<button type="button" class="link-btn" data-sub-delete="${escapeHtml(s.submissionId)}">Delete</button>`}</td></tr>`).join("")}
     </tbody></table>`;
+  cleanupWire(wrap, "submissions", cuRows, loadSubmissions);
   wrap.querySelectorAll("[data-sub]").forEach(b => b.onclick = () => openSubmission(b.dataset.sub));
   const act = async (id, action, confirmText) => {
     if (confirmText && !confirm(confirmText)) return;
@@ -6373,6 +6463,7 @@ function renderCrmTable() {
   tbody.innerHTML = visibleLeads.map((l, i) => `
     <tr data-idx="${i}">
       <td>${formatDate(l["Submitted At"])}</td>
+      <td>${formatDate(l["Last Updated"] || l["Submitted At"])}</td>
       <td>${escapeHtml(l["Role"] || "")}</td>
       <td>${escapeHtml(l["Contact Name"] || "")}<br><span class="small-muted">${escapeHtml(l["Contact Email"] || "")} · ${escapeHtml(l["Contact Phone"] || "")}</span></td>
       <td>${l["Role"] === "Seller" ? "—" : escapeHtml(l["Team"] || "—")}</td>
@@ -6864,6 +6955,9 @@ function openOutreachSop() {
   panel.querySelector("#close-outreach-sop-btn").onclick = () => overlay.hidden = true;
 }
 
+// The backend stamps "Last Updated" on every change; mirror it here so the table and detail panel show it without a reload.
+function touchLeadLocal(lead) { lead["Last Updated"] = new Date().toISOString(); }
+
 function formatDate(iso) {
   try { return new Date(iso).toLocaleString(); } catch (e) { return iso; }
 }
@@ -6994,12 +7088,12 @@ function openDetail(lead) {
   }
   panel.querySelector("#status-select").onchange = async (e) => {
     const res = await api("updateStatus", { token: sessionToken, leadId: lead["Lead ID"], status: e.target.value });
-    if (res.ok) { lead["Status"] = e.target.value; renderCrmTable(); }
+    if (res.ok) { lead["Status"] = e.target.value; touchLeadLocal(lead); renderCrmTable(); }
     else alert("Failed to save status: " + (res.error || "unknown error"));
   };
   panel.querySelector("#likelihood-select").onchange = async (e) => {
     const res = await api("updateClosingLikelihood", { token: sessionToken, leadId: lead["Lead ID"], score: e.target.value });
-    if (res.ok) { lead["Closing Likelihood"] = e.target.value; renderCrmTable(); }
+    if (res.ok) { lead["Closing Likelihood"] = e.target.value; touchLeadLocal(lead); renderCrmTable(); }
     else alert("Failed to save closing likelihood: " + (res.error || "unknown error"));
   };
   const teamInput = panel.querySelector("#team-input");
@@ -7013,7 +7107,7 @@ function openDetail(lead) {
         // that here instead of only updating the one lead we opened.
         const targetEmail = String(lead["Contact Email"] || "").trim().toLowerCase();
         currentLeads.forEach(l => {
-          if (String(l["Contact Email"] || "").trim().toLowerCase() === targetEmail) l["Team"] = team;
+          if (String(l["Contact Email"] || "").trim().toLowerCase() === targetEmail) { l["Team"] = team; touchLeadLocal(l); }
         });
         renderCrmTable();
       } else {
@@ -7043,6 +7137,7 @@ function bindAdminNoteControls(panel, lead) {
         const res = await api("deleteNote", { token: sessionToken, noteId });
         if (res.ok) {
           lead.notes = (lead.notes || []).filter(n => n.noteId !== noteId);
+          touchLeadLocal(lead); renderCrmTable();
           renderNotes();
         } else {
           alert("Failed to delete note: " + (res.error || "unknown error"));
@@ -7062,6 +7157,7 @@ function bindAdminNoteControls(panel, lead) {
       lead.notes.push({ noteId: res.noteId, timestamp: new Date().toISOString(), note, author: "Admin", visibility: isPrivate ? "Private" : "Shared" });
       noteInput.value = "";
       panel.querySelector("#private-note-checkbox").checked = false;
+      touchLeadLocal(lead); renderCrmTable();
       renderNotes();
     } else {
       alert("Failed to add note: " + (res.error || "unknown error"));

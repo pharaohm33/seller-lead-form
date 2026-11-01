@@ -121,5 +121,58 @@ function tests(M) {
   check('a link that is not a link is refused', adminSaveUpdatedLoi({ crmId: e1.crmId, loiUrl: 'not a link' }).ok === false && adminGetPreLoiEntry({ crmId: e1.crmId }).entry.answers.updatedLoiUrl === upd2, {});
   check('an empty link clears it everywhere', adminSaveUpdatedLoi({ crmId: e1.crmId, loiUrl: '' }).ok && !adminGetPreLoiEntry({ crmId: e1.crmId }).entry.answers.updatedLoiUrl && adminGetSubmission({ submissionId: e1.submissionId }).submission.updatedLoiLink === '', {});
   check('an unknown deal is refused', adminSaveUpdatedLoi({ crmId: 'nope', loiUrl: upd }).ok === false, {});
+
+  // 11. Last Updated on the Leads: stamped at creation and on every change
+  const lu = (id) => leadRows().find(l => l['Lead ID'] === id)['Last Updated'];
+  const setLu = (id, v) => { const sh = M.sheets['Leads'], h = sh.data[0], c = h.indexOf('Last Updated'), r = sh.data.findIndex((row, i) => i > 0 && row[h.indexOf('Lead ID')] === id); sh.data[r][c] = v; };
+  const OLD = '2020-01-01T00:00:00.000Z';
+  check('a lead is stamped Last Updated from the moment it is created', !!lu(add.leadId) && String(lu(add.leadId)) >= String(leadRows().find(l => l['Lead ID'] === add.leadId)['Submitted At']) && !!leadRows().find(l => /Maple/.test(l['Street Address']) )['Last Updated'], { lu: lu(add.leadId) });
+  const bumps = [
+    ['stage change', () => updateStatus({ leadId: add.leadId, status: 'Negotiation' })],
+    ['closing likelihood', () => updateClosingLikelihood({ leadId: add.leadId, score: 4 })],
+    ['team', () => updateTeam({ leadId: add.leadId, team: 'Team A' })],
+    ['MAO', () => updateMaoForLead({ leadId: add.leadId, maoCash: '1', maoHardMoney10: '2', maoHardMoney20: '3', maoBreakdown: 'x' })],
+    ['admin note', () => addNote({ leadId: add.leadId, note: 'seller countered at 300k' })]
+  ];
+  bumps.forEach(([name, fn]) => { setLu(add.leadId, OLD); const r = fn(); check('Last Updated moves on ' + name, r.ok && String(lu(add.leadId)) > OLD, { r, lu: lu(add.leadId) }); });
+  const noteId = getLeads({}).leads.find(l => l['Lead ID'] === add.leadId).notes[0].noteId;
+  setLu(add.leadId, OLD); deleteNote({ noteId: noteId });
+  check('Last Updated moves when a note is deleted', String(lu(add.leadId)) > OLD, { lu: lu(add.leadId) });
+  setLu(add.leadId, '');
+  const gl = getLeads({}).leads.find(l => l['Lead ID'] === add.leadId);
+  check('an old lead with no stamp shows its submit time (or newest note) as Last Updated', !!gl['Last Updated'], { gl: gl['Last Updated'] });
+  const lbe = getLeadsByEmail({ email: 'me@example.com' });
+  check('Last Updated is admin-only (not in the public submitter view)', PUBLIC_LEAD_FIELDS.indexOf('Last Updated') === -1 && (!lbe.leads || lbe.leads.every(l => !('Last Updated' in l))), {});
+
+  // 12. bulk clean-up: archive / delete / restore, never touching a sent offer or a deal already in the CRM
+  const mk = (street, zip) => adminFinishPreLoi({ email: EMAIL, answers: Object.assign({}, dealA, { street: street, zip: zip, role: 'Wholesaler' }), loiUrl: 'https://pharaohm33.github.io/loi-generator/?x=' + zip });
+  const k1 = mk('1 Junk Rd', '85711'), k2 = mk('2 Junk Rd', '85712'), k3 = mk('3 Sent Rd', '85713'), k4 = mk('4 Crm Rd', '85714');
+  adminMarkPreLoiSent({ crmId: k3.crmId });
+  adminAddSubmissionToCrm({ submissionId: k4.submissionId, status: 'New' });
+  const ids = [k1.crmId, k2.crmId, k3.crmId, 'nope'];
+  const ba = adminBulkPreLoi({ crmIds: ids, action: 'archive' });
+  check('bulk archive Pre-LOI: the unsent ones are archived, the sent one and a bad id are skipped with a reason', ba.ok && ba.done === 2 && ba.skipped.length === 2 && ba.skipped.some(s => /sent/.test(s.reason)) && ba.skipped.some(s => /not found/.test(s.reason)), { ba });
+  check('archived Pre-LOIs are hidden from the list but kept', !list().some(e => e.crmId === k1.crmId) && adminGetPreLoi({ includeArchived: true }).entries.some(e => e.crmId === k1.crmId && e.status === PRELOI_ARCHIVED_STATUS), {});
+  check('the sent Pre-LOI is still in the list as sent', list().some(e => e.crmId === k3.crmId && e.status === PRELOI_SENT_STATUS), {});
+  check('archived rows do not count in the cross reference', adminGetSubmissions({}).submissions.find(s => s.submissionId === k1.submissionId).matches.preLoi === 0, {});
+  check('bulk archive twice skips what is already archived', adminBulkPreLoi({ crmIds: [k1.crmId], action: 'archive' }).skipped.some(s => /already/.test(s.reason)), {});
+  const br = adminBulkPreLoi({ crmIds: [k1.crmId, k3.crmId], action: 'restore' });
+  check('bulk restore brings an archived one back (as Form Completed, it has a submission) and skips one that was never archived', br.done === 1 && list().find(e => e.crmId === k1.crmId).status === PRELOI_DONE_STATUS && br.skipped.length === 1, { br });
+  const bd = adminBulkPreLoi({ crmIds: [k1.crmId, k2.crmId, k3.crmId], action: 'delete' });
+  check('bulk delete hides the same reversible way and still skips the sent one', bd.done === 2 && bd.skipped.length === 1 && adminGetPreLoi({ includeDeleted: true }).entries.filter(e => e.status === PRELOI_DELETED_STATUS).length >= 2, { bd });
+  check('saving an archived property again brings it back as a normal Pre-LOI', (adminBulkPreLoi({ crmIds: [k2.crmId], action: 'restore' }), adminBulkPreLoi({ crmIds: [k2.crmId], action: 'archive' }), save(Object.assign({}, dealA, { street: '2 Junk Rd', zip: '85712', role: 'Wholesaler' })).crmId === k2.crmId && list().find(e => e.crmId === k2.crmId).status === PRELOI_STATUS), {});
+  check('bulk Pre-LOI refuses an unknown action or an empty pick', adminBulkPreLoi({ crmIds: [k1.crmId], action: 'purge' }).ok === false && adminBulkPreLoi({ crmIds: [], action: 'archive' }).ok === false, {});
+
+  const sa = adminBulkSubmissions({ submissionIds: [k1.submissionId, k2.submissionId, k3.submissionId, k4.submissionId], action: 'archive' });
+  const subIds = () => adminGetSubmissions({}).submissions.map(s => s.submissionId);
+  check('bulk archive submissions skips the sent offer and the deal already in the CRM', sa.ok && sa.skipped.length === 2 && sa.skipped.some(s => /sent/.test(s.reason)) && sa.skipped.some(s => /CRM/.test(s.reason)), { sa });
+  check('archived submissions are hidden but kept, and shown with includeArchived', !subIds().includes(k1.submissionId) && subIds().includes(k3.submissionId) && adminGetSubmissions({ includeArchived: true }).submissions.some(s => s.submissionId === k1.submissionId && s.archivedAt), {});
+  check('a submission knows its Pre-LOI status (so the page can tell sent from not sent)', adminGetSubmissions({}).submissions.find(s => s.submissionId === k3.submissionId).preLoiStatus === PRELOI_SENT_STATUS, {});
+  const sr = adminBulkSubmissions({ submissionIds: [k1.submissionId], action: 'restore' });
+  check('bulk restore submissions', sr.done === 1 && subIds().includes(k1.submissionId), { sr });
+  const sd = adminBulkSubmissions({ submissionIds: [k1.submissionId, k2.submissionId], action: 'delete' });
+  check('bulk delete submissions (reversible) takes an archived one out of archive', sd.done === 2 && !subIds().includes(k2.submissionId) && adminGetSubmissions({ includeDeleted: true }).submissions.find(s => s.submissionId === k2.submissionId).deletedAt && !adminGetSubmissions({ includeDeleted: true, includeArchived: true }).submissions.find(s => s.submissionId === k2.submissionId).archivedAt, { sd });
+  check('bulk submissions is audit-logged', M.sheets['Pre-LOI Log'].data.some(r => String(r[1]).indexOf('bulk archive submission') === 0) && M.sheets['Pre-LOI Log'].data.some(r => String(r[1]) === 'bulk archive'), {});
+  check('bulk submissions refuses an unknown action', adminBulkSubmissions({ submissionIds: [k1.submissionId], action: 'purge' }).ok === false, {});
   return results.join('\n') + '\n' + results.filter(r => r.startsWith('FAIL')).length + ' failed of ' + results.length;
 }
