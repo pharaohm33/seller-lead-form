@@ -217,6 +217,11 @@ function tests(M) {
   const al2 = adminAllowNewOffer({ offerId: adminGetOffers({}).offers.find(o => o.sentTo === 'rita@broker.com').offerId, reason: '' });
   check('override from an offer row works and a blank reason is recorded as such; it can be cancelled', al2.ok && adminGetOffers({}).permits[0].reason === 'No reason given' && adminCancelOverride({ permitId: al2.permitId }).ok && adminCheckOffer({ address: '40 Offer St, Tucson, AZ 85720' }).status === 'sent', {});
   check('an override works for an address with no offer yet and an empty request is refused', adminAllowNewOffer({ address: '77 Fresh Rd, Tucson, AZ 85720' }).ok && adminAllowNewOffer({}).ok === false, {});
+  const leadWithOffer = getLeads({}).leads.find(l => l['Lead ID'] === oLead.leadId);
+  check('Leads tab: the lead carries the offer that went out for its address (count, when, to whom, waiting)', !!leadWithOffer.offer && leadWithOffer.offer.count >= 1 && leadWithOffer.offer.sentTo === 'rita@broker.com' && leadWithOffer.offer.respondedAt === '', { offer: leadWithOffer && leadWithOffer.offer });
+  check('Leads tab: a lead with no offer has none', !getLeads({}).leads.some(l => !/40 Offer/.test(l['Street Address']) && l.offer), {});
+  const og = adminGetOffers({ q: '40 offer' }).offers.find(o => o.sentTo === 'rita@broker.com');
+  check('Offers Sent tab: each offer shows its lead and that lead\'s stage, and the submission it could be added from', og.leadId === oLead.leadId && og.leadStatus === leadRows().find(l => l['Lead ID'] === oLead.leadId)['Status'] && og.submissionId === o1.submissionId, { og });
   const log3 = M.sheets['Pre-LOI Log'].data.map(r => r[1]).join('|');
   check('offers, replies and overrides are audit-logged', ['offer sent', 'offer response', 'offer override'].every(a => log3.indexOf(a) !== -1), { log3 });
   check('the offers list shows each offer with its gate status', adminGetOffers({ q: 'offer st' }).offers.every(o => ['sent', 'responded', 'override', 'none'].indexOf(o.gate) !== -1) && adminGetOffers({ q: 'zzz' }).total === 0, {});

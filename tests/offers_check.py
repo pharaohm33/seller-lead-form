@@ -18,6 +18,7 @@ with sync_playwright() as p:
       api = async (a, body) => { calls.push([a, body]);
         if (a === "adminGetOffers") return { ok:true, total: offers.length, offers, accounts, permits: offers.filter(o => o.permit).map(o => o.permit) };
         if (a === "adminSetOfferAccounts") { accounts = body.accounts.split(/[ ,]+/).filter(Boolean); return { ok:true, accounts }; }
+        if (a === "getLeads") return { ok:true, leads: currentLeads };
         if (a === "adminRecordOffers") return { ok:true, added:1, results:[{ status:"added" }] };
         return { ok:true }; };
       const wait = ms => new Promise(r => setTimeout(r, ms)), out = {};
@@ -54,6 +55,30 @@ with sync_playwright() as p:
       out.manualAdd = !!ar && ar[1].offers[0].source === "Manual" && ar[1].offers[0].address === "123 Main St, Tucson, AZ 85701" && ar[1].offers[0].sentTo === "a@b.com" && ar[1].offers[0].sentAt.startsWith("2026-10-15");
       document.getElementById("admin-tab-leads").click(); await wait(50);
       out.backToLeads = document.getElementById("offers-panel").hidden && !document.getElementById("crm-table-wrap").hidden;
+      // ---- Leads tab <-> Offers Sent tab ----
+      offers = [OFFER({ leadId:"L9", leadStatus:"Negotiation" }), OFFER({ offerId:"O2", street:"41 Offer St", leadId:"", submissionId:"S2" }), OFFER({ offerId:"O3", street:"42 Offer St", leadId:"", submissionId:"" })]; await loadOffers();
+      out.offersShowLeadStage = list.innerText.includes("Negotiation") && !!list.querySelector("[data-of-lead='L9']");
+      out.offersCanAddToLeads = !!list.querySelector("[data-of-addlead='S2']") && list.innerText.includes("no lead");
+      list.querySelector("[data-of-addlead='S2']").click(); await wait(100);
+      const al3 = calls.filter(c => c[0] === "adminAddSubmissionToCrm").pop();
+      out.addToLeadsCall = !!al3 && al3[1].submissionId === "S2" && al3[1].status === "Offer Sent";
+      currentLeads = [
+        { "Lead ID":"L9", "Submitted At":"2026-10-01T00:00:00Z", "Street Address":"40 Offer St", "City":"Tucson", "State":"AZ", Status:"Negotiation", Role:"Seller", notes:[], offer:{ count:1, sentAt:"2026-10-20T15:00:00Z", sentTo:"rita@broker.com", respondedAt:"2026-10-23T09:00:00Z" } },
+        { "Lead ID":"L10", "Submitted At":"2026-10-02T00:00:00Z", "Street Address":"50 Waiting Rd", "City":"Tucson", "State":"AZ", Status:"Offer Sent", Role:"Seller", notes:[], offer:{ count:2, sentAt:"2026-10-25T15:00:00Z", sentTo:"x@y.com", respondedAt:"" } },
+        { "Lead ID":"L11", "Submitted At":"2026-10-03T00:00:00Z", "Street Address":"60 Fresh Ln", "City":"Tucson", "State":"AZ", Status:"New", Role:"Seller", notes:[] }];
+      document.getElementById("admin-tab-leads").click(); await wait(100); crmSortMode = "default"; renderCrmTable();
+      const tb = () => document.getElementById("crm-tbody").innerText;
+      out.leadsOfferHeader = Array.from(document.querySelectorAll("#crm-table-wrap .crm-table thead th")).map(th => th.textContent).includes("Offer");
+      out.leadsShowOffers = tb().includes("Seller replied") && tb().includes("waiting on seller") && tb().includes("2 offers");
+      const f = document.getElementById("crm-offer-filter");
+      f.value = "waiting"; f.onchange({ target: f }); out.filterWaiting = tb().includes("50 Waiting Rd") && !tb().includes("40 Offer St") && !tb().includes("60 Fresh Ln");
+      f.value = "replied"; f.onchange({ target: f }); out.filterReplied = tb().includes("40 Offer St") && !tb().includes("50 Waiting Rd");
+      f.value = "none"; f.onchange({ target: f }); out.filterNone = tb().includes("60 Fresh Ln") && !tb().includes("40 Offer St") && !tb().includes("50 Waiting Rd");
+      f.value = "all"; f.onchange({ target: f }); out.filterAll = tb().includes("60 Fresh Ln") && tb().includes("50 Waiting Rd");
+      out.detailShowsOffer = buildLeadFields(currentLeads[1]).some(x => x[0] === "Offer" && /waiting on the seller/.test(x[1]) && /2 offers/.test(x[1]));
+      document.getElementById("admin-tab-offers").click(); await wait(150);
+      list.querySelector("[data-of-lead='L9']").click(); await wait(200);
+      out.openLeadSwitches = !document.getElementById("crm-table-wrap").hidden && document.getElementById("offers-panel").hidden;
       return out; }""")
     for k, v in r.items(): check(k, bool(v), v if v is not True else "")
     check("no page errors", not errs, errs); b.close()

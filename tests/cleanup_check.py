@@ -79,7 +79,7 @@ with sync_playwright() as p:
       const rows = Array.from(document.querySelectorAll("#crm-tbody tr")).map(tr => tr.innerText);
       out.crm_header = Array.from(document.querySelectorAll("#crm-table-wrap .crm-table thead th")).map(th => th.textContent).slice(0, 3).join("|") === "Submitted|Last updated|Role";
       out.crm_sortUpdated = rows[0].includes("Old Submit") && rows[1].includes("New Submit") && rows[2].includes("No Stamp");
-      out.crm_cells = document.querySelector("#crm-tbody tr").children.length === 11 + 1;
+      out.crm_cells = document.querySelector("#crm-tbody tr").children.length === 12 + 1;
       const l = currentLeads[1]; const before = l["Last Updated"]; touchLeadLocal(l);
       out.crm_touch = l["Last Updated"] > before;
       return out; }""")

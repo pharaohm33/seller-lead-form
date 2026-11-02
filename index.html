@@ -409,6 +409,12 @@
   </div>
   <div style="display:flex; gap:8px; margin-bottom:16px;">
     <input type="text" id="crm-search-input" placeholder="Search by address, city, zip, name, or email..." style="flex:1; width:auto; margin-bottom:0;">
+    <select id="crm-offer-filter" style="flex:0 0 auto; width:auto;" title="Filter by the offer that went out for the lead's address">
+      <option value="all">Offers: all</option>
+      <option value="waiting">Offer sent, waiting</option>
+      <option value="replied">Seller replied</option>
+      <option value="none">No offer sent yet</option>
+    </select>
     <select id="crm-sort-select" style="flex:0 0 auto; width:auto;">
       <option value="default">Sort: Default</option>
       <option value="newest">Sort: Newest</option>
@@ -419,7 +425,7 @@
     <table class="crm-table">
       <thead>
         <tr>
-          <th>Submitted</th><th>Last updated</th><th>Role</th><th>Contact</th><th>Team</th><th>Address</th><th>Asset Type</th><th>Senior Loan</th><th>Payment Structure</th><th>Price Sought</th><th>Score</th><th>Status</th>
+          <th>Submitted</th><th>Last updated</th><th>Role</th><th>Contact</th><th>Team</th><th>Address</th><th>Asset Type</th><th>Senior Loan</th><th>Payment Structure</th><th>Price Sought</th><th>Score</th><th>Offer</th><th>Status</th>
         </tr>
       </thead>
       <tbody id="crm-tbody"></tbody>
@@ -451,7 +457,7 @@
 </div>
 
 <script src="config.js?v=158"></script>
-<script src="app.js?v=175"></script>
+<script src="app.js?v=176"></script>
 <script src="screener.js?v=32"></script>
 </body>
 </html>

@@ -1478,8 +1478,19 @@ function adminGetOffers(body) {
   rows.sort(function (a, b) { return String(b['Sent At']).localeCompare(String(a['Sent At'])); });
   const permits = sheetToObjects(getSheet(OVERRIDES_SHEET, OVERRIDE_COLUMNS)).filter(function (r) { return !r['Used At']; });
   const permitKeys = {}; permits.forEach(function (p) { permitKeys[addrKey(p['Street Address'], p['Zip'], p['City'], p['State'])] = p; });
+  const leadByKey = {}, subByKey = {};
+  sheetToObjects(getSheet(LEADS_SHEET, LEAD_COLUMNS)).forEach(function (l) { const k = addrKey(l['Street Address'], l['Zip'], l['City'], l['State']); if (offerKeyOk(k) && !leadByKey[k]) leadByKey[k] = l; });
+  sheetToObjects(getSheet(SUBMISSIONS_SHEET, SUBMISSION_COLUMNS)).forEach(function (r) {
+    if (r['Deleted At'] || r['Archived At']) return;
+    const k = addrKey(r['Street Address'], r['Zip'], r['City'], r['State']);
+    if (offerKeyOk(k) && (!subByKey[k] || String(r['Submitted At']) > String(subByKey[k]['Submitted At']))) subByKey[k] = r;
+  });
   const out = rows.slice(0, 500).map(function (r) {
     const s = offerSummary(r), key = addrKey(r['Street Address'], r['Zip'], r['City'], r['State']);
+    const ld = leadByKey[key], sb = subByKey[key];
+    s.leadId = ld ? ld['Lead ID'] : '';
+    s.leadStatus = ld ? (ld['Status'] || 'New') : '';
+    s.submissionId = sb ? sb['Submission ID'] : '';
     const p = permitKeys[key];
     s.permit = p ? { permitId: p['Permit ID'], reason: p['Reason'] } : null;
     s.gate = r['Deleted At'] ? 'deleted' : offerGate(key).status;
@@ -1647,6 +1658,21 @@ function getLeads(body) {
       l.notes.forEach(function (n) { const t = new Date(n.timestamp).getTime(); if (t > latest) latest = t; });
       if (latest) l['Last Updated'] = new Date(latest).toISOString();
     }
+  });
+
+  // The offer(s) sent for each lead's address, so the Leads tab and the Offers Sent tab show one story.
+  const offerByKey = {};
+  sheetToObjects(getSheet(OFFERS_SHEET, OFFER_COLUMNS)).forEach(function (o) {
+    if (o['Deleted At']) return;
+    const k = addrKey(o['Street Address'], o['Zip'], o['City'], o['State']);
+    if (!offerKeyOk(k)) return;
+    const cur = offerByKey[k] || (offerByKey[k] = { count: 0, sentAt: '', sentTo: '', respondedAt: '' });
+    cur.count++;
+    if (String(o['Sent At']) > String(cur.sentAt)) { cur.sentAt = o['Sent At']; cur.sentTo = o['Sent To']; cur.respondedAt = o['Responded At'] || ''; }
+  });
+  leads.forEach(function (l) {
+    const k = addrKey(l['Street Address'], l['Zip'], l['City'], l['State']);
+    if (offerByKey[k]) l.offer = offerByKey[k];
   });
 
   return { ok: true, leads: leads };

@@ -5542,6 +5542,7 @@ function buildLeadFields(lead) {
   const fields = [
     ["Submitted", formatDate(lead["Submitted At"])],
     ...(lead["Last Updated"] ? [["Last updated", formatDate(lead["Last Updated"])]] : []),
+    ...(lead.offer ? [["Offer", "Sent " + formatDate(lead.offer.sentAt) + " to " + (lead.offer.sentTo || "—") + (lead.offer.respondedAt ? " · seller replied " + formatDate(lead.offer.respondedAt) : " · waiting on the seller") + (lead.offer.count > 1 ? " (" + lead.offer.count + " offers)" : "")]] : []),
     ["Role", lead["Role"]], ["Name", lead["Contact Name"]], ["Email", lead["Contact Email"]], ["Phone", lead["Contact Phone"]],
     ["Social Link", lead["Social Link"] || "—"],
     ["Referred By", lead["Referrer Name"] || "—"], ["Referrer Phone", lead["Referrer Phone"] || "—"],
@@ -6011,6 +6012,7 @@ document.getElementById("crm-search-input").oninput = (e) => {
   renderCrmTable();
 };
 
+document.getElementById("crm-offer-filter").onchange = (e) => { crmOfferFilter = e.target.value; crmPage = 1; renderCrmTable(); };
 document.getElementById("crm-sort-select").onchange = (e) => {
   crmSortMode = e.target.value;
   crmPage = 1;
@@ -6327,12 +6329,13 @@ async function loadOffers() {
     : o.respondedAt ? `<span style="color:#166534;font-weight:600;font-size:12px;">Seller responded</span><br><span class="small-muted">${escapeHtml(formatDate(o.respondedAt))}${o.responseNote ? " · " + escapeHtml(o.responseNote) : ""}</span>`
     : `<span style="color:#92400e;font-weight:600;font-size:12px;">Waiting on seller</span><br><span class="small-muted">no second offer until they answer</span>`;
   wrap.innerHTML = `<p class="small-muted">${res.total} offer${res.total === 1 ? "" : "s"}${res.permits.length ? " · " + res.permits.length + " override" + (res.permits.length === 1 ? "" : "s") + " waiting to be used" : ""}</p>
-    <table class="crm-table"><thead><tr><th>Sent</th><th>Address</th><th>Sent to</th><th>From account</th><th>Status</th><th></th></tr></thead><tbody>
+    <table class="crm-table"><thead><tr><th>Sent</th><th>Address</th><th>Sent to</th><th>From account</th><th>Status</th><th>In the CRM</th><th></th></tr></thead><tbody>
     ${res.offers.map(o => { const id = escapeHtml(o.offerId); return `<tr style="cursor:default${o.deletedAt ? ";opacity:.6" : ""}">
       <td>${formatDate(o.sentAt)}<br><span class="small-muted">${escapeHtml(o.source || "")}</span></td>
       <td>${escapeHtml(o.street || "")}<br><span class="small-muted">${escapeHtml(o.city || "")}, ${escapeHtml(o.state || "")} ${escapeHtml(o.zip || "")}</span></td>
       <td>${escapeHtml(o.sentTo || "")}</td><td>${escapeHtml(o.fromAccount || "")}</td>
       <td>${statusHtml(o)}</td>
+      <td>${o.leadId ? `${statusPillHtml(o.leadStatus)}<br><button type="button" class="link-btn" data-of-lead="${escapeHtml(o.leadId)}">Open lead</button>` : o.submissionId && !o.deletedAt ? `<span class="small-muted">not a lead yet</span><br><button type="button" class="link-btn" data-of-addlead="${escapeHtml(o.submissionId)}">Add to Leads</button>` : `<span class="small-muted">no lead</span>`}</td>
       <td style="white-space:nowrap">${o.deletedAt ? `<button type="button" class="btn secondary" data-of-restore="${id}">Restore</button>` : `
         ${o.threadLink ? `<a class="btn secondary" href="${escapeHtml(o.threadLink)}" target="_blank" rel="noopener">Open mail</a>` : ""}
         ${o.respondedAt ? `<button type="button" class="link-btn" data-of-reopen="${id}" title="Mark as waiting on the seller again">Not responded</button>` : `<button type="button" class="btn secondary" data-of-responded="${id}">Seller responded</button>`}
@@ -6340,6 +6343,12 @@ async function loadOffers() {
         <button type="button" class="link-btn" data-of-delete="${id}" title="Takes a wrongly recorded offer out of the gate; Restore brings it back">Delete</button>`}</td></tr>`; }).join("")}
     </tbody></table>`;
   const call = async (action, extra) => { const r = await api(action, Object.assign({ token: sessionToken }, extra)); if (!r.ok) { alert(r.error || "That didn't work."); return false; } loadOffers(); return true; };
+  wrap.querySelectorAll("[data-of-lead]").forEach(b => b.onclick = async () => { showAdminTab("leads"); if (!currentLeads.length) await loadLeads(); const l = currentLeads.find(x => x["Lead ID"] === b.dataset.ofLead); if (l) openDetail(l); });
+  wrap.querySelectorAll("[data-of-addlead]").forEach(b => b.onclick = async () => {
+    const r = await api("adminAddSubmissionToCrm", { token: sessionToken, submissionId: b.dataset.ofAddlead, status: "Offer Sent" });
+    if (!r.ok) { alert(r.error || "Couldn't add it to Leads."); return; }
+    loadOffers(); if (typeof loadLeads === "function") loadLeads();
+  });
   wrap.querySelectorAll("[data-of-responded]").forEach(b => b.onclick = () => { const note = prompt("What did they say? (optional, goes in the lead's notes)", ""); if (note !== null) call("adminMarkOfferResponded", { offerId: b.dataset.ofResponded, note }); });
   wrap.querySelectorAll("[data-of-reopen]").forEach(b => b.onclick = () => call("adminMarkOfferResponded", { offerId: b.dataset.ofReopen, responded: false }));
   wrap.querySelectorAll("[data-of-allow]").forEach(b => b.onclick = () => { const reason = prompt("Allow a new offer on this address. Why? (counter, price drop, new terms, anything)", ""); if (reason !== null) call("adminAllowNewOffer", { offerId: b.dataset.ofAllow, reason }); });
@@ -6490,6 +6499,16 @@ function leadMatchesSearch(l, query) {
   return haystack.indexOf(query.toLowerCase()) !== -1;
 }
 
+// One line about the offer that went out for a lead's address (from the Offers Sent tab), shared by the table and the detail panel.
+function offerBadgeHtml(o) {
+  if (!o) return `<span class="small-muted">—</span>`;
+  const day = new Date(o.sentAt); const when = isNaN(day) ? "" : day.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return o.respondedAt
+    ? `<span style="color:#166534;font-weight:600;font-size:12px;">Seller replied</span><br><span class="small-muted">offer sent ${escapeHtml(when)}${o.count > 1 ? " · " + o.count + " offers" : ""}</span>`
+    : `<span style="color:#92400e;font-weight:600;font-size:12px;">Offer sent ${escapeHtml(when)}</span><br><span class="small-muted">waiting on seller${o.count > 1 ? " · " + o.count + " offers" : ""}</span>`;
+}
+let crmOfferFilter = "all";
+
 function renderCrmTable() {
   const tbody = document.getElementById("crm-tbody");
   const emptyEl = document.getElementById("crm-empty");
@@ -6497,6 +6516,7 @@ function renderCrmTable() {
 
   const filteredLeads = currentLeads
     .filter(l => leadMatchesSearch(l, crmSearchQuery))
+    .filter(l => crmOfferFilter === "all" || (crmOfferFilter === "none" ? !l.offer : crmOfferFilter === "waiting" ? (l.offer && !l.offer.respondedAt) : (l.offer && l.offer.respondedAt)))
     .sort(leadSortComparator(crmSortMode, adminStatusSortIndex));
 
   if (filteredLeads.length === 0) {
@@ -6528,6 +6548,7 @@ function renderCrmTable() {
       <td>${escapeHtml(l["Payment Structure Willing"] || "")}</td>
       <td>${escapeHtml(String(l["Price Sought"] ?? ""))}</td>
       <td>${escapeHtml(l["Closing Likelihood"] ? String(l["Closing Likelihood"]) + "/5" : "—")}</td>
+      <td>${offerBadgeHtml(l.offer)}</td>
       <td>${statusPillHtml(l["Status"])}</td>
     </tr>
   `).join("");
