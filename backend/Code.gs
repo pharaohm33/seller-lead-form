@@ -1273,6 +1273,8 @@ const OVERRIDES_SHEET = 'Offer Overrides';
 const OVERRIDE_COLUMNS = ['Permit ID', 'Created At', 'Street Address', 'City', 'State', 'Zip', 'Reason', 'Used At'];
 // Stages a reply or a sent offer may move a lead out of. Anything further along (accepted, signed, escrow, closed, dead) is never moved by a mail scan.
 const OFFER_MOVABLE_STAGES = ['New', 'Contacted', 'Under Review', 'Hold Off', 'Offer Sent'];
+// A deal at one of these stages is live: no new offer is built for it (an admin override still allows one).
+const ACTIVE_DEAL_STAGES = ['Verbally Accepted But Not Signed', 'Offer Signed By Seller', 'In Escrow To Close'];
 
 // "1689 W Wood Bridge Ct, Tucson, AZ 85746" (the form of the LOI email subject) -> its parts. Anything it cannot split stays whole in street.
 function parseAddressLine(line) {
@@ -1327,6 +1329,12 @@ function adminCheckOffer(body) {
   const a = offerAddress(body), key = addrKey(a.street, a.zip, a.city, a.state);
   if (!offerKeyOk(key)) return { ok: false, error: 'The address needs a street and a city or zip.' };
   const g = offerGate(key);
+  if (g.allowed && g.status !== 'override') {
+    const lead = leadAtKey(key);
+    if (lead && ACTIVE_DEAL_STAGES.indexOf(lead['Status']) !== -1) {
+      return { ok: true, status: 'active_deal', allowed: false, stage: lead['Status'], offer: g.offer ? offerSummary(g.offer) : null, permit: null, offerCount: offersForKey(key).length };
+    }
+  }
   return { ok: true, status: g.status, allowed: g.allowed, offer: g.offer ? offerSummary(g.offer) : null, permit: g.permit ? { permitId: g.permit['Permit ID'], reason: g.permit['Reason'] } : null, offerCount: offersForKey(key).length };
 }
 

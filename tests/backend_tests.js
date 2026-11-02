@@ -206,6 +206,8 @@ function tests(M) {
   const g2 = adminCheckOffer({ address: '40 Offer St, Tucson, AZ 85720' });
   check('gate: after the seller answered a new offer is allowed (status responded)', g2.status === 'responded' && g2.allowed && !!g2.offer.respondedAt, { g2 });
   check('a lead already further along is not moved by a scan', (updateStatus({ leadId: oLead.leadId, status: 'Offer Signed By Seller' }), moveLeadForOffer(leadRows().find(l => l['Lead ID'] === oLead.leadId), 'Negotiation') === 'unchanged') && leadRows().find(l => l['Lead ID'] === oLead.leadId)['Status'] === 'Offer Signed By Seller', {});
+  const gAct = adminCheckOffer({ address: '40 Offer St, Tucson, AZ 85720' });
+  check('gate: a deal that is signed / accepted / in escrow is never offered on again, even after the seller answered', gAct.status === 'active_deal' && gAct.allowed === false && gAct.stage === 'Offer Signed By Seller', { gAct });
   adminRecordOffers({ offers: [{ address: '40 Offer St, Tucson, AZ 85720', sentAt: '2026-10-30T10:00:00.000Z', sentTo: 'rita@broker.com', fromAccount: 'old@gmail.com', subject: 'LOI for 40 Offer St', messageKey: 'old@gmail.com|ghi' }] });
   check('the new offer blocks again until that one is answered', adminCheckOffer({ address: '40 Offer St, Tucson, AZ 85720' }).status === 'sent', {});
   const al = adminAllowNewOffer({ address: '40 Offer St, Tucson, AZ 85720', reason: 'price drop' });
