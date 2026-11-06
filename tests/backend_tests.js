@@ -223,11 +223,25 @@ function tests(M) {
   check('the override is used up by the next draft, then the gate is back', adminUseOfferPermit({ address: '40 Offer St, Tucson, AZ 85720' }).used === true && adminUseOfferPermit({ address: '40 Offer St, Tucson, AZ 85720' }).used === false && gateNoCrm('40 Offer St, Tucson, AZ 85720').status === 'sent', {});
   const al2 = adminAllowNewOffer({ offerId: adminGetOffers({}).offers.find(o => o.sentTo === 'rita@broker.com').offerId, reason: '' });
   check('override from an offer row works and a blank reason is recorded as such; it can be cancelled', al2.ok && adminGetOffers({}).permits[0].reason === 'No reason given' && adminCancelOverride({ permitId: al2.permitId }).ok && gateNoCrm('40 Offer St, Tucson, AZ 85720').status === 'sent', {});
-  // an address with an offer but NO lead in the CRM: the seller answering lets a new offer be made (feedback), a sent one blocks, an override allows
+  // "All counts if entered at all": an offer on the Offers Sent tab alone (no lead, no Pre-LOI) blocks too, answered or not; only an admin override lifts it
   adminRecordOffers({ offers: [{ address: '55 Gate St, Tucson, AZ 85720', sentAt: '2026-10-20T15:00:00.000Z', sentTo: 'a@b.com', fromAccount: 'me@gmail.com', subject: 'LOI for 55 Gate St', messageKey: 'me@gmail.com|g55' }] });
-  check('no lead, offer sent and unanswered: blocked', adminCheckOffer({ address: '55 Gate St, Tucson, AZ 85720' }).status === 'sent', {});
+  const gOff = adminCheckOffer({ address: '55 Gate St, Tucson, AZ 85720' });
+  check('offer entered, no lead: blocked, and it says where', gOff.status === 'in_crm' && gOff.allowed === false && /Offer sent \(waiting on seller\)/.test(gOff.where), { gOff });
   adminRecordResponses({ responses: [{ address: '55 Gate St, Tucson, AZ 85720', from: 'a@b.com', receivedAt: '2026-10-22T09:00:00Z', snippet: 'counter' }] });
-  check('no lead, seller answered: a new offer is allowed', adminCheckOffer({ address: '55 Gate St, Tucson, AZ 85720' }).status === 'responded' && adminCheckOffer({ address: '55 Gate St, Tucson, AZ 85720' }).allowed, {});
+  const gOff2 = adminCheckOffer({ address: '55 Gate St, Tucson, AZ 85720' });
+  check('offer entered and the seller answered: still blocked (a new offer needs the admin override)', gOff2.status === 'in_crm' && gOff2.allowed === false && /seller answered/.test(gOff2.where), { gOff2 });
+  const alG = adminAllowNewOffer({ address: '55 Gate St, Tucson, AZ 85720', reason: 'counter' });
+  check('the admin override lifts it', alG.ok && adminCheckOffer({ address: '55 Gate St, Tucson, AZ 85720' }).status === 'override' && adminCheckOffer({ address: '55 Gate St, Tucson, AZ 85720' }).allowed, {});
+  adminCancelOverride({ permitId: alG.permitId });
+  // a Pre-LOI alone, a Submission alone
+  const dealP = Object.assign({}, dealA, { street: '70 Entry Ave', zip: '85720', role: 'Wholesaler', units: '1' });
+  const pe = adminFinishPreLoi({ email: EMAIL, answers: dealP, loiUrl: 'https://x.io/?o=70' });
+  const gPre = adminCheckOffer({ address: '70 Entry Ave, Tucson, AZ 85720' });
+  check('a Pre-LOI (and its Submission) alone blocks a new offer', pe.ok && gPre.status === 'in_crm' && gPre.allowed === false && /Pre-LOI/.test(gPre.where) && /Submission/.test(gPre.where), { gPre });
+  adminDeleteSubmission({ submissionId: pe.submissionId });
+  check('with the Submission deleted the Pre-LOI still blocks', adminCheckOffer({ address: '70 Entry Ave, Tucson, AZ 85720' }).status === 'in_crm', {});
+  adminBulkPreLoi({ crmIds: [pe.crmId], action: 'archive' });
+  check('archived / deleted entries are cleaned up: they no longer block', adminCheckOffer({ address: '70 Entry Ave, Tucson, AZ 85720' }).status === 'none', { g: adminCheckOffer({ address: '70 Entry Ave, Tucson, AZ 85720' }) });
   const alCrm = adminAllowNewOffer({ address: '40 Offer St, Tucson, AZ 85720', reason: 'price drop' });
   check('an admin override lifts the CRM block for one new offer', alCrm.ok && adminCheckOffer({ address: '40 Offer St, Tucson, AZ 85720' }).status === 'override' && adminCheckOffer({ address: '40 Offer St, Tucson, AZ 85720' }).allowed, {});
   adminCancelOverride({ permitId: alCrm.permitId });
@@ -237,6 +251,13 @@ function tests(M) {
   check('Leads tab: a lead with no offer has none', !getLeads({}).leads.some(l => !/40 Offer/.test(l['Street Address']) && l.offer), {});
   const og = adminGetOffers({ q: '40 offer' }).offers.find(o => o.sentTo === 'rita@broker.com');
   check('Offers Sent tab: each offer shows its lead and that lead\'s stage, and the submission it could be added from', og.leadId === oLead.leadId && og.leadStatus === leadRows().find(l => l['Lead ID'] === oLead.leadId)['Status'] && og.submissionId === o1.submissionId, { og });
+  // every tab says the same thing about a property: its Lead (stage) and its newest offer
+  const stPre = adminGetPreLoi({}).entries.find(e => /40 Offer/.test(e.street));
+  check('Pre-LOI list: each row carries the property\'s lead stage and offer state', !!stPre && !!stPre.standing.lead && stPre.standing.lead.id === oLead.leadId && !!stPre.standing.offer && stPre.standing.offer.sentTo === 'rita@broker.com', { stPre: stPre && stPre.standing });
+  const stSub = adminGetSubmissions({ q: '40 Offer' }).submissions[0];
+  check('Submissions list: the same standing', !!stSub.standing.lead && !!stSub.standing.offer, { stSub: stSub && stSub.standing });
+  const stNone = adminGetPreLoi({}).entries.find(e => !/40 Offer|70 Entry/.test(e.street));
+  check('a property with no lead and no offer has neither', !stNone || (stNone.standing.lead === null || /40 Offer|55 Gate/.test(stNone.street)), {});
   const log3 = M.sheets['Pre-LOI Log'].data.map(r => r[1]).join('|');
   check('offers, replies and overrides are audit-logged', ['offer sent', 'offer response', 'offer override'].every(a => log3.indexOf(a) !== -1), { log3 });
   check('the offers list shows each offer with its gate status', adminGetOffers({ q: 'offer st' }).offers.every(o => ['sent', 'responded', 'override', 'none'].indexOf(o.gate) !== -1) && adminGetOffers({ q: 'zzz' }).total === 0, {});

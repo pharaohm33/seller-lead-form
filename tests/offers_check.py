@@ -79,6 +79,13 @@ with sync_playwright() as p:
       document.getElementById("admin-tab-offers").click(); await wait(150);
       list.querySelector("[data-of-lead='L9']").click(); await wait(200);
       out.openLeadSwitches = !document.getElementById("crm-table-wrap").hidden && document.getElementById("offers-panel").hidden;
+      // ---- one way to say where a property stands (Pre-LOI list, Submissions list) + the legend ----
+      const h1 = standingHtml({ lead: { id: "L", status: "Dead" }, offer: { sentAt: "2026-11-02T03:49:00Z", respondedAt: "2026-11-03T03:35:00Z" } }), h2 = standingHtml({ lead: null, offer: null }), h3 = standingHtml({ lead: { id: "L", status: "New" }, offer: { sentAt: "2026-11-02T03:49:00Z", respondedAt: "" } });
+      out.standingDead = /Lead: Dead/.test(h1) && /seller answered/.test(h1) && /991b1b/.test(h1);
+      out.standingNone = /No lead/.test(h2) && /No offer sent/.test(h2);
+      out.standingWaiting = /Lead: New/.test(h3) && /waiting/.test(h3);
+      out.standingNoCrash = standingHtml(undefined).includes("No lead");
+      const lg = document.getElementById("crm-legend"); out.legend = !!lg && /entered anywhere = no new offer/i.test(lg.textContent) && /Auto Pre-LOI Before Contact/.test(lg.textContent) && /Offers Sent/.test(lg.textContent) && /Leads/.test(lg.textContent);
       return out; }""")
     for k, v in r.items(): check(k, bool(v), v if v is not True else "")
     check("no page errors", not errs, errs); b.close()

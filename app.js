@@ -6204,13 +6204,14 @@ async function loadPreLoi() {
   if (!res.entries.length) { wrap.innerHTML = `<p class="small-muted" style="padding:12px;">No pre-LOI deals yet.</p>`; return; }
   const cuRows = res.entries.map(e => ({ id: e.crmId, hidden: e.status === "Auto Pre-LOI Deleted" || e.status === "Auto Pre-LOI Archived", sent: e.status === "Auto Pre-LOI LOI Sent", inCrm: false,
     finished: e.status === "Auto Pre-LOI Form Completed" || e.status === "Auto Pre-LOI LOI Sent", hasDoc: true, when: e.updatedAt, key: cleanupAddrKey(e.street, e.zip) }));
-  wrap.innerHTML = cleanupBarHtml("preloi", [["unsent", "All not sent"], ["stuck", "Never finished (still Ready)"], ["old", "Not sent and older than " + CLEANUP_OLD_DAYS + " days"], ["dups", "Older duplicates of the same address"]]) + `<table class="crm-table"><thead><tr><th><input type="checkbox" data-cu-all style="width:auto" title="Tick every row shown"></th><th>Updated</th><th>Status</th><th>Address</th><th>Asking</th><th>Seller / realtor contact</th><th></th></tr></thead><tbody>
+  wrap.innerHTML = cleanupBarHtml("preloi", [["unsent", "All not sent"], ["stuck", "Never finished (still Ready)"], ["old", "Not sent and older than " + CLEANUP_OLD_DAYS + " days"], ["dups", "Older duplicates of the same address"]]) + `<table class="crm-table"><thead><tr><th><input type="checkbox" data-cu-all style="width:auto" title="Tick every row shown"></th><th>Updated</th><th>Pre-LOI status</th><th>Lead / Offer</th><th>Address</th><th>Asking</th><th>Seller / realtor contact</th><th></th></tr></thead><tbody>
     ${res.entries.map(e => {
       const badge = PRELOI_BADGE[e.status] || [e.status, "#374151"], gone = e.status === "Auto Pre-LOI Deleted", shelved = e.status === "Auto Pre-LOI Archived", id = escapeHtml(e.crmId);
       return `<tr style="cursor:default${gone || shelved ? ";opacity:.6" : ""}">
       <td><input type="checkbox" data-cu-pick="${id}" style="width:auto"></td>
       <td>${formatDate(e.updatedAt)}</td>
       <td><span style="color:${badge[1]};font-weight:600;font-size:12px;">${escapeHtml(badge[0])}</span></td>
+      <td>${standingHtml(e.standing)}</td>
       <td>${escapeHtml(e.street || "")}<br><span class="small-muted">${escapeHtml(e.city || "")}, ${escapeHtml(e.state || "")} ${escapeHtml(e.zip || "")}</span></td>
       <td>${escapeHtml(String(e.askingPrice || ""))}</td>
       <td>${escapeHtml(e.sellerContactName || "")}<br><span class="small-muted">${escapeHtml([e.sellerContactPhone, e.sellerContactEmail].filter(Boolean).join(" · "))}</span></td>
@@ -6374,7 +6375,7 @@ async function loadSubmissions() {
   const cuRows = res.submissions.map(s => ({ id: s.submissionId, hidden: !!(s.deletedAt || s.archivedAt), sent: sentLike(s), inCrm: !!s.leadId, finished: true, hasDoc: !!(s.docUrl || s.draftStatus), when: s.submittedAt, key: cleanupAddrKey(s.street, s.zip) }));
   wrap.innerHTML = `<p class="small-muted">${res.total} submission${res.total === 1 ? "" : "s"}${res.total > res.submissions.length ? " (showing the newest " + res.submissions.length + ")" : ""}</p>
     ${cleanupBarHtml("submissions", [["unsent", "All not sent and not in the CRM"], ["nodoc", "No Doc and no Gmail draft"], ["old", "Not sent and older than " + CLEANUP_OLD_DAYS + " days"], ["dups", "Older duplicates of the same address"]])}
-    <table class="crm-table"><thead><tr><th><input type="checkbox" data-cu-all style="width:auto" title="Tick every row shown"></th><th>When</th><th>Source</th><th>Address</th><th>Contact</th><th>Admin emailed</th><th>Matches</th><th>LOI / Doc / Draft</th><th>CRM stage</th><th></th></tr></thead><tbody>
+    <table class="crm-table"><thead><tr><th><input type="checkbox" data-cu-all style="width:auto" title="Tick every row shown"></th><th>When</th><th>Source</th><th>Address</th><th>Contact</th><th>Admin emailed</th><th>Matches</th><th>LOI / Doc / Draft</th><th>CRM stage</th><th>Lead / Offer</th><th></th></tr></thead><tbody>
     ${res.submissions.map(s => `<tr style="cursor:default${s.deletedAt || s.archivedAt ? ";opacity:.6" : ""}">
       <td><input type="checkbox" data-cu-pick="${escapeHtml(s.submissionId)}" style="width:auto"></td>
       <td>${formatDate(s.submittedAt)}</td><td>${escapeHtml(s.source)}</td>
@@ -6384,6 +6385,7 @@ async function loadSubmissions() {
       <td class="small-muted">L ${s.matches.leads} · P ${s.matches.preLoi} · C ${s.matches.crm}${s.matches.submissions > 1 ? " · " + s.matches.submissions + " subs" : ""}</td>
       <td class="small-muted">${s.loiLink ? "LOI ✓" : "—"} · ${s.docUrl ? `<a href="${escapeHtml(s.docUrl)}" target="_blank" rel="noopener">Doc</a>` : "no doc"} · ${escapeHtml(s.draftStatus || "no draft")}</td>
       <td>${s.deletedAt ? `<span style="color:#991b1b;font-weight:600;font-size:12px;">Deleted</span>` : s.archivedAt ? `<span style="color:#92400e;font-weight:600;font-size:12px;">Archived</span>` : s.leadId ? escapeHtml(s.leadStatus || "In CRM") : `<span class="small-muted">not in CRM</span>`}</td>
+      <td>${standingHtml(s.standing)}</td>
       <td style="white-space:nowrap"><button type="button" class="btn secondary" data-sub="${escapeHtml(s.submissionId)}">View</button>
         ${s.deletedAt ? `<button type="button" class="btn secondary" data-sub-restore="${escapeHtml(s.submissionId)}">Restore</button> <button type="button" class="link-btn" data-sub-purge="${escapeHtml(s.submissionId)}">Delete forever</button>`
                       : s.archivedAt ? `<button type="button" class="btn secondary" data-cu-one="restore:${escapeHtml(s.submissionId)}">Restore</button> <button type="button" class="link-btn" data-sub-delete="${escapeHtml(s.submissionId)}">Delete</button>`
@@ -6508,6 +6510,17 @@ function offerBadgeHtml(o) {
     : `<span style="color:#92400e;font-weight:600;font-size:12px;">Offer sent ${escapeHtml(when)}</span><br><span class="small-muted">waiting on seller${o.count > 1 ? " · " + o.count + " offers" : ""}</span>`;
 }
 let crmOfferFilter = "all";
+
+// ONE way to say where a property stands, used by the Pre-LOI list and the Submissions list (the Leads and Offers Sent tabs show the same facts):
+//   Lead  = a deal in your CRM, with its stage (Dead included)      Offer = an offer that really went out (the Offers Sent tab), waiting or answered
+// A property that shows ANY of them is already entered: the agent makes no new offer for it.
+function standingHtml(st) {
+  st = st || {};
+  const lead = st.lead ? `<span style="font-weight:600;font-size:12px;color:${st.lead.status === "Dead" ? "#991b1b" : "#1d4ed8"};">Lead: ${escapeHtml(st.lead.status)}</span>` : `<span class="small-muted">No lead</span>`;
+  const day = st.offer && !isNaN(new Date(st.offer.sentAt)) ? new Date(st.offer.sentAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "";
+  const offer = st.offer ? `<span style="font-weight:600;font-size:12px;color:${st.offer.respondedAt ? "#166534" : "#92400e"};">Offer sent ${escapeHtml(day)}: ${st.offer.respondedAt ? "seller answered" : "waiting"}</span>` : `<span class="small-muted">No offer sent</span>`;
+  return `${lead}<br>${offer}`;
+}
 
 function renderCrmTable() {
   const tbody = document.getElementById("crm-tbody");

@@ -888,6 +888,16 @@ function relatedRecords(key, exceptSubmissionId) {
   return out;
 }
 
+// Everything ENTERED for one property, for the "no new offer once it is entered at all" rule: Leads (any stage, Dead included), Pre-LOI / CRM rows (not deleted or archived),
+// Submissions (not deleted or archived) and Offers Sent (not deleted). Each is {kind, id, status}.
+function entriesAtKey(key) {
+  if (!key) return [];
+  const out = relatedRecords(key).filter(function (r) { return !(r.kind !== 'Lead' && (r.status === PRELOI_DELETED_STATUS || r.status === PRELOI_ARCHIVED_STATUS)); })
+    .map(function (r) { return { kind: r.kind, id: r.id, status: r.status || '' }; });
+  offersForKey(key).forEach(function (o) { out.push({ kind: 'Offer sent', id: o['Offer ID'], status: o['Responded At'] ? 'seller answered' : 'waiting on seller' }); });
+  return out;
+}
+
 function adminSavePreLoi(body) {
   if (!normalizeCrmEmail(body.email)) body.email = PropertiesService.getScriptProperties().getProperty('ADMIN_EMAIL') || '';
   const a = body.answers || {};
@@ -951,10 +961,28 @@ function adminMarkPreLoiSent(body) {
   return { ok: true, crmId: copy.crmId, preLoiCrmId: row['CRM ID'] };
 }
 
+// What the CRM knows about a property, in ONE place, so every tab says the same thing: its Lead (stage), and the newest offer on the Offers Sent tab (when, answered or not).
+function standingMaps() {
+  const lead = {}, offer = {};
+  sheetToObjects(getSheet(LEADS_SHEET, LEAD_COLUMNS)).forEach(function (l) { const k = addrKey(l['Street Address'], l['Zip'], l['City'], l['State']); if (k && !lead[k]) lead[k] = { id: l['Lead ID'], status: l['Status'] || 'New' }; });
+  sheetToObjects(getSheet(OFFERS_SHEET, OFFER_COLUMNS)).forEach(function (o) {
+    if (o['Deleted At']) return;
+    const k = addrKey(o['Street Address'], o['Zip'], o['City'], o['State']);
+    if (k && (!offer[k] || String(o['Sent At']) > String(offer[k].sentAt))) offer[k] = { sentAt: o['Sent At'], sentTo: o['Sent To'], respondedAt: o['Responded At'] || '' };
+  });
+  return { lead: lead, offer: offer };
+}
+function standingFor(maps, street, zip, city, state) {
+  const k = addrKey(street, zip, city, state);
+  return { lead: (k && maps.lead[k]) || null, offer: (k && maps.offer[k]) || null };
+}
+
 function adminGetPreLoi(body) {
+  const maps = standingMaps();
   const entries = sheetToObjects(getSheet(CRM_SHEET, CRM_COLUMNS))
     .filter(function (r) { return isPreLoiStatus(r['Status']) && (body.includeDeleted || r['Status'] !== PRELOI_DELETED_STATUS) && (body.includeArchived || r['Status'] !== PRELOI_ARCHIVED_STATUS); })
     .map(crmSummary);
+  entries.forEach(function (e) { e.standing = standingFor(maps, e.street, e.zip, e.city, e.state); });
   entries.sort(function (a, b) { return String(b.updatedAt).localeCompare(String(a.updatedAt)); });
   return { ok: true, entries: entries };
 }
@@ -1014,12 +1042,14 @@ function adminGetSubmissions(body) {
   leads.forEach(function (r) { bump(addrKey(r['Street Address'], r['Zip'], r['City'], r['State']), 'leads'); });
   crm.forEach(function (r) { if (r['Status'] === PRELOI_DELETED_STATUS || r['Status'] === PRELOI_ARCHIVED_STATUS) return; bump(addrKey(r['Street Address'], r['Zip'], r['City'], r['State']), isPreLoiStatus(r['Status']) ? 'preLoi' : 'crm'); });
   rows.forEach(function (r) { if (!r['Deleted At'] && !r['Archived At']) bump(addrKey(r['Street Address'], r['Zip'], r['City'], r['State']), 'submissions'); });
+  const maps = standingMaps();
   const leadStatus = {}; leads.forEach(function (l) { leadStatus[l['Lead ID']] = l['Status']; });
   const preLoiStatus = {}; crm.forEach(function (r) { if (isPreLoiStatus(r['Status'])) preLoiStatus[r['CRM ID']] = r['Status']; });
   let out = rows.filter(function (r) { return (body.includeDeleted || !r['Deleted At']) && (body.includeArchived || !r['Archived At']); }).map(function (r) {
     const s = summarizeSubmission(r);
     s.preLoiStatus = r['CRM ID'] ? (preLoiStatus[r['CRM ID']] || '') : '';
     s.leadStatus = r['Lead ID'] ? (leadStatus[r['Lead ID']] || '') : '';
+    s.standing = standingFor(maps, r['Street Address'], r['Zip'], r['City'], r['State']);
     s.matches = count[addrKey(r['Street Address'], r['Zip'], r['City'], r['State'])] || { leads: 0, preLoi: 0, crm: 0, submissions: 1 };
     return s;
   });
@@ -1330,10 +1360,13 @@ function adminCheckOffer(body) {
   if (!offerKeyOk(key)) return { ok: false, error: 'The address needs a street and a city or zip.' };
   const g = offerGate(key);
   if (g.status !== 'override') {
-    // Once a deal is in the CRM (a Lead at this address, in ANY stage: New, Dead, Closed ...) no new offer is made. Only an admin override (Allow a new offer) lifts it.
-    const lead = leadAtKey(key);
-    if (lead) {
-      return { ok: true, status: 'in_crm', allowed: false, stage: lead['Status'] || 'New', leadId: lead['Lead ID'], offer: g.offer ? offerSummary(g.offer) : null, permit: null, offerCount: offersForKey(key).length };
+    // Once a property is ENTERED at all (a Lead in any stage, Dead included; a Pre-LOI; a Submission; an offer on the Offers Sent tab) no new offer is made. Only an admin override lifts it.
+    const entries = entriesAtKey(key);
+    if (entries.length) {
+      const lead = entries.filter(function (e) { return e.kind === 'Lead'; })[0];
+      return { ok: true, status: 'in_crm', allowed: false, stage: lead ? lead.status || 'New' : entries[0].status, leadId: lead ? lead.id : '',
+        where: entries.map(function (e) { return e.kind + (e.status ? ' (' + e.status + ')' : ''); }).join(', '), entries: entries,
+        offer: g.offer ? offerSummary(g.offer) : null, permit: null, offerCount: offersForKey(key).length };
     }
   }
   return { ok: true, status: g.status, allowed: g.allowed, offer: g.offer ? offerSummary(g.offer) : null, permit: g.permit ? { permitId: g.permit['Permit ID'], reason: g.permit['Reason'] } : null, offerCount: offersForKey(key).length };

@@ -362,6 +362,14 @@
     <button type="button" class="btn secondary" id="admin-tab-submissions">Submissions</button>
     <button type="button" class="btn secondary" id="admin-tab-offers">Offers Sent</button>
   </div>
+  <details id="crm-legend" style="margin:0 0 12px;"><summary class="small-muted" style="cursor:pointer;">What these tabs mean (and the rule: entered anywhere = no new offer)</summary>
+    <table class="crm-table" style="margin-top:8px;"><tbody>
+      <tr><td><strong>Leads</strong></td><td>Deals in your CRM, each with a stage (New ... Negotiation ... Closed, Dead). A property that is a lead, in any stage, is <em>entered</em>.</td></tr>
+      <tr><td><strong>Auto Pre-LOI Before Contact</strong></td><td>The working list before anyone is contacted. <em>LOI sent</em> here means the offer email went out. It is not a lead.</td></tr>
+      <tr><td><strong>Submissions</strong></td><td>A log of every finished form (including the agent's), so you can check and cross-reference. One property can have several.</td></tr>
+      <tr><td><strong>Offers Sent</strong></td><td>The emails that really went out, collected from Gmail (or added by hand), with whether the seller answered.</td></tr>
+      <tr><td><strong>The rule</strong></td><td>If a property is entered anywhere (a lead in any stage including Dead, a Pre-LOI, a submission, or an offer sent) the agent makes <strong>no new offer</strong> for it. Archive or delete an entry to clean it up; use <em>Allow a new offer</em> on the Offers Sent tab for a deliberate exception.</td></tr>
+    </tbody></table></details>
   <div id="offers-panel" hidden>
     <div class="banner info" style="text-align:left;">Every LOI that actually went out, collected by the browser agent from the <strong>Sent</strong> folder of each Gmail account below (<code>./run.sh run sync_sent_offers</code>) or added by hand.
       The agent will not build a second offer for an address while one is out and the seller has not answered. A reply it finds in the inbox (or <strong>Seller responded</strong> here) lifts that, so a counter can get a new offer.
@@ -457,7 +465,7 @@
 </div>
 
 <script src="config.js?v=158"></script>
-<script src="app.js?v=176"></script>
+<script src="app.js?v=177"></script>
 <script src="screener.js?v=32"></script>
 </body>
 </html>
