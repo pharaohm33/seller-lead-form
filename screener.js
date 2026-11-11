@@ -665,7 +665,11 @@ function scrLocalDate(plusDays) { const d = new Date(); d.setDate(d.getDate() + 
 const scrNum = v => (v === "" || v === undefined || v === null || isNaN(Number(v))) ? "" : String(Number(v));   // "2.0" -> "2"
 function scrAddressLine(d) { return `${d.street || ""}, ${d.city || ""}, ${d.state || ""} ${d.zip || ""}`.trim(); }
 
-function scrCompsPrompt(d) {
+// Google AI Mode sometimes answers with a list of web results ("Here are top web results for exploring this topic") instead of an answer. These one-line instructions ask it to write the answer itself.
+const SCR_NO_WEB_LIST_FIRST = "Do the research and write the complete answer yourself in this chat. Do not reply with just a list of web results or links.\n\n";
+const SCR_NO_WEB_LIST_END = " Answer directly in this chat with your own estimate (a total repair range, then a short breakdown), not a list of web results.";
+function scrCompsPrompt(d) { return SCR_NO_WEB_LIST_FIRST + scrCompsPromptBase(d); }
+function scrCompsPromptBase(d) {
   const land = SCR.cfg.asset === "land";
   if (land) {
     const acres = d.lot ? (d.lot / 43560).toFixed(2).replace(/\.?0+$/, "") : "";
@@ -678,7 +682,8 @@ function scrCompsPrompt(d) {
   return compsPromptResidential(scrAddressLine(d), details, "");
 }
 
-function scrRehabPrompt(d, arvMid) {
+function scrRehabPrompt(d, arvMid) { return scrRehabPromptBase(d, arvMid) + SCR_NO_WEB_LIST_END; }
+function scrRehabPromptBase(d, arvMid) {
   return repairPromptText(scrAddressLine(d), arvMid, scrNum(d.beds), scrNum(d.baths), true,
     d.url || "https://www.zillow.com/homes/" + encodeURIComponent(d.address.replace(/,/g, "").replace(/\s+/g, "-")) + "_rb/");
 }
