@@ -54,7 +54,7 @@ const SCR = {
   // MIN_SELLER_CASH_PCT), always keeping the buyer profit minimum and taking the soonest balloon that works. Every attempt is logged.
   HOLD_ASKING_FIRST: true,      // buy & hold: the offer starts at the asking price (the seller gets full price) and only steps down if no balloon works there
   HOLD_CASH_PCT: 0.65, HOLD_DOWN_PCT: 0.50, HOLD_CF_MIN: 250, HOLD_CF_PRICE_CAP: 500000, HOLD_CF_PCT_ABOVE: 0.001, HOLD_MIN_CASHBACK: 0,
-  LOGIC_VERSION: 1, LOG_KEY: "scrHoldLog", LOG_MAX: 300,
+  LOGIC_VERSION: 2, LOG_KEY: "scrHoldLog", LOG_MAX: 300,
   // New development (land): dual offer = cash, or the full asking price paid at sale/refinance within 24 months with $0 at closing.
   DEV_MONTHS: 24,
   OFFER_DAYS_FROM_TOMORROW: 14,      // the seller has two weeks, counted from the day after today
@@ -520,6 +520,11 @@ function scrLoiLink(d, p, extra) {
     Object.assign(q, { loan_type: "dscr", rehab: 0, sr_rate: SCR.HOLD.DSCR_RATE, sr_ltv: Math.round(p.ltv * 1000) / 10, sr_amort: SCR.HOLD.DSCR_AMORT_YEARS, sr_term: 360, sr_points: 2, sr_dscr: 1.25, acq_pct: 50, esc1_pct: 2, esc2_pct: 1.5, taf_pct: 2.5,
       exit_reserve_mo: 6, ac_name: "Suede Buffalo LLC", ac_email1: "suedebuffalofficial@gmail.com", ac_email2: "montanoemmanuel@gmail.com", buyer_company: "Don Ava Capital LLC",
       res_rent: Math.round(p.rentLtr || 0) || "" });
+    // The NOI the screener actually underwrote (the better of long-term and short-term rent, each net of its operating expenses: see scrRentalIncome) goes to the LOI calculator as its
+    // Direct NOI. Without it the calculator works the NOI out itself from the long-term rent alone, less 5% vacancy and no taxes / insurance / maintenance, which overstates the NOI and
+    // the DSCR and ignores a better short-term income (13792 E Langtry Ln: calculator NOI $23,940 / DSCR 1.78x against the underwritten $16,950 / 1.26x).
+    const hp = p.holdPlan;
+    if (hp && hp.rentKnown && hp.noi > 0) q.noi_direct = Math.round(hp.noi * 12);
   }
   // A principal-only note whose monthly payment would be under $100 is not worth the seller's bookkeeping: no payments, the whole balance comes due at the balloon (Deferred-To-Exit).
   if (!p.land && !p.noteRate && (p.monthlyPrincipal || 0) < 100) { q.mode = "deferred_exit"; q.monthly_principal = 0; }

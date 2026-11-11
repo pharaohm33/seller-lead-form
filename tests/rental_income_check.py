@@ -14,7 +14,8 @@ RUN = """([price, arv, ltr, str_, noiA, units, strat, asset]) => { SCR.cfg.minDo
   const d = { address: '1 A St, Tucson, AZ 85701', street: '1 A St', city: 'Tucson', state: 'AZ', zip: '85701', price, sqft: 1500, dom: 300 }; if (units) d.units = units;
   const f = { pwEquityPct: 100, arvLow: arv, arvHigh: arv, rentLtr: ltr, rentStr: str_, rehabLow: 20000, rehabHigh: 30000, tier: 'moderate' }; if (noiA) f.noiAnnual = noiA;
   const p = scrPrice(d, f), a = scrAnswers(d, f, p), notes = scrNotes(d, f, p, 'https://loi', 'https://resume');
-  return { hold: p.hold, q: p.qualifies, method: a.rentalIncomeMethod, detail: a.rentalIncomeDetail, rent: a.rentcastMonthlyRent, exp: a.expenseRatio, ltrNoi: a.residentialNOI, strRev: a.strAnnualRevenue, strNoi: a.strNOI,
+  const lq = new URL(scrLoiLink(d, p)).searchParams;
+  return { loiNoi: lq.get('noi_direct'), loiRent: lq.get('res_rent'), hold: p.hold, q: p.qualifies, method: a.rentalIncomeMethod, detail: a.rentalIncomeDetail, rent: a.rentcastMonthlyRent, exp: a.expenseRatio, ltrNoi: a.residentialNOI, strRev: a.strAnnualRevenue, strNoi: a.strNOI,
            line: (notes.split('\\n').find(l => l.indexOf('- Rental income:') === 0) || '') }; }"""
 with sync_playwright() as p:
     b = p.chromium.launch(channel="chrome", headless=True); pg = b.new_page(); errs = []
@@ -35,6 +36,12 @@ with sync_playwright() as p:
     check("a fix & flip with no rent entered still says none", fl0["method"].startswith("None: fix & flip") and "not used" not in fl0["detail"], fl0["detail"])
     nr = run(330000, 360000, 0, 0)
     check("a buy & hold with no rent says cash flow was not tested", nr["method"].startswith("Buy & hold, but no rent was entered"), nr["method"])
+    # the LOI calculator gets the NOI the screener underwrote, not one it works out from the long-term rent alone
+    check("LTR only: the LOI link carries the underwritten NOI (35% expenses), not rent less 5% vacancy", l["loiNoi"] == str(round(2500 * 0.65 * 12)) and l["loiRent"] == "2500", (l["loiNoi"], l["loiRent"]))
+    check("STR nets more: the LOI link carries the STR NOI (the higher one was used)", s["loiNoi"] == str(round(5200 * 0.5 * 12)), s["loiNoi"])
+    e = run(449900, 510500, 2100, 2825)
+    check("13792 E Langtry Ln case: LTR $2,100 and STR $2,825 -> LOI NOI $16,950 (STR), not the $23,940 the calculator worked out", e["loiNoi"] == "16950" and e["method"] == "Short-term rental (STR)", (e["loiNoi"], e["method"]))
+    check("a fix & flip and a hold with no rent send no direct NOI", fl["loiNoi"] is None and nr["loiNoi"] is None, (fl["loiNoi"], nr["loiNoi"]))
     mf = run(900000, 1000000, 0, 0, 90000, 8)
     check("a multifamily / commercial deal uses the listing's in-place NOI", mf["method"].startswith("In-place NOI from the listing") and "$90,000/yr" in mf["detail"] and mf["ltrNoi"] == "90000", (mf["method"], mf["detail"]))
     check("no page errors", not errs, errs)
