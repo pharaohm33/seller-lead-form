@@ -32,7 +32,7 @@ with sync_playwright() as p:
     check("the buyer keeps at least 3 months of payments in reserve and you get at least the fee formula", all(r["buyerMonths"] >= 3 - 1e-9 and r["wholesaler"] >= min(r["fee"], 25000) - 1 for r in (strong, ltr)), (ltr["buyerMonths"], ltr["wholesaler"], ltr["fee"]))
     check("above the reserves the cash is split: a rich deal pays more than the fee formula", strong["wholesaler"] > strong["fee"] and strong["buyerMonths"] > 6, (strong["wholesaler"], strong["fee"], strong["buyerMonths"]))
     check("the balloon is between 1 and 15 years (checked year by year); the buyer profit is at least 5% of the price under 5 years, 10% from 5 years", 1 <= ltr["years"] <= 15 and ltr["profit"] >= (0.05 if ltr["years"] < 5 else 0.10) * ltr["carry"] - 1, (ltr["years"], ltr["profit"]))
-    thin = run(300000, 318000, 1800)
+    thin = run(300000, 318000, 1900)
     check("a thin deal takes a longer balloon only when it needs one (soonest that works)", thin["q"] and thin["years"] <= 15 and thin["profit"] >= (0.05 if thin["years"] < 5 else 0.10) * thin["carry"] - 1 and ltr["years"] < thin["years"], (thin["years"], thin["ltv"], ltr["years"]))
     gap = run(330000, 320000, 2500)
     check("an appraisal under the asking price skips the deal", gap["q"] is False and any("appraisal" in w for w in gap["why"]) and gap["appraisalOk"] is False, gap["why"])
@@ -49,6 +49,22 @@ with sync_playwright() as p:
     check("the 15% counter-raise is reported (not required)", isinstance(ltr["ceilOk"], bool) and isinstance(mf["ceilOk"], bool))
     flip = run(600000, 900000, 0, 0, 0, None, "flip")
     check("fix & flip over $450,000 is untouched", not any("cash offer" in w or "cash flow" in w or "appraisal" in w for w in flip["why"]), flip["why"])
+    # The seller is paid every month: a principal-only note pays at least MIN_NOTE_PMT, found by lowering the loan; every other rule still holds, otherwise the deal is skipped.
+    PAY = """([price, arv, ltr, str_, minPay]) => { SCR.HOLD.MIN_NOTE_PMT = minPay; SCR.cfg.minDom = 0; SCR.cfg.asset = 'sf'; SCR.cfg.strategy = 'hold';
+      const d = { address: '1 A St, Tucson, AZ 85701', street: '1 A St', price, sqft: 1500, dom: 300 }; const f = { pwEquityPct: 100, arvLow: arv, arvHigh: arv, rentLtr: ltr, rentStr: str_, rehabLow: 20000, rehabHigh: 30000, tier: 'moderate' };
+      const p = scrPrice(d, f), h = p.holdPlan || {}, c = h.cashAtClose || {}, x = h.saleExit || {}; SCR.HOLD.MIN_NOTE_PMT = 250;
+      return { q: p.qualifies, why: p.why, noteRate: p.noteRate, mp: p.monthlyPrincipal, cf: h.cashflow, need: h.cfNeed, dscr: h.dscr, down: p.carryDown / p.carryOffer, years: p.months / 12, sale: x.surplus, buyerMonths: c.buyerMonths, wholesaler: c.wholesaler, fee: c.fee, structure: h.structure, ltv: p.ltv, link: scrLoiLink(d, p) }; }"""
+    sweep = [(pr, ar, rent) for pr, ar in [(250000, 270000), (300000, 325000), (330000, 360000), (350000, 380000), (400000, 440000)] for rent in (1900, 2200, 2500, 2800, 3200)]
+    rows = [(sp, pg.evaluate(PAY, [sp[0], sp[1], sp[2], 0, 250]), pg.evaluate(PAY, [sp[0], sp[1], sp[2], 0, 0])) for sp in sweep]
+    q = [(sp, a, b) for sp, a, b in rows if a["q"]]
+    check("a sweep has qualifying deals to test the monthly payment on", len(q) >= 5, len(q))
+    check("every qualifying hold deal pays the seller something every month (interest-only, or principal of at least $250 a month)", all(a["noteRate"] > 0 or a["mp"] >= 250 for sp, a, b in q), [(sp, a["mp"]) for sp, a, b in q if not (a["noteRate"] > 0 or a["mp"] >= 250)])
+    check("none of those deals is sent as a deferred-to-exit offer", all("mode=deferred_exit" not in a["link"] for sp, a, b in q))
+    check("paying the seller each month never breaks the other rules: cash flow floor, DSCR 1.25, reserves, your fee, sale exit above 0", all(a["cf"] >= a["need"] - 0.5 and a["dscr"] >= 1.25 - 1e-9 and a["buyerMonths"] >= 3 - 1e-9 and a["wholesaler"] >= min(a["fee"], 25000) - 1 and a["sale"] > 0 for sp, a, b in q), [(sp, a["cf"], a["need"], a["dscr"]) for sp, a, b in q if not (a["cf"] >= a["need"] - 0.5 and a["dscr"] >= 1.25 - 1e-9)])
+    dropped = [(sp, b) for sp, a, b in rows if b["q"] and not a["q"]]
+    check("a deal that only worked by paying the seller nothing is skipped and says so", all(any("paying the seller nothing each month" in w for w in (a_["why"])) for sp, a_, b in rows if b["q"] and not a_["q"] and b["structure"] == "principal" and b["mp"] < 250), dropped)
+    changed = [(sp, a["mp"], a["ltv"], b["ltv"], a["noteRate"]) for sp, a, b in rows if a["q"] and b["q"] and b["structure"] == "principal" and (b["mp"] or 0) < 250]
+    check("a deal that used to be deferred now pays the seller by taking a smaller loan (or is skipped above)", all((c[1] >= 250 or c[4] > 0) and c[2] <= c[3] + 1e-9 for c in changed), changed)
     SALE = """([price, arv, ltr, req]) => { SCR.HOLD.SALE_EXIT_REQUIRED = req; SCR.cfg.minDom = 0; SCR.cfg.asset = 'sf'; SCR.cfg.strategy = 'hold';
       const d = { address: '1 A St, Tucson, AZ 85701', street: '1 A St', price, sqft: 1500, dom: 300 }; const f = { pwEquityPct: 100, arvLow: arv, arvHigh: arv, rentLtr: ltr, rentStr: 0, rehabLow: 20000, rehabHigh: 30000, tier: 'moderate' };
       const p = scrPrice(d, f), x = (p.holdPlan || {}).saleExit || {}; SCR.HOLD.SALE_EXIT_REQUIRED = true; return { q: p.qualifies, years: p.months / 12, ltv: p.ltv, down: p.carryDown / p.carryOffer, surplus: x.surplus, log: p.holdLog[0] }; }"""

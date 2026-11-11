@@ -35,7 +35,7 @@ const SCR = {
   // lowers the LTV (and, only when the loan cannot fund the cash at closing, the seller's cash) until the DSCR, the cash flow floor, the buyer's reserves and the buyer profit all work,
   // and takes the soonest balloon (5 to 15 years) that does. Single family: proforma rent, long-term or short-term, whichever cash flows more. Multifamily / commercial: the in-place NOI.
   HOLD: { LTV_START: 0.75, LTV_MIN: 0.30, LTV_STEP: 0.01, DSCR_RATE: 8, DSCR_AMORT_YEARS: 30, DSCR_MIN: 1.25, DOWN_START: 0.50, DOWN_MIN: 0.10, DOWN_STEP: 0.025,
-          BALLOON_MIN_YEARS: 1, BALLOON_MAX_YEARS: 15, SALE_EXIT_REQUIRED: true, DOWN_TARGET: 0.35, DOWN_TRADE_YEARS: 2, ACQ_SPLIT: 0.50, NOTE_RATE_IO: 0.03, PRICE_BUMP: 0.10, NOI_GROWTH: 0.02,
+          BALLOON_MIN_YEARS: 1, BALLOON_MAX_YEARS: 15, SALE_EXIT_REQUIRED: true, DOWN_TARGET: 0.35, DOWN_TRADE_YEARS: 2, ACQ_SPLIT: 0.50, NOTE_RATE_IO: 0.03, MIN_NOTE_PMT: 250, PRICE_BUMP: 0.10, NOI_GROWTH: 0.02,
           RESERVE_MIN_MONTHS: 3, RESERVE_TARGET_MONTHS: 6, WHOLESALE_MIN: 25000, WHOLESALE_PCT: 0.03, MIN_PROFIT_PCT_OF_PRICE: 0.10, MIN_PROFIT_PCT_SHORT: 0.05, SHORT_BALLOON_UNDER_YEARS: 5, APPRAISAL_TOLERANCE: 0 },
   GEN: { esc1: 0.02, esc2: 0.015, pts: 0.02, agent: 0,   /* no realtor commission paid at closing */ acq: 0.50, taf: 0.025, sellerClosingShare: 0.5 },
   // Full rehab / gut: cash back to the buyer at closing = the full holding cost (24 months of hard money
@@ -54,7 +54,7 @@ const SCR = {
   // MIN_SELLER_CASH_PCT), always keeping the buyer profit minimum and taking the soonest balloon that works. Every attempt is logged.
   HOLD_ASKING_FIRST: true,      // buy & hold: the offer starts at the asking price (the seller gets full price) and only steps down if no balloon works there
   HOLD_CASH_PCT: 0.65, HOLD_DOWN_PCT: 0.50, HOLD_CF_MIN: 250, HOLD_CF_PRICE_CAP: 500000, HOLD_CF_PCT_ABOVE: 0.001, HOLD_MIN_CASHBACK: 0,
-  LOGIC_VERSION: 2, LOG_KEY: "scrHoldLog", LOG_MAX: 300,
+  LOGIC_VERSION: 3, LOG_KEY: "scrHoldLog", LOG_MAX: 300,
   // New development (land): dual offer = cash, or the full asking price paid at sale/refinance within 24 months with $0 at closing.
   DEV_MONTHS: 24,
   OFFER_DAYS_FROM_TOMORROW: 14,      // the seller has two weeks, counted from the day after today
@@ -327,11 +327,15 @@ function scrPrice(d, f) {
       const F = Math.max(H.WHOLESALE_MIN, H.WHOLESALE_PCT * V);              // your fee: the greater of $25,000 or 3% of value (the site's current formula)
       holdLog = [];
       // One candidate: purchase price P, seller cash %, DSCR loan LTV, balloon T years.
+      let minPay = H.MIN_NOTE_PMT || 0;
       const ev = (P, structure, dpct, ltv, T) => {
         const dn = scrRound(P * dpct), Nn = P - dn, L = Math.round(V * ltv / 500) * 500, pmt = scrAmortPmt(L, H.DSCR_RATE, H.DSCR_AMORT_YEARS), reqCf = need(P);
         let notePmt, noteBal, nRate = 0;
         if (structure === "io") { nRate = H.NOTE_RATE_IO; notePmt = Nn * nRate / 12; noteBal = Nn; }
         else { const room = rentKnown ? Math.max(0, noi - pmt - reqCf) : 0; notePmt = Math.min(Nn / (T * 12), Math.floor(room / 50) * 50); noteBal = Math.max(0, Nn - notePmt * 12 * T); }
+        // The seller is paid something every month: a principal-only note has to pay at least MIN_NOTE_PMT a month (or the whole balance spread over the term when that is less). The rule is met by
+        // lowering the DSCR loan (a smaller loan payment leaves more cash flow to pay the seller) while every other rule (cash flow, DSCR, cash at closing, buyer profit, sale exit) still holds.
+        const payOk = structure === "io" || notePmt >= Math.min(minPay, Nn / (T * 12)) - 0.5;
         const cf = noi - notePmt - pmt, dscr = pmt > 0 ? noi / pmt : Infinity;
         // Cash at closing, the way the LOI generator works it out: the loan less the seller's cash and the closing costs, less the 2.5% fee on the money the buyer does not put in (TAF); what is left is the
         // total net cash, and the Acq / Bird Dog Fee is 50% of it (your fee), the other half is the cash back to the buyer. Both halves have to clear their floors: your fee the greater of $25,000 or 3% of value,
@@ -346,9 +350,9 @@ function scrPrice(d, f) {
         const saleSurplus = sale - loanBal - noteBal;       // the LOI generator's "Sale Exit - CF pocketed (appreciation)": the sale at the balloon pays the DSCR loan and the seller note, no cash flow counted ("Sale Viable (no CF)")
         const profit = sale - loanBal - noteBal + (rentKnown ? cumNoi - M * 12 * T : 0), minProfit = (T < H.SHORT_BALLOON_UNDER_YEARS ? H.MIN_PROFIT_PCT_SHORT : H.MIN_PROFIT_PCT_OF_PRICE) * P;     // a balloon under 5 years is worth a thinner buyer profit (the equity from renting a rent-ready home covers the payoff)
         return { P, structure, dpct, ltv, T, dn, Nn, L, pmt, notePmt, nRate, noteBal, loanBal, cf, reqCf, dscr, closing, avail, F, W, B, M, Rmin, Rtgt, profit, minProfit, sale, saleSurplus,
-          saleOk: !H.SALE_EXIT_REQUIRED || saleSurplus > 0, cfOk: !rentKnown || cf >= reqCf - 0.5, dscrOk: !rentKnown || dscr >= H.DSCR_MIN - 1e-9, cashOk: W >= F - 0.5 && B >= Rmin - 0.5, profitOk: profit >= minProfit };
+          saleOk: !H.SALE_EXIT_REQUIRED || saleSurplus > 0, cfOk: !rentKnown || cf >= reqCf - 0.5, dscrOk: !rentKnown || dscr >= H.DSCR_MIN - 1e-9, cashOk: W >= F - 0.5 && B >= Rmin - 0.5, profitOk: profit >= minProfit, payOk };
       };
-      const good = e => e.cfOk && e.dscrOk && e.cashOk && e.profitOk && e.saleOk;       // saleOk: selling off appreciation alone must clear both debts; the LTV comes down until it does
+      const good = e => e.cfOk && e.dscrOk && e.cashOk && e.profitOk && e.saleOk && e.payOk;       // saleOk: selling off appreciation alone must clear both debts; the LTV comes down until it does
       // The balloon is checked year by year, soonest first (1, 2, 3 ... 15): for each year the seller's cash starts at 50% and comes down only as far as it must, and the LTV comes down as little as possible.
       // The seller's cash should ideally stay at 35% or more: the soonest balloon that works at 35%+ wins, unless a balloon more than DOWN_TRADE_YEARS shorter works with less down.
       const soonest = (P, structure, dpHi, dpLo) => {
@@ -375,19 +379,28 @@ function scrPrice(d, f) {
       const stepP = Math.max(1000, Math.round(V * 0.005 / 1000) * 1000), start = list ? (SCR.HOLD_ASKING_FIRST ? list : Math.min(list, carryRaw)) : carryRaw, floorP = SCR.MIN_CARRY_PCT_OF_ARV * V;
       const ceilOf = P => Math.round(Math.min(list || Infinity, P * (1 + SCR.NEGOTIATION_ROOM)) / 1000) * 1000;
       let found = null, ceilFound = null, structure = "io", tries = 0;
+      const findPlan = () => {
+        let f = null, st = "io", tr = 0;
+        f = search(start, "io");
+        if (!f) { const e0 = search(start, "principal"); if (e0) { f = e0; st = "principal"; } }       // asking price, principal-only (paying the seller at least MIN_NOTE_PMT a month), before any price bump
+        if (!f) { const P = Math.round((list || carryRaw) * (1 + H.PRICE_BUMP) / 1000) * 1000, e = search(P, "principal"); if (e) { f = e; st = "principal"; } }
+        for (let P = start - stepP; !f && P >= floorP; P -= stepP) { tr++; f = search(P, "io"); }
+        return { f, st, tr };
+      };
       if (appraisalOk) {
         // The price stays near asking (the 70%-of-value price, capped at the asking price) and the seller's cash is the lever. The price only comes down as a last resort. The +15% counter-raise is reported, not required.
-        found = search(start, "io");
-        if (!found) { const e0 = search(start, "principal"); if (e0) { found = e0; structure = "principal"; } }       // asking price, principal-only (deferred when under $100/mo), before any price bump
-        if (!found) { const P = Math.round((list || carryRaw) * (1 + H.PRICE_BUMP) / 1000) * 1000, e = search(P, "principal"); if (e) { found = e; structure = "principal"; } }
-        for (let P = start - stepP; !found && P >= floorP; P -= stepP) { tries++; found = search(P, "io"); }
+        const r = findPlan(); found = r.f; structure = r.st; tries = r.tr;
         if (found) ceilFound = search(found.structure === "io" ? ceilOf(found.P) : Math.round(found.P * (1 + SCR.NEGOTIATION_ROOM) / 1000) * 1000, found.structure);
+        else if (minPay > 0) {      // would it work if the seller were paid nothing each month? Then the monthly payment is what rules the deal out
+          minPay = 0; const r0 = findPlan(); minPay = H.MIN_NOTE_PMT;
+          if (r0.f) holdWhy.push(`it only works by paying the seller nothing each month (deferred to the balloon): a principal-only note has to pay at least ${scrMoney(H.MIN_NOTE_PMT)}/mo and no loan size leaves that much cash flow while keeping the ${H.DSCR_MIN} DSCR, the cash at closing, the buyer profit and the sale exit: skipped`);
+        }
       }
       const shown = found || ev(start, "io", H.DOWN_START, H.LTV_START, H.BALLOON_MIN_YEARS);
       const dg = found ? null : diagnose(start, "io");
       structure = found ? found.structure : "io";
       if (!appraisalOk) holdWhy.push(`appraisal is likely to come in under the asking price (value ${scrMoney(V)} vs asking ${scrMoney(list)}), and the DSCR loan is sized on the appraised value, so the deal cannot close: skipped`);
-      else if (!found) {
+      else if (!found && !holdWhy.length) {
         if (!dg.anyCf) holdWhy.push(`no cash flow: NOI ${scrMoney(noi)}/mo cannot cover the DSCR loan at ${H.DSCR_MIN} DSCR and the seller note down to ${H.LTV_MIN * 100}% LTV (minimum ${scrMoney(need(start))}/mo)`);
         else if (!dg.anyCash) holdWhy.push(`the DSCR loan cannot fund the seller's cash, the closing costs, ${H.RESERVE_MIN_MONTHS} months of buyer reserves and your ${scrMoney(F)} fee, even at ${H.DOWN_MIN * 100}% down to the seller`);
         else if (!dg.anyCfCash) holdWhy.push(`the loan that cash flows is too small to fund the cash at closing (seller's cash, costs, ${H.RESERVE_MIN_MONTHS} months of reserves and your fee)`);
