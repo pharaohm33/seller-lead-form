@@ -17,10 +17,10 @@ with sync_playwright() as p:
     r = pg.evaluate("""() => { SCR.cfg.asset = 'sf'; const d = { street: '1 A St', city: 'Tucson', state: 'AZ', zip: '85701', beds: 3, baths: 2, sqft: 1500, address: '1 A St, Tucson, AZ 85701', url: 'https://www.redfin.com/AZ/Tucson/1-A-St-85701/home/1' };
       const c = scrCompsPrompt(d), h = scrRehabPrompt(d, 300000); const echo = h + '\\nRough estimate: $30,000 to $45,000 for the whole job.\\nKitchen refresh: $10,000 to $15,000';
       return { c, h, cEnc: encodeURIComponent(c).length, hEnc: encodeURIComponent(h).length, best: scrBestRehab(echo, 300000), base: compsPromptResidential('1 A St', 'x', '').length }; }""")
-    check("comps prompt starts by asking for the answer itself, not web results", r["c"].startswith("Do the research and write the complete answer yourself in this chat. Do not reply with just a list of web results"))
+    check("comps prompt starts by asking for a written summary, not links or web results", r["c"].startswith("Write a summary of your findings in this chat, in your own words") and "Do not reply with links, a list of websites or web search results" in r["c"][:400])
     check("comps prompt keeps the machine-read summary block", "---COMPS SUMMARY---" in r["c"] and "ARV ESTIMATE:" in r["c"] and "---END SUMMARY---" in r["c"])
     check("comps prompt still fits a Google URL (under 7000 characters encoded)", r["cEnc"] < 7000, r["cEnc"])
-    check("rehab prompt asks for an answer, not a list of web results", r["h"].endswith("not a list of web results.") and "how much fix and flip investor repair" in r["h"])
+    check("rehab prompt asks for a written summary, not links", r["h"].endswith("with no links and no list of websites or web results.") and "Write a summary of the estimate" in r["h"] and "how much fix and flip investor repair" in r["h"])
     check("the echoed rehab question (with the instruction) does not hide the real total", r["best"] and (r["best"]["low"], r["best"]["high"]) == (30000, 45000), r["best"])
     check("no script errors", not errs, errs)
 print("FAILED" if bad else "ALL PASS"); raise SystemExit(bad)

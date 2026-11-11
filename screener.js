@@ -666,8 +666,8 @@ const scrNum = v => (v === "" || v === undefined || v === null || isNaN(Number(v
 function scrAddressLine(d) { return `${d.street || ""}, ${d.city || ""}, ${d.state || ""} ${d.zip || ""}`.trim(); }
 
 // Google AI Mode sometimes answers with a list of web results ("Here are top web results for exploring this topic") instead of an answer. These one-line instructions ask it to write the answer itself.
-const SCR_NO_WEB_LIST_FIRST = "Do the research and write the complete answer yourself in this chat. Do not reply with just a list of web results or links.\n\n";
-const SCR_NO_WEB_LIST_END = " Answer directly in this chat with your own estimate (a total repair range, then a short breakdown), not a list of web results.";
+const SCR_NO_WEB_LIST_FIRST = "Write a summary of your findings in this chat, in your own words: the analysis and the numbers. Do not reply with links, a list of websites or web search results; I do not need sources, I need your written summary.\n\n";
+const SCR_NO_WEB_LIST_END = " Write a summary of the estimate in your own words (a total repair range, then a short breakdown), with no links and no list of websites or web results.";
 function scrCompsPrompt(d) { return SCR_NO_WEB_LIST_FIRST + scrCompsPromptBase(d); }
 function scrCompsPromptBase(d) {
   const land = SCR.cfg.asset === "land";
