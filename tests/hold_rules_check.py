@@ -66,6 +66,22 @@ with sync_playwright() as p:
     check("a deal that only worked by paying the seller nothing is skipped and says so", all(any("paying the seller nothing each month" in w for w in (a_["why"])) for sp, a_, b in rows if b["q"] and not a_["q"] and b["structure"] == "principal" and b["mp"] < 250), dropped)
     changed = [(sp, a["mp"], a["ltv"], b["ltv"], a["noteRate"]) for sp, a, b in rows if a["q"] and b["q"] and b["structure"] == "principal" and (b["mp"] or 0) < 250]
     check("a deal that used to be deferred now pays the seller by taking a smaller loan (or is skipped above)", all((c[1] >= 250 or c[4] > 0) and c[2] <= c[3] + 1e-9 for c in changed), changed)
+    # A seller down payment asked for (cfg.downTargetPct, % of the full purchase price): the offer starts there and comes down only as far as the other rules force; blank = the usual rules.
+    DOWN = """([price, arv, ltr, str_, pct, strat]) => { SCR.cfg.downTargetPct = pct; SCR.cfg.minDom = 0; SCR.cfg.asset = 'sf'; SCR.cfg.strategy = strat;
+      const d = { address: '1 A St, Tucson, AZ 85701', street: '1 A St', price, sqft: 1500, dom: 300 }; const f = { pwEquityPct: 100, arvLow: arv, arvHigh: arv, rentLtr: ltr, rentStr: str_, rehabLow: 20000, rehabHigh: 30000, tier: 'moderate' };
+      const p = scrPrice(d, f), h = p.holdPlan || {}, c = h.cashAtClose || {}, x = h.saleExit || {}; SCR.cfg.downTargetPct = 0;
+      return { q: p.qualifies, down: p.carryDown / p.carryOffer, carry: p.carryOffer, years: p.months / 12, cf: h.cashflow, need: h.cfNeed, dscr: h.dscr, sale: x.surplus, buyerMonths: c.buyerMonths, wholesaler: c.wholesaler, fee: c.fee, levers: h.levers || [], note: p.carryNote || '' }; }"""
+    auto = pg.evaluate(DOWN, [330000, 360000, 2500, 5200, 0, 'hold'])
+    asked = pg.evaluate(DOWN, [330000, 360000, 2500, 5200, 40, 'hold'])
+    check("blank = automatic: the usual start (50% where it works) is unchanged", auto["q"] and abs(auto["down"] - 0.5) < 0.01, auto["down"])
+    check("asking for 40% down gives the seller 40% (or the best the rules allow) and every other rule still holds", asked["q"] and asked["down"] >= 0.40 - 0.005 and asked["cf"] >= asked["need"] - 0.5 and asked["dscr"] >= 1.25 - 1e-9 and asked["sale"] > 0 and asked["buyerMonths"] >= 3 - 1e-9, asked)
+    weak = pg.evaluate(DOWN, [300000, 325000, 2500, 0, 45, 'hold']); weak_auto = pg.evaluate(DOWN, [300000, 325000, 2500, 0, 0, 'hold'])
+    check("a down payment the deal cannot carry comes down only as far as it must, never below what the automatic rules reach, and says so", weak["q"] and weak["down"] <= 0.45 + 1e-9 and weak["down"] >= weak_auto["down"] - 1e-9 and (weak["down"] >= 0.45 - 0.005 or any("asked 45%" in l for l in weak["levers"])), (weak, weak_auto["down"]))
+    check("the asked-for down payment is reported in the levers", any("seller down payment" in l for l in asked["levers"]), asked["levers"])
+    flip_auto = pg.evaluate(DOWN, [600000, 900000, 0, 0, 0, 'flip']); flip_ask = pg.evaluate(DOWN, [600000, 900000, 0, 0, 45, 'flip'])
+    check("flips: the asked-for down payment is the start (45%), not the usual ~30%", flip_ask["down"] > flip_auto["down"] + 0.02 and flip_ask["down"] <= 0.45 + 1e-9, (flip_auto["down"], flip_ask["down"]))
+    sweep = [pg.evaluate(DOWN, [pr, ar, rent, 0, 35, 'hold']) for pr, ar, rent in [(250000, 270000, 2200), (300000, 325000, 2500), (330000, 360000, 2800), (400000, 440000, 3200)]]
+    check("with a target set every qualifying hold deal still meets cash flow, DSCR, reserves, fee and the sale exit", all((not r["q"]) or (r["cf"] >= r["need"] - 0.5 and r["dscr"] >= 1.25 - 1e-9 and r["sale"] > 0 and r["buyerMonths"] >= 3 - 1e-9 and r["wholesaler"] >= min(r["fee"], 25000) - 1) for r in sweep), sweep)
     SALE = """([price, arv, ltr, req]) => { SCR.HOLD.SALE_EXIT_REQUIRED = req; SCR.cfg.minDom = 0; SCR.cfg.asset = 'sf'; SCR.cfg.strategy = 'hold';
       const d = { address: '1 A St, Tucson, AZ 85701', street: '1 A St', price, sqft: 1500, dom: 300 }; const f = { pwEquityPct: 100, arvLow: arv, arvHigh: arv, rentLtr: ltr, rentStr: 0, rehabLow: 20000, rehabHigh: 30000, tier: 'moderate' };
       const p = scrPrice(d, f), x = (p.holdPlan || {}).saleExit || {}; SCR.HOLD.SALE_EXIT_REQUIRED = true; return { q: p.qualifies, years: p.months / 12, ltv: p.ltv, down: p.carryDown / p.carryOffer, surplus: x.surplus, log: p.holdLog[0] }; }"""

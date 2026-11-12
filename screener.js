@@ -6,7 +6,7 @@
 
 const SCR = {
   rows: [], sel: null,
-  cfg: { asset: "sf", strategy: "flip", offerMode: "carry", minDom: 180, minOwnerEquityPct: 80, defCity: "", defState: "", defZip: "" },   // strategy: sf = flip | hold, land = cash | dev   // qualification = days on market + Propwire owner equity only
+  cfg: { asset: "sf", strategy: "flip", offerMode: "carry", minDom: 180, minOwnerEquityPct: 80, downTargetPct: 0, defCity: "", defState: "", defZip: "" },   // strategy: sf = flip | hold, land = cash | dev   // qualification = days on market + Propwire owner equity only
   AGENT_EMAIL: "montanoemmanuel@gmail.com", AGENT_NAME: "Emmanuel's LOI Helper Agent", PHONE: "5206336437",
   LOI_URL: "https://pharaohm33.github.io/loi-generator/",
   REHAB_PSF: { light: 25, moderate: 40, heavy: 55, gut: 75 },   // quick estimate when no rehab number is entered
@@ -215,7 +215,7 @@ function scrPrice(d, f) {
       const build = carry => {
         const cashRaw = scrRound((hold ? SCR.HOLD_CASH_PCT : SCR.CASH_PCT_OF_CARRY) * carry), cashCapped = mao > 0 && cashRaw > scrRound(mao);
         const cash = cashCapped ? scrRound(mao) : cashRaw;
-        const baseDown = scrRound((hold ? SCR.HOLD_DOWN_PCT : SCR.CARRY_DOWN) * carry), dMin = scrRound(SCR.MIN_SELLER_CASH_PCT * carry);
+        const baseDown = scrRound((scrDownTarget() || (hold ? SCR.HOLD_DOWN_PCT : SCR.CARRY_DOWN)) * carry), dMin = scrRound(SCR.MIN_SELLER_CASH_PCT * carry);
         const targetFor = loan => f.gut && !hold ? loan * SCR.HM_RATE / 100 / 12 * termMonths + buffer : SCR.CASHBACK_PCT * carry;
         const gap = (r, cac) => scrModel(carry, cac, asIs * r, asIs).cashBack - targetFor(asIs * r);
         const minProfit = Math.max(SCR.MIN_PROFIT_PER_YEAR * years, SCR.MIN_PROFIT_PCT_OF_PRICE * carry);
@@ -327,6 +327,7 @@ function scrPrice(d, f) {
       const F = Math.max(H.WHOLESALE_MIN, H.WHOLESALE_PCT * V);              // your fee: the greater of $25,000 or 3% of value (the site's current formula)
       holdLog = [];
       // One candidate: purchase price P, seller cash %, DSCR loan LTV, balloon T years.
+      const askedDown = scrDownTarget(), dStart = askedDown || H.DOWN_START, dTarget = askedDown || H.DOWN_TARGET, dTrade = askedDown ? H.BALLOON_MAX_YEARS : H.DOWN_TRADE_YEARS;     // a down payment asked for: start there, keep it as long as ANY balloon works, come down only as far as the other rules force
       let minPay = H.MIN_NOTE_PMT || 0;
       const ev = (P, structure, dpct, ltv, T) => {
         const dn = scrRound(P * dpct), Nn = P - dn, L = Math.round(V * ltv / 500) * 500, pmt = scrAmortPmt(L, H.DSCR_RATE, H.DSCR_AMORT_YEARS), reqCf = need(P);
@@ -362,15 +363,15 @@ function scrPrice(d, f) {
         return null;
       };
       const search = (P, structure) => {
-        const any = soonest(P, structure, H.DOWN_START, H.DOWN_MIN);
-        if (!any || any.dpct >= H.DOWN_TARGET - 1e-9) return any;
-        const ideal = soonest(P, structure, H.DOWN_START, H.DOWN_TARGET);
-        return ideal && ideal.T <= any.T + H.DOWN_TRADE_YEARS ? ideal : any;
+        const any = soonest(P, structure, dStart, H.DOWN_MIN);
+        if (!any || any.dpct >= dTarget - 1e-9) return any;
+        const ideal = soonest(P, structure, dStart, dTarget);
+        return ideal && ideal.T <= any.T + dTrade ? ideal : any;
       };
       // Why nothing works: which rule cannot be met anywhere on the grid.
       const diagnose = (P, structure) => {
         let anyCf = false, anyCash = false, anyProfit = false, anyCfCash = false, anySale = false, anyCfCashSale = false;
-        for (let dp = H.DOWN_START; dp >= H.DOWN_MIN - 1e-9; dp -= H.DOWN_STEP)
+        for (let dp = dStart; dp >= H.DOWN_MIN - 1e-9; dp -= H.DOWN_STEP)
           for (let lt = H.LTV_START; lt >= H.LTV_MIN - 1e-9; lt -= H.LTV_STEP)
             for (let T = H.BALLOON_MIN_YEARS; T <= H.BALLOON_MAX_YEARS; T += 5) { const e = ev(P, structure, dp, lt, T); anyCf = anyCf || (e.cfOk && e.dscrOk); anyCash = anyCash || e.cashOk; anyProfit = anyProfit || e.profitOk; anyCfCash = anyCfCash || (e.cfOk && e.dscrOk && e.cashOk); anySale = anySale || e.saleOk; anyCfCashSale = anyCfCashSale || (e.cfOk && e.dscrOk && e.cashOk && e.saleOk); }
         return { anyCf, anyCash, anyProfit, anyCfCash, anySale, anyCfCashSale };
@@ -396,7 +397,7 @@ function scrPrice(d, f) {
           if (r0.f) holdWhy.push(`it only works by paying the seller nothing each month (deferred to the balloon): a principal-only note has to pay at least ${scrMoney(H.MIN_NOTE_PMT)}/mo and no loan size leaves that much cash flow while keeping the ${H.DSCR_MIN} DSCR, the cash at closing, the buyer profit and the sale exit: skipped`);
         }
       }
-      const shown = found || ev(start, "io", H.DOWN_START, H.LTV_START, H.BALLOON_MIN_YEARS);
+      const shown = found || ev(start, "io", dStart, H.LTV_START, H.BALLOON_MIN_YEARS);
       const dg = found ? null : diagnose(start, "io");
       structure = found ? found.structure : "io";
       if (!appraisalOk) holdWhy.push(`appraisal is likely to come in under the asking price (value ${scrMoney(V)} vs asking ${scrMoney(list)}), and the DSCR loan is sized on the appraised value, so the deal cannot close: skipped`);
@@ -410,13 +411,14 @@ function scrPrice(d, f) {
       }
       const e = shown, levers = [];
       if (found) {
-        if (e.dpct < H.DOWN_START - 1e-9) levers.push(`seller cash at closing ${H.DOWN_START * 100}% -> ${(e.dpct * 100).toFixed(1)}% because the loan could not fund the cash at closing (appraisal contingency at the asking price)`);
+        if (e.dpct < dStart - 1e-9) levers.push(`seller cash at closing ${(dStart * 100).toFixed(1).replace(/\.0$/, "")}% -> ${(e.dpct * 100).toFixed(1)}% because the loan could not fund the cash at closing (appraisal contingency at the asking price)`);
         if (e.ltv < H.LTV_START - 1e-9) {
           const up = Math.round((e.ltv + H.LTV_STEP) * 100) / 100, x = up <= H.LTV_START + 1e-9 ? ev(e.P, e.structure, e.dpct, up, e.T) : null, saleBinds = !!x && x.cfOk && x.dscrOk && x.cashOk && x.profitOk && !x.saleOk;
           levers.push(`LTV ${H.LTV_START * 100}% -> ${(e.ltv * 100).toFixed(0)}% for cash flow, the ${H.DSCR_MIN} DSCR${saleBinds ? " and so that selling off appreciation clears the loan and the seller note (Sale Viable, no cash flow)" : ""}`);
         }
         levers.push(`balloon ${e.T} year${e.T === 1 ? "" : "s"} (soonest that works, checked year by year)`);
-        if (e.dpct < H.DOWN_TARGET - 1e-9) levers.push(`seller cash is ${(e.dpct * 100).toFixed(1)}%, under the ${H.DOWN_TARGET * 100}% target: no balloon within ${H.DOWN_TRADE_YEARS} years of this one works at ${H.DOWN_TARGET * 100}%+`);
+        if (askedDown) levers.push(e.dpct >= askedDown - 1e-9 ? `seller down payment ${(askedDown * 100).toFixed(1).replace(/\.0$/, "")}% as asked` : `seller down payment asked ${(askedDown * 100).toFixed(1).replace(/\.0$/, "")}%, best the other rules allow ${(e.dpct * 100).toFixed(1)}%`);
+        else if (e.dpct < dTarget - 1e-9) levers.push(`seller cash is ${(e.dpct * 100).toFixed(1)}%, under the ${dTarget * 100}% target: no balloon within ${dTrade} years of this one works at ${dTarget * 100}%+`);
       }
       holdLog.push({ s: structure, term: e.T * 12, carry: e.P, down: e.dn, downPct: +(e.dpct).toFixed(3), ltv: +e.ltv.toFixed(2), cash: scrRound(SCR.HOLD_CASH_PCT * e.P), cashCapped: false, hmInt: Math.round(e.pmt), pay: Math.round(e.notePmt), noi: Math.round(noi),
         cf: rentKnown ? Math.round(e.cf) : null, need: rentKnown ? Math.round(e.reqCf) : null, cfOk: rentKnown ? e.cfOk : null, profit: Math.round(e.profit), minProfit: Math.round(e.minProfit), saleSurplus: Math.round(e.saleSurplus), saleOk: e.saleOk, ok: !!found, ceilOk: !!ceilFound,
@@ -510,6 +512,12 @@ function scrLogLines(p) {
 
 /* ---------- links + notes ---------- */
 // Days the seller has to accept, counted from TOMORROW (so today + days + 1): two weeks for single family and small multifamily; thirty days for 5+ units or commercial over $1M
+// The seller down payment the person asks for, as a fraction of the purchase price (0 = automatic: the usual rules). Kept between the seller-cash floor and 90%.
+function scrDownTarget() {
+  const v = Number(SCR.cfg.downTargetPct) / 100;
+  return v > 0 ? Math.min(0.90, Math.max(SCR.MIN_SELLER_CASH_PCT, v)) : 0;
+}
+
 function scrOfferDays(units, propType, price) {
   const large = Number(units) >= 5 || (String(propType) === "commercial" && Number(price) > SCR.LARGE_COMMERCIAL_PRICE);
   return large ? SCR.OFFER_DAYS_LARGE_FROM_TOMORROW : SCR.OFFER_DAYS_FROM_TOMORROW;
@@ -1171,6 +1179,7 @@ function scrMount() {
       <div><label>Min days on market</label><input type="number" id="scr-min-dom" value="180"></div>
       <div><label>Offer type</label><select id="scr-offer-mode"><option value="carry">Seller carryback only</option><option value="dual">Dual: carryback + cash</option></select></div>
       <div><label>Min owner equity %</label><input type="number" id="scr-min-eq" value="80"></div>
+      <div><label title="Blank = automatic (the usual rules). A number asks for that seller down payment as a % of the full purchase price: the offer starts there and comes down only as far as the other rules force.">Seller down payment % (blank = auto)</label><input type="number" id="scr-down-pct" min="5" max="90" step="1" placeholder="auto"></div>
       <div><label>Default city (if the list has none)</label><input type="text" id="scr-def-city" placeholder="Tucson"></div>
       <div><label>Default state</label><input type="text" id="scr-def-state" maxlength="2" placeholder="AZ" style="text-transform:uppercase"></div>
       <div><label>Default ZIP (optional)</label><input type="text" id="scr-def-zip" maxlength="5" placeholder="85701"></div>
@@ -1200,6 +1209,7 @@ function scrMount() {
     scrRenderStrat();
     SCR.cfg.minDom = Number(document.getElementById("scr-min-dom").value) || 0;
     SCR.cfg.minOwnerEquityPct = Number(document.getElementById("scr-min-eq").value) || 0;
+    SCR.cfg.downTargetPct = Number(document.getElementById("scr-down-pct").value) || 0;
     SCR.cfg.defCity = document.getElementById("scr-def-city").value.trim();
     SCR.cfg.defState = document.getElementById("scr-def-state").value.trim().toUpperCase();
     SCR.cfg.defZip = document.getElementById("scr-def-zip").value.trim();
