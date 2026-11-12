@@ -6,7 +6,7 @@
 
 const SCR = {
   rows: [], sel: null,
-  cfg: { asset: "sf", strategy: "flip", offerMode: "carry", minDom: 180, minOwnerEquityPct: 80, downTargetPct: 0, defCity: "", defState: "", defZip: "" },   // strategy: sf = flip | hold, land = cash | dev   // qualification = days on market + Propwire owner equity only
+  cfg: { asset: "sf", strategy: "flip", offerMode: "carry", minDom: 180, minOwnerEquityPct: 80, downTargetFlipPct: 0, downTargetHoldPct: 0, defCity: "", defState: "", defZip: "" },   // strategy: sf = flip | hold, land = cash | dev   // qualification = days on market + Propwire owner equity only
   AGENT_EMAIL: "montanoemmanuel@gmail.com", AGENT_NAME: "Emmanuel's LOI Helper Agent", PHONE: "5206336437",
   LOI_URL: "https://pharaohm33.github.io/loi-generator/",
   REHAB_PSF: { light: 25, moderate: 40, heavy: 55, gut: 75 },   // quick estimate when no rehab number is entered
@@ -215,7 +215,7 @@ function scrPrice(d, f) {
       const build = carry => {
         const cashRaw = scrRound((hold ? SCR.HOLD_CASH_PCT : SCR.CASH_PCT_OF_CARRY) * carry), cashCapped = mao > 0 && cashRaw > scrRound(mao);
         const cash = cashCapped ? scrRound(mao) : cashRaw;
-        const baseDown = scrRound((scrDownTarget() || (hold ? SCR.HOLD_DOWN_PCT : SCR.CARRY_DOWN)) * carry), dMin = scrRound(SCR.MIN_SELLER_CASH_PCT * carry);
+        const baseDown = scrRound((scrDownTarget(hold) || (hold ? SCR.HOLD_DOWN_PCT : SCR.CARRY_DOWN)) * carry), dMin = scrRound(SCR.MIN_SELLER_CASH_PCT * carry);
         const targetFor = loan => f.gut && !hold ? loan * SCR.HM_RATE / 100 / 12 * termMonths + buffer : SCR.CASHBACK_PCT * carry;
         const gap = (r, cac) => scrModel(carry, cac, asIs * r, asIs).cashBack - targetFor(asIs * r);
         const minProfit = Math.max(SCR.MIN_PROFIT_PER_YEAR * years, SCR.MIN_PROFIT_PCT_OF_PRICE * carry);
@@ -327,7 +327,7 @@ function scrPrice(d, f) {
       const F = Math.max(H.WHOLESALE_MIN, H.WHOLESALE_PCT * V);              // your fee: the greater of $25,000 or 3% of value (the site's current formula)
       holdLog = [];
       // One candidate: purchase price P, seller cash %, DSCR loan LTV, balloon T years.
-      const askedDown = scrDownTarget(), dStart = askedDown || H.DOWN_START, dTarget = askedDown || H.DOWN_TARGET, dTrade = askedDown ? H.BALLOON_MAX_YEARS : H.DOWN_TRADE_YEARS;     // a down payment asked for: start there, keep it as long as ANY balloon works, come down only as far as the other rules force
+      const askedDown = scrDownTarget(true), dStart = askedDown || H.DOWN_START, dTarget = askedDown || H.DOWN_TARGET, dTrade = askedDown ? H.BALLOON_MAX_YEARS : H.DOWN_TRADE_YEARS;     // a down payment asked for: start there, keep it as long as ANY balloon works, come down only as far as the other rules force
       let minPay = H.MIN_NOTE_PMT || 0;
       const ev = (P, structure, dpct, ltv, T) => {
         const dn = scrRound(P * dpct), Nn = P - dn, L = Math.round(V * ltv / 500) * 500, pmt = scrAmortPmt(L, H.DSCR_RATE, H.DSCR_AMORT_YEARS), reqCf = need(P);
@@ -512,9 +512,9 @@ function scrLogLines(p) {
 
 /* ---------- links + notes ---------- */
 // Days the seller has to accept, counted from TOMORROW (so today + days + 1): two weeks for single family and small multifamily; thirty days for 5+ units or commercial over $1M
-// The seller down payment the person asks for, as a fraction of the purchase price (0 = automatic: the usual rules). Kept between the seller-cash floor and 90%.
-function scrDownTarget() {
-  const v = Number(SCR.cfg.downTargetPct) / 100;
+// The seller down payment the person asks for (one setting for fix & flip, one for buy & hold), as a fraction of the purchase price (0 = automatic: the usual rules). Kept between the seller-cash floor and 90%.
+function scrDownTarget(hold) {
+  const v = Number(hold ? SCR.cfg.downTargetHoldPct : SCR.cfg.downTargetFlipPct) / 100;       // buy & hold and fix & flip each have their own
   return v > 0 ? Math.min(0.90, Math.max(SCR.MIN_SELLER_CASH_PCT, v)) : 0;
 }
 
@@ -1179,7 +1179,8 @@ function scrMount() {
       <div><label>Min days on market</label><input type="number" id="scr-min-dom" value="180"></div>
       <div><label>Offer type</label><select id="scr-offer-mode"><option value="carry">Seller carryback only</option><option value="dual">Dual: carryback + cash</option></select></div>
       <div><label>Min owner equity %</label><input type="number" id="scr-min-eq" value="80"></div>
-      <div><label title="Blank = automatic (the usual rules). A number asks for that seller down payment as a % of the full purchase price: the offer starts there and comes down only as far as the other rules force.">Seller down payment % (blank = auto)</label><input type="number" id="scr-down-pct" min="5" max="90" step="1" placeholder="auto"></div>
+      <div><label title="Blank = automatic (the usual rules). A number asks for that seller down payment on a FIX & FLIP offer as a % of the full purchase price: the offer starts there and comes down only as far as the other rules force.">Flip: seller down payment % (blank = auto)</label><input type="number" id="scr-down-flip" min="5" max="90" step="1" placeholder="auto"></div>
+      <div><label title="Blank = automatic (the usual rules). A number asks for that seller down payment on a BUY & HOLD offer as a % of the full purchase price: the offer starts there and comes down only as far as the other rules force.">Hold: seller down payment % (blank = auto)</label><input type="number" id="scr-down-hold" min="5" max="90" step="1" placeholder="auto"></div>
       <div><label>Default city (if the list has none)</label><input type="text" id="scr-def-city" placeholder="Tucson"></div>
       <div><label>Default state</label><input type="text" id="scr-def-state" maxlength="2" placeholder="AZ" style="text-transform:uppercase"></div>
       <div><label>Default ZIP (optional)</label><input type="text" id="scr-def-zip" maxlength="5" placeholder="85701"></div>
@@ -1209,7 +1210,8 @@ function scrMount() {
     scrRenderStrat();
     SCR.cfg.minDom = Number(document.getElementById("scr-min-dom").value) || 0;
     SCR.cfg.minOwnerEquityPct = Number(document.getElementById("scr-min-eq").value) || 0;
-    SCR.cfg.downTargetPct = Number(document.getElementById("scr-down-pct").value) || 0;
+    SCR.cfg.downTargetFlipPct = Number(document.getElementById("scr-down-flip").value) || 0;
+    SCR.cfg.downTargetHoldPct = Number(document.getElementById("scr-down-hold").value) || 0;
     SCR.cfg.defCity = document.getElementById("scr-def-city").value.trim();
     SCR.cfg.defState = document.getElementById("scr-def-state").value.trim().toUpperCase();
     SCR.cfg.defZip = document.getElementById("scr-def-zip").value.trim();

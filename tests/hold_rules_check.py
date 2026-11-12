@@ -66,10 +66,10 @@ with sync_playwright() as p:
     check("a deal that only worked by paying the seller nothing is skipped and says so", all(any("paying the seller nothing each month" in w for w in (a_["why"])) for sp, a_, b in rows if b["q"] and not a_["q"] and b["structure"] == "principal" and b["mp"] < 250), dropped)
     changed = [(sp, a["mp"], a["ltv"], b["ltv"], a["noteRate"]) for sp, a, b in rows if a["q"] and b["q"] and b["structure"] == "principal" and (b["mp"] or 0) < 250]
     check("a deal that used to be deferred now pays the seller by taking a smaller loan (or is skipped above)", all((c[1] >= 250 or c[4] > 0) and c[2] <= c[3] + 1e-9 for c in changed), changed)
-    # A seller down payment asked for (cfg.downTargetPct, % of the full purchase price): the offer starts there and comes down only as far as the other rules force; blank = the usual rules.
-    DOWN = """([price, arv, ltr, str_, pct, strat]) => { SCR.cfg.downTargetPct = pct; SCR.cfg.minDom = 0; SCR.cfg.asset = 'sf'; SCR.cfg.strategy = strat;
+    # A seller down payment asked for (cfg.downTargetFlipPct and cfg.downTargetHoldPct, % of the full purchase price): the offer starts there and comes down only as far as the other rules force; blank = the usual rules.
+    DOWN = """([price, arv, ltr, str_, pct, strat, other]) => { SCR.cfg.downTargetHoldPct = strat === 'hold' ? pct : (other || 0); SCR.cfg.downTargetFlipPct = strat === 'flip' ? pct : (other || 0); SCR.cfg.minDom = 0; SCR.cfg.asset = 'sf'; SCR.cfg.strategy = strat;
       const d = { address: '1 A St, Tucson, AZ 85701', street: '1 A St', price, sqft: 1500, dom: 300 }; const f = { pwEquityPct: 100, arvLow: arv, arvHigh: arv, rentLtr: ltr, rentStr: str_, rehabLow: 20000, rehabHigh: 30000, tier: 'moderate' };
-      const p = scrPrice(d, f), h = p.holdPlan || {}, c = h.cashAtClose || {}, x = h.saleExit || {}; SCR.cfg.downTargetPct = 0;
+      const p = scrPrice(d, f), h = p.holdPlan || {}, c = h.cashAtClose || {}, x = h.saleExit || {}; SCR.cfg.downTargetHoldPct = 0; SCR.cfg.downTargetFlipPct = 0;
       return { q: p.qualifies, down: p.carryDown / p.carryOffer, carry: p.carryOffer, years: p.months / 12, cf: h.cashflow, need: h.cfNeed, dscr: h.dscr, sale: x.surplus, buyerMonths: c.buyerMonths, wholesaler: c.wholesaler, fee: c.fee, levers: h.levers || [], note: p.carryNote || '' }; }"""
     auto = pg.evaluate(DOWN, [330000, 360000, 2500, 5200, 0, 'hold'])
     asked = pg.evaluate(DOWN, [330000, 360000, 2500, 5200, 40, 'hold'])
@@ -80,6 +80,8 @@ with sync_playwright() as p:
     check("the asked-for down payment is reported in the levers", any("seller down payment" in l for l in asked["levers"]), asked["levers"])
     flip_auto = pg.evaluate(DOWN, [600000, 900000, 0, 0, 0, 'flip']); flip_ask = pg.evaluate(DOWN, [600000, 900000, 0, 0, 45, 'flip'])
     check("flips: the asked-for down payment is the start (45%), not the usual ~30%", flip_ask["down"] > flip_auto["down"] + 0.02 and flip_ask["down"] <= 0.45 + 1e-9, (flip_auto["down"], flip_ask["down"]))
+    flip_other = pg.evaluate(DOWN, [600000, 900000, 0, 0, 0, 'flip', 70]); hold_other = pg.evaluate(DOWN, [330000, 360000, 2500, 5200, 0, 'hold', 70])
+    check("the two settings are separate: a flip target does not move a buy & hold offer and the other way round", abs(hold_other["down"] - auto["down"]) < 1e-9 and abs(flip_other["down"] - flip_auto["down"]) < 1e-9, (hold_other["down"], auto["down"], flip_other["down"], flip_auto["down"]))
     sweep = [pg.evaluate(DOWN, [pr, ar, rent, 0, 35, 'hold']) for pr, ar, rent in [(250000, 270000, 2200), (300000, 325000, 2500), (330000, 360000, 2800), (400000, 440000, 3200)]]
     check("with a target set every qualifying hold deal still meets cash flow, DSCR, reserves, fee and the sale exit", all((not r["q"]) or (r["cf"] >= r["need"] - 0.5 and r["dscr"] >= 1.25 - 1e-9 and r["sale"] > 0 and r["buyerMonths"] >= 3 - 1e-9 and r["wholesaler"] >= min(r["fee"], 25000) - 1) for r in sweep), sweep)
     SALE = """([price, arv, ltr, req]) => { SCR.HOLD.SALE_EXIT_REQUIRED = req; SCR.cfg.minDom = 0; SCR.cfg.asset = 'sf'; SCR.cfg.strategy = 'hold';
