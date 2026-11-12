@@ -527,7 +527,7 @@ function scrLoiLink(d, p, extra) {
     exit_refi_ltv: 75, exit_refi_rate: 7.5, exit_dscr_req: 1.25, exit_amort: 30, exit_refi_costs: 2.5, exit_refi_fees: 15000,
     exit_reserve_mo: p.months, ac_phone: "520 633 6437", ac_email1: "SuedeBuffaloOfficial@gmail.com", buyer_company: "Suede Buffalo LLC",
     offer_expiry: "", loi_agent_fee: "", loi_agent_fee_type: "pct", closing_cost_party: "split", appraisal_contingency: "on", cash_financing: "hard_money_appraisal",
-    acq_fee_basis: "at_closing", seller_security_type: "equity", mode: p.noteRate ? "interest_only" : "principal_only", loan_type: "hard_money", static_cf: 1
+    acq_fee_basis: "at_closing", seller_security_type: "deed_of_trust", mode: p.noteRate ? "interest_only" : "principal_only", loan_type: "hard_money", static_cf: 1
   };
   if (p.hold) {          // Buy & hold: rehab 0, a DSCR senior loan and the generator's "Admin Template" terms (not the cash template the flips use)
     Object.assign(q, { loan_type: "dscr", rehab: 0, sr_rate: SCR.HOLD.DSCR_RATE, sr_ltv: Math.round(p.ltv * 1000) / 10, sr_amort: SCR.HOLD.DSCR_AMORT_YEARS, sr_term: 360, sr_points: 2, sr_dscr: 1.25, acq_pct: 50, esc1_pct: 2, esc2_pct: 1.5, taf_pct: 2.5,
