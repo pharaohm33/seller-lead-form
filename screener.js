@@ -6,7 +6,7 @@
 
 const SCR = {
   rows: [], sel: null,
-  cfg: { asset: "sf", strategy: "flip", offerMode: "carry", minDom: 180, minOwnerEquityPct: 80, downTargetFlipPct: 0, downTargetHoldPct: 0, buyer: null, defCity: "", defState: "", defZip: "" },   // strategy: sf = flip | hold, land = cash | dev   // qualification = days on market + Propwire owner equity only
+  cfg: { asset: "sf", strategy: "flip", offerMode: "carry", minDom: 180, minOwnerEquityPct: 80, downTargetFlipPct: 0, downTargetHoldPct: 0, agentFeePct: 0, buyer: null, defCity: "", defState: "", defZip: "" },   // strategy: sf = flip | hold, land = cash | dev   // qualification = days on market + Propwire owner equity only
   AGENT_EMAIL: "montanoemmanuel@gmail.com", AGENT_NAME: "Emmanuel's LOI Helper Agent", PHONE: "5206336437",
   LOI_URL: "https://pharaohm33.github.io/loi-generator/",
   REHAB_PSF: { light: 25, moderate: 40, heavy: 55, gut: 75 },   // quick estimate when no rehab number is entered
@@ -36,7 +36,7 @@ const SCR = {
   // and takes the soonest balloon (5 to 15 years) that does. Single family: proforma rent, long-term or short-term, whichever cash flows more. Multifamily / commercial: the in-place NOI.
   HOLD: { LTV_START: 0.75, LTV_MIN: 0.30, LTV_STEP: 0.01, DSCR_RATE: 8, DSCR_AMORT_YEARS: 30, DSCR_MIN: 1.25, DOWN_START: 0.50, DOWN_MIN: 0.10, DOWN_STEP: 0.025,
           BALLOON_MIN_YEARS: 1, BALLOON_MAX_YEARS: 15, SALE_EXIT_REQUIRED: true, DOWN_TARGET: 0.35, DOWN_TRADE_YEARS: 2, ACQ_SPLIT: 0.50, NOTE_RATE_IO: 0.03, MIN_NOTE_PMT: 250, PRICE_BUMP: 0.10, NOI_GROWTH: 0.02,
-          RESERVE_MIN_MONTHS: 3, RESERVE_TARGET_MONTHS: 6, WHOLESALE_MIN: 25000, WHOLESALE_PCT: 0.03, MIN_PROFIT_PCT_OF_PRICE: 0.10, MIN_PROFIT_PCT_SHORT: 0.05, SHORT_BALLOON_UNDER_YEARS: 5, APPRAISAL_TOLERANCE: 0 },
+          RESERVE_MIN_MONTHS: 6, RESERVE_TARGET_MONTHS: 9, WHOLESALE_MIN: 25000, WHOLESALE_PCT: 0.03, MIN_PROFIT_PCT_OF_PRICE: 0.10, MIN_PROFIT_PCT_SHORT: 0.05, SHORT_BALLOON_UNDER_YEARS: 5, APPRAISAL_TOLERANCE: 0 },
   GEN: { esc1: 0.02, esc2: 0.015, pts: 0.02, agent: 0,   /* no realtor commission paid at closing */ acq: 0.50, taf: 0.025, sellerClosingShare: 0.5 },
   // Full rehab / gut: cash back to the buyer at closing = the full holding cost (24 months of hard money
   // interest) + the greater of $30,000 or 6% of ARV, so there is room for the assignment fee and extra cash
@@ -54,7 +54,7 @@ const SCR = {
   // MIN_SELLER_CASH_PCT), always keeping the buyer profit minimum and taking the soonest balloon that works. Every attempt is logged.
   HOLD_ASKING_FIRST: true,      // buy & hold: the offer starts at the asking price (the seller gets full price) and only steps down if no balloon works there
   HOLD_CASH_PCT: 0.65, HOLD_DOWN_PCT: 0.50, HOLD_CF_MIN: 250, HOLD_CF_PRICE_CAP: 500000, HOLD_CF_PCT_ABOVE: 0.001, HOLD_MIN_CASHBACK: 0,
-  LOGIC_VERSION: 3, LOG_KEY: "scrHoldLog", LOG_MAX: 300,
+  FLIP_RESERVE_MONTHS: 6, LOGIC_VERSION: 4, LOG_KEY: "scrHoldLog", LOG_MAX: 300,
   // New development (land): dual offer = cash, or the full asking price paid at sale/refinance within 24 months with $0 at closing.
   DEV_MONTHS: 24,
   OFFER_DAYS_FROM_TOMORROW: 14,      // the seller has two weeks, counted from the day after today
@@ -137,7 +137,7 @@ const scrMoney = n => (n < 0 ? "-$" : "$") + Math.round(Math.abs(n)).toLocaleStr
 // escrow 2% + 1.5%, 2 points, 3% agent fee, TAF 2.5%, closing costs split). Close, not exact: check the generator.
 function scrModel(pp, cac, loan, asIs) {
   const g = SCR.GEN, esc2 = Math.max(pp - cac, 0) * g.esc2;      // 2nd escrow is on the seller carry, not the price
-  const noAcq = pp * (g.esc1 + g.agent) + esc2 + loan * g.pts;
+  const noAcq = pp * (g.esc1 + scrAgentFrac()) + esc2 + loan * g.pts;
   const tafPrinNoAcq = Math.max(0, (asIs - loan) + (noAcq - esc2)), tafNo = tafPrinNoAcq * g.taf;
   const B0 = loan - cac - noAcq - tafNo, t = tafPrinNoAcq > 0 ? g.taf : 0;
   const acq = Math.max(0, B0) * g.acq / (1 + g.acq * t), closing = noAcq + acq;
@@ -170,7 +170,28 @@ function scrEquityPct(f, ref) { const i = scrEquityInfo(f, ref); return i ? i.pc
 const scrAmortPmt = (loan, ratePct, years) => { const i = ratePct / 1200, n = years * 12; return i ? loan * i / (1 - Math.pow(1 + i, -n)) : loan / n; };
 const scrLoanBalance = (loan, ratePct, years, paidMonths) => { const i = ratePct / 1200, p = scrAmortPmt(loan, ratePct, years); return i ? loan * Math.pow(1 + i, paidMonths) - p * (Math.pow(1 + i, paidMonths) - 1) / i : loan - p * paidMonths; };
 
+// The seller's agent commission paid by the buyer at closing (the browser agent's "seller agent commission paid by buyer" button; cfg.agentFeePct, 0 = off). It is a real closing cost in every
+// cash-at-closing calculation. It is optional: scrPrice() drops it when the deal only fails because of it.
+let scrAgentOverride = null;
+function scrAgentFrac() { return scrAgentOverride !== null ? scrAgentOverride : Math.min(0.10, Math.max(0, Number(SCR.cfg.agentFeePct) || 0) / 100); }
 function scrPrice(d, f) {
+  const want = scrAgentFrac();
+  scrAgentOverride = want;
+  let p;
+  try {
+    p = scrPriceCore(d, f);
+    if (want > 0 && p && p.ready !== false && !p.qualifies) {
+      scrAgentOverride = 0;
+      const p0 = scrPriceCore(d, f);
+      if (p0 && p0.qualifies) { p0.agentFee = { pct: 0, asked: want * 100, dropped: true }; return p0; }       // it only failed because of the commission: make the offer without it
+      if (p0) { p0.agentFee = { pct: 0, asked: want * 100, dropped: false }; return p0; }
+    }
+  } finally { scrAgentOverride = null; }
+  if (p && p.ready !== false) p.agentFee = { pct: want * 100, asked: want * 100, dropped: false };
+  return p;
+}
+
+function scrPriceCore(d, f) {
   const land = SCR.cfg.asset === "land", strat = SCR.cfg.strategy;
   const hold = !land && strat === "hold", dev = land && strat === "dev";
   const list = d.price || 0;
@@ -216,7 +237,7 @@ function scrPrice(d, f) {
         const cashRaw = scrRound((hold ? SCR.HOLD_CASH_PCT : SCR.CASH_PCT_OF_CARRY) * carry), cashCapped = mao > 0 && cashRaw > scrRound(mao);
         const cash = cashCapped ? scrRound(mao) : cashRaw;
         const baseDown = scrRound((scrDownTarget(hold) || (hold ? SCR.HOLD_DOWN_PCT : SCR.CARRY_DOWN)) * carry), dMin = scrRound(SCR.MIN_SELLER_CASH_PCT * carry);
-        const targetFor = loan => f.gut && !hold ? loan * SCR.HM_RATE / 100 / 12 * termMonths + buffer : SCR.CASHBACK_PCT * carry;
+        const targetFor = loan => Math.max(f.gut && !hold ? loan * SCR.HM_RATE / 100 / 12 * termMonths + buffer : SCR.CASHBACK_PCT * carry, hold ? 0 : loan * SCR.HM_RATE / 100 / 12 * SCR.FLIP_RESERVE_MONTHS);   // a flip: the buyer keeps at least 6 months of the hard money interest in reserve
         const gap = (r, cac) => scrModel(carry, cac, asIs * r, asIs).cashBack - targetFor(asIs * r);
         const minProfit = Math.max(SCR.MIN_PROFIT_PER_YEAR * years, SCR.MIN_PROFIT_PCT_OF_PRICE * carry);
         // Smallest LTV at which buyer cash back reaches its target for a given seller cash at closing (null = even the max LTV can't).
@@ -340,8 +361,8 @@ function scrPrice(d, f) {
         const cf = noi - notePmt - pmt, dscr = pmt > 0 ? noi / pmt : Infinity;
         // Cash at closing, the way the LOI generator works it out: the loan less the seller's cash and the closing costs, less the 2.5% fee on the money the buyer does not put in (TAF); what is left is the
         // total net cash, and the Acq / Bird Dog Fee is 50% of it (your fee), the other half is the cash back to the buyer. Both halves have to clear their floors: your fee the greater of $25,000 or 3% of value,
-        // the buyer's cash back at least 3 months of payments in reserve (aiming for 6).
-        const closingNoAcq = P * (SCR.GEN.esc1 + SCR.GEN.agent) + Nn * SCR.GEN.esc2 + L * SCR.GEN.pts;
+        // the buyer's cash back at least 6 months of payments in reserve (aiming for 9).
+        const closingNoAcq = P * (SCR.GEN.esc1 + scrAgentFrac()) + Nn * SCR.GEN.esc2 + L * SCR.GEN.pts;
         const tafPrin = Math.max(0, (V - L) + (closingNoAcq - Nn * SCR.GEN.esc2)), t = tafPrin > 0 ? SCR.GEN.taf : 0, tafFee = tafPrin * SCR.GEN.taf;
         const closing = closingNoAcq + tafFee, avail = L - dn - closing;
         const M = pmt + notePmt, Rmin = H.RESERVE_MIN_MONTHS * M, Rtgt = H.RESERVE_TARGET_MONTHS * M;
@@ -547,6 +568,7 @@ function scrLoiLink(d, p, extra) {
     const hp = p.holdPlan;
     if (hp && hp.rentKnown && hp.noi > 0) q.noi_direct = Math.round(hp.noi * 12);
   }
+  if (p.agentFee && p.agentFee.pct > 0) { q.loi_agent_fee = p.agentFee.pct; q.loi_agent_fee_type = "pct"; }       // the seller's agent is paid by the buyer, on top of the seller's cash
   // The buyer on the offer and the acquisition correspondent, when a buyer profile is chosen (the browser agent's Buyer setting; blank = the usual: Don Ava Capital LLC with Suede Buffalo LLC as the correspondent on a
   // buy & hold, Suede Buffalo LLC as the direct buyer on a flip). A blank correspondent name means no correspondent.
   const by = SCR.cfg.buyer;
@@ -641,6 +663,7 @@ function scrNotes(d, f, p, loi, resume) {
     "", "PICK UP WHERE WE LEFT OFF",
     `- LOI Generator (${land ? "cash template, land" : SCR.cfg.offerMode === "dual" ? "cash template + dual offer" : "seller carryback only"}, pre-filled): ${loi}`,
     `- sendmyseller.com resume link (do NOT submit): ${resume}`, "", "UNDERWRITING",
+    p.agentFee && (p.agentFee.pct > 0 || p.agentFee.dropped) ? `- Seller's agent commission paid by the buyer: ${p.agentFee.pct > 0 ? `${p.agentFee.pct}% (${scrMoney((p.carryOffer || p.cashOffer || 0) * p.agentFee.pct / 100)}) at closing, on top of the seller's cash` : `NOT included: the deal does not fit with the ${p.agentFee.asked}% commission, so the offer is made without it`}` : null,
     land ? `- As-is value (middle of range): ${scrMoney(p.arvMid)}` : `- ARV (middle of comp range): ${scrMoney(p.arvMid)}   Rehab: ${scrMoney(p.rehab)}   As-is: ${scrMoney(p.asIs)}`,
     land ? `- Cash offer (land): ${scrMoney(p.cashOffer)}   [site MAO: ${scrMoney(p.mao)}]` + (p.dev ? `\n- Offer B, full asking price: ${scrMoney(p.carryOffer)}, $0 at closing, paid at sale or refinance of the property within ${p.months} months (${p.devNote})` : "")
          : `- Hard Money Buyer MAO (10% down): ${scrMoney(p.mao10)}   (20% down): ${scrMoney(p.mao)}${SCR.cfg.offerMode === "dual" ? `\n- Offer A, all cash (${(SCR.CASH_PCT_OF_CARRY * 100).toFixed(1)}% of the carry price): ${scrMoney(p.cashOffer)}` : `\n- (All cash would be ${scrMoney(p.cashOffer)}: not offered, seller carryback only)`}\n- ${SCR.cfg.offerMode === "dual" ? "Offer B" : "Offer"}, seller carry (${p.hold && p.holdPlan.structure === "principal" ? SCR.HOLD.PRICE_BUMP * 100 + "% over asking" : p.hold ? (SCR.CARRY_PCT_OF_ARV * 100).toFixed(1) + "% of value, capped at list" : "Hard Money Buyer MAO (10% down) " + scrMoney(p.mao10) + ", capped at list"}): ${scrMoney(p.carryOffer)} (${scrMoney(p.carryDown)} at closing, balance carried ${p.months} months at ${p.noteRate * 100}%${p.hold ? (p.noteRate ? " interest-only" : ", principal-only") : ""})`,
@@ -664,7 +687,7 @@ function scrNotes(d, f, p, loi, resume) {
   const contact = [f.contactName, f.contactPhone, f.contactEmail].filter(Boolean).join(" · ");
   L.push(`- Contact (${who}): ${contact || "not entered yet"}${f.owner && f.contactRole !== "seller" ? "   Owner (Propwire): " + f.owner : ""}`);
   if (f.owner || f.pwNotes) L.push(`- Propwire notes: ${[f.owner, f.pwNotes].filter(Boolean).join(" | ")}`);
-  return L.join("\n");
+  return L.filter(x => x !== null).join("\n");
 }
 
 function scrGmailLink(d, notes) {
@@ -1185,6 +1208,7 @@ function scrMount() {
       <div><label>Min days on market</label><input type="number" id="scr-min-dom" value="180"></div>
       <div><label>Offer type</label><select id="scr-offer-mode"><option value="carry">Seller carryback only</option><option value="dual">Dual: carryback + cash</option></select></div>
       <div><label>Min owner equity %</label><input type="number" id="scr-min-eq" value="80"></div>
+      <div><label title="Pays the seller's agent a commission at closing, paid by the buyer on top of the seller's cash. Optional: if the deal only fails because of it, the offer is made without it.">Seller agent commission paid by buyer</label><label style="display:flex;gap:6px;align-items:center;font-weight:400"><input type="checkbox" id="scr-agent-fee" style="width:auto"> pay <input type="number" id="scr-agent-pct" value="3" min="0.5" max="10" step="0.25" style="width:70px">%</label></div>
       <div><label title="Blank = automatic (the usual rules). A number asks for that seller down payment on a FIX & FLIP offer as a % of the full purchase price: the offer starts there and comes down only as far as the other rules force.">Flip: seller down payment % (blank = auto)</label><input type="number" id="scr-down-flip" min="5" max="90" step="1" placeholder="auto"></div>
       <div><label title="Blank = automatic (the usual rules). A number asks for that seller down payment on a BUY & HOLD offer as a % of the full purchase price: the offer starts there and comes down only as far as the other rules force.">Hold: seller down payment % (blank = auto)</label><input type="number" id="scr-down-hold" min="5" max="90" step="1" placeholder="auto"></div>
       <div><label>Default city (if the list has none)</label><input type="text" id="scr-def-city" placeholder="Tucson"></div>
@@ -1217,6 +1241,7 @@ function scrMount() {
     SCR.cfg.minDom = Number(document.getElementById("scr-min-dom").value) || 0;
     SCR.cfg.minOwnerEquityPct = Number(document.getElementById("scr-min-eq").value) || 0;
     SCR.cfg.downTargetFlipPct = Number(document.getElementById("scr-down-flip").value) || 0;
+    SCR.cfg.agentFeePct = document.getElementById("scr-agent-fee").checked ? (Number(document.getElementById("scr-agent-pct").value) || 3) : 0;
     SCR.cfg.downTargetHoldPct = Number(document.getElementById("scr-down-hold").value) || 0;
     SCR.cfg.defCity = document.getElementById("scr-def-city").value.trim();
     SCR.cfg.defState = document.getElementById("scr-def-state").value.trim().toUpperCase();
