@@ -1,7 +1,7 @@
 """Buy & hold seller carryback rules (scrSolveHold): 50% cash to the seller to start, a 75% LTV DSCR loan lowered as needed, seller cash lowered only when the loan cannot fund the cash at closing,
 the soonest balloon from 5 to 15 years, buyer reserves of at least 6 months, your fee on top, single family proforma (the better of long-term and short-term rent), multifamily the in-place NOI,
 appraisal at the asking price, and a single-family hold over $450,000 is skipped.   Run:  python tests/hold_rules_check.py"""
-import functools, http.server, json, pathlib, sys, threading
+import functools, http.server, json, pathlib, re, sys, threading
 from playwright.sync_api import sync_playwright
 
 SP = str(pathlib.Path(__file__).resolve().parent.parent)
@@ -112,6 +112,20 @@ with sync_playwright() as p:
     check("every qualifying deal with the commission on either carries it or says it was dropped, and keeps 6 months of reserves", all((not r["q"]) or ((r["fee"]["pct"] == 3 and r["linkFee"] == "3") or r["fee"]["dropped"]) and r["months"] >= 6 - 1e-9 for r in sweep), sweep)
     flip_off, flip_on = pg.evaluate(AG, [600000, 900000, 0, 0, 0, 'flip']), pg.evaluate(AG, [600000, 900000, 0, 0, 3, 'flip'])
     check("flips: the commission is carried or dropped the same way and the link says which", flip_on["q"] and ((flip_on["fee"]["pct"] == 3 and flip_on["linkFee"] == "3") or (flip_on["fee"]["dropped"] and flip_on["linkFee"] is None)), (flip_off["fee"], flip_on["fee"]))
+    # Only the loan leverage (LTV) and the seller's down payment come down to meet the rules: the price stays at the asking price (the down payment asked for, or 50%, is where it starts, and it goes down from there).
+    PRC = """([price, arv, ltr, allow, down]) => { SCR.HOLD.ALLOW_PRICE_CHANGES = allow; SCR.cfg.downTargetHoldPct = down; SCR.cfg.minDom = 0; SCR.cfg.asset = 'sf'; SCR.cfg.strategy = 'hold';
+      const d = { address: '1 A St, Tucson, AZ 85701', street: '1 A St', price, sqft: 1500, dom: 300 }; const f = { pwEquityPct: 100, arvLow: arv, arvHigh: arv, rentLtr: ltr, rentStr: 0, rehabLow: 20000, rehabHigh: 30000, tier: 'moderate' };
+      const p = scrPrice(d, f), h = p.holdPlan || {}; SCR.HOLD.ALLOW_PRICE_CHANGES = false; SCR.cfg.downTargetHoldPct = 0;
+      return { q: p.qualifies, carry: p.carryOffer, price, ltv: p.ltv, down: p.carryDown / p.carryOffer, levers: h.levers || [], note: p.priceNote || '' }; }"""
+    grid = [(pr, round(pr * k), rent) for pr in (200000, 250000, 300000, 350000, 400000, 440000) for k in (1.05, 1.1) for rent in (1700, 2100, 2600)]
+    res = [(g, pg.evaluate(PRC, [g[0], g[1], g[2], False, 0])) for g in grid]
+    qual = [(g, r) for g, r in res if r["q"]]
+    check("a sweep has qualifying hold deals", len(qual) >= 10, len(qual))
+    check("every qualifying hold deal is offered at the asking price: no price bump, no price cut", all(r["carry"] == g[0] and not r["note"] for g, r in qual), [(g, r["carry"]) for g, r in qual if r["carry"] != g[0]])
+    check("what it changes to qualify is the loan leverage (LTV) and the seller's down payment", all(r["ltv"] <= 0.75 + 1e-9 and r["down"] <= 0.5 + 1e-9 for g, r in qual) and not any(re.search(r"price (reduced|bump|stepped)|over asking|carry price", l, re.I) for g, r in qual for l in r["levers"]), [r["levers"] for g, r in qual if any(re.search(r"price (reduced|bump|stepped)|over asking|carry price", l, re.I) for l in r["levers"])])
+    asked = [(g, pg.evaluate(PRC, [g[0], g[1], g[2], False, 40])) for g in grid]
+    check("with a down payment asked for (40%) it starts there and only goes down from it", all(r["down"] <= 0.40 + 1e-9 for g, r in asked if r["q"]), [(g, r["down"]) for g, r in asked if r["q"] and r["down"] > 0.40 + 1e-9])
+    check("a deal that cannot qualify at the asking price is skipped, not repriced (switching price changes on brings the old behaviour back)", sum(1 for g in grid if pg.evaluate(PRC, [g[0], g[1], g[2], True, 0])["q"]) >= len(qual))
     SALE = """([price, arv, ltr, req]) => { SCR.HOLD.SALE_EXIT_REQUIRED = req; SCR.cfg.minDom = 0; SCR.cfg.asset = 'sf'; SCR.cfg.strategy = 'hold';
       const d = { address: '1 A St, Tucson, AZ 85701', street: '1 A St', price, sqft: 1500, dom: 300 }; const f = { pwEquityPct: 100, arvLow: arv, arvHigh: arv, rentLtr: ltr, rentStr: 0, rehabLow: 20000, rehabHigh: 30000, tier: 'moderate' };
       const p = scrPrice(d, f), x = (p.holdPlan || {}).saleExit || {}; SCR.HOLD.SALE_EXIT_REQUIRED = true; return { q: p.qualifies, years: p.months / 12, ltv: p.ltv, down: p.carryDown / p.carryOffer, surplus: x.surplus, log: p.holdLog[0] }; }"""

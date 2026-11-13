@@ -35,7 +35,7 @@ const SCR = {
   // lowers the LTV (and, only when the loan cannot fund the cash at closing, the seller's cash) until the DSCR, the cash flow floor, the buyer's reserves and the buyer profit all work,
   // and takes the soonest balloon (5 to 15 years) that does. Single family: proforma rent, long-term or short-term, whichever cash flows more. Multifamily / commercial: the in-place NOI.
   HOLD: { LTV_START: 0.75, LTV_MIN: 0.30, LTV_STEP: 0.01, DSCR_RATE: 8, DSCR_AMORT_YEARS: 30, DSCR_MIN: 1.25, DOWN_START: 0.50, DOWN_MIN: 0.10, DOWN_STEP: 0.025,
-          BALLOON_MIN_YEARS: 1, BALLOON_MAX_YEARS: 15, SALE_EXIT_REQUIRED: true, DOWN_TARGET: 0.35, DOWN_TRADE_YEARS: 2, ACQ_SPLIT: 0.50, NOTE_RATE_IO: 0.03, MIN_NOTE_PMT: 250, PRICE_BUMP: 0.10, NOI_GROWTH: 0.02,
+          BALLOON_MIN_YEARS: 1, BALLOON_MAX_YEARS: 15, SALE_EXIT_REQUIRED: true, DOWN_TARGET: 0.35, DOWN_TRADE_YEARS: 2, ACQ_SPLIT: 0.50, NOTE_RATE_IO: 0.03, MIN_NOTE_PMT: 250, PRICE_BUMP: 0.10, ALLOW_PRICE_CHANGES: false, NOI_GROWTH: 0.02,
           RESERVE_MIN_MONTHS: 6, RESERVE_TARGET_MONTHS: 9, WHOLESALE_MIN: 25000, WHOLESALE_PCT: 0.03, MIN_PROFIT_PCT_OF_PRICE: 0.10, MIN_PROFIT_PCT_SHORT: 0.05, SHORT_BALLOON_UNDER_YEARS: 5, APPRAISAL_TOLERANCE: 0 },
   GEN: { esc1: 0.02, esc2: 0.015, pts: 0.02, agent: 0,   /* no realtor commission paid at closing */ acq: 0.50, taf: 0.025, sellerClosingShare: 0.5 },
   // Full rehab / gut: cash back to the buyer at closing = the full holding cost (24 months of hard money
@@ -405,8 +405,10 @@ function scrPriceCore(d, f) {
         let f = null, st = "io", tr = 0;
         f = search(start, "io");
         if (!f) { const e0 = search(start, "principal"); if (e0) { f = e0; st = "principal"; } }       // asking price, principal-only (paying the seller at least MIN_NOTE_PMT a month), before any price bump
-        if (!f) { const P = Math.round((list || carryRaw) * (1 + H.PRICE_BUMP) / 1000) * 1000, e = search(P, "principal"); if (e) { f = e; st = "principal"; } }
-        for (let P = start - stepP; !f && P >= floorP; P -= stepP) { tr++; f = search(P, "io"); }
+        // The price is never the lever (ALLOW_PRICE_CHANGES is off): the offer stays at the asking price and only the loan leverage (LTV) and the seller's down payment come down to meet the rules, from the
+        // down payment aimed for (50%, or the one asked for) downwards. The price bump and the stepping-down below are kept for anyone who switches it on.
+        if (!f && H.ALLOW_PRICE_CHANGES) { const P = Math.round((list || carryRaw) * (1 + H.PRICE_BUMP) / 1000) * 1000, e = search(P, "principal"); if (e) { f = e; st = "principal"; } }
+        for (let P = start - stepP; H.ALLOW_PRICE_CHANGES && !f && P >= floorP; P -= stepP) { tr++; f = search(P, "io"); }
         return { f, st, tr };
       };
       if (appraisalOk) {
