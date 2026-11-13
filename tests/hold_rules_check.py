@@ -84,6 +84,18 @@ with sync_playwright() as p:
     check("the two settings are separate: a flip target does not move a buy & hold offer and the other way round", abs(hold_other["down"] - auto["down"]) < 1e-9 and abs(flip_other["down"] - flip_auto["down"]) < 1e-9, (hold_other["down"], auto["down"], flip_other["down"], flip_auto["down"]))
     sweep = [pg.evaluate(DOWN, [pr, ar, rent, 0, 35, 'hold']) for pr, ar, rent in [(250000, 270000, 2200), (300000, 325000, 2500), (330000, 360000, 2800), (400000, 440000, 3200)]]
     check("with a target set every qualifying hold deal still meets cash flow, DSCR, reserves, fee and the sale exit", all((not r["q"]) or (r["cf"] >= r["need"] - 0.5 and r["dscr"] >= 1.25 - 1e-9 and r["sale"] > 0 and r["buyerMonths"] >= 3 - 1e-9 and r["wholesaler"] >= min(r["fee"], 25000) - 1) for r in sweep), sweep)
+    # The buyer / acquisition correspondent chosen in the browser agent (SCR.cfg.buyer) go into the LOI link for flips and holds alike.
+    BUY = """([strat, buyer]) => { SCR.cfg.buyer = buyer; SCR.cfg.minDom = 0; SCR.cfg.asset = 'sf'; SCR.cfg.strategy = strat;
+      const d = { address: '1 A St, Tucson, AZ 85701', street: '1 A St', price: strat === 'flip' ? 600000 : 330000, sqft: 1500, dom: 300 }; const f = { pwEquityPct: 100, arvLow: strat === 'flip' ? 900000 : 360000, arvHigh: strat === 'flip' ? 900000 : 360000, rentLtr: strat === 'flip' ? 0 : 2500, rentStr: 0, rehabLow: 20000, rehabHigh: 30000, tier: 'moderate' };
+      const p = scrPrice(d, f), u = new URL(scrLoiLink(d, p)).searchParams; SCR.cfg.buyer = null; return { q: p.qualifies, buyer: u.get('buyer_company'), ac: u.get('ac_name'), e1: u.get('ac_email1'), e2: u.get('ac_email2'), ph: u.get('ac_phone') }; }"""
+    don = {"buyer_company": "Don Ava Capital LLC", "ac_name": "Suede Buffalo LLC", "ac_email1": "suedebuffalofficial@gmail.com", "ac_email2": "montanoemmanuel@gmail.com", "ac_phone": "520 633 6437"}
+    sb = {"buyer_company": "Suede Buffalo LLC", "ac_name": "", "ac_email1": "SuedeBuffaloOfficial@gmail.com", "ac_email2": "", "ac_phone": "520 633 6437"}
+    for strat in ("hold", "flip"):
+        r = pg.evaluate(BUY, [strat, don])
+        check(f"{strat}: a chosen buyer profile names Don Ava Capital LLC as the buyer and Suede Buffalo LLC as the acquisition correspondent", r["q"] and r["buyer"] == "Don Ava Capital LLC" and r["ac"] == "Suede Buffalo LLC" and r["e2"] == "montanoemmanuel@gmail.com", r)
+    r = pg.evaluate(BUY, ["hold", sb])
+    check("Suede Buffalo LLC chosen as the buyer: no acquisition correspondent in the link", r["buyer"] == "Suede Buffalo LLC" and not r["ac"] and not r["e2"], r)
+    check("no profile chosen: the usual defaults (hold: Don Ava with the correspondent; flip: Suede Buffalo as the buyer)", pg.evaluate(BUY, ["hold", None])["buyer"] == "Don Ava Capital LLC" and pg.evaluate(BUY, ["flip", None])["buyer"] == "Suede Buffalo LLC")
     SALE = """([price, arv, ltr, req]) => { SCR.HOLD.SALE_EXIT_REQUIRED = req; SCR.cfg.minDom = 0; SCR.cfg.asset = 'sf'; SCR.cfg.strategy = 'hold';
       const d = { address: '1 A St, Tucson, AZ 85701', street: '1 A St', price, sqft: 1500, dom: 300 }; const f = { pwEquityPct: 100, arvLow: arv, arvHigh: arv, rentLtr: ltr, rentStr: 0, rehabLow: 20000, rehabHigh: 30000, tier: 'moderate' };
       const p = scrPrice(d, f), x = (p.holdPlan || {}).saleExit || {}; SCR.HOLD.SALE_EXIT_REQUIRED = true; return { q: p.qualifies, years: p.months / 12, ltv: p.ltv, down: p.carryDown / p.carryOffer, surplus: x.surplus, log: p.holdLog[0] }; }"""

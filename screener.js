@@ -6,7 +6,7 @@
 
 const SCR = {
   rows: [], sel: null,
-  cfg: { asset: "sf", strategy: "flip", offerMode: "carry", minDom: 180, minOwnerEquityPct: 80, downTargetFlipPct: 0, downTargetHoldPct: 0, defCity: "", defState: "", defZip: "" },   // strategy: sf = flip | hold, land = cash | dev   // qualification = days on market + Propwire owner equity only
+  cfg: { asset: "sf", strategy: "flip", offerMode: "carry", minDom: 180, minOwnerEquityPct: 80, downTargetFlipPct: 0, downTargetHoldPct: 0, buyer: null, defCity: "", defState: "", defZip: "" },   // strategy: sf = flip | hold, land = cash | dev   // qualification = days on market + Propwire owner equity only
   AGENT_EMAIL: "montanoemmanuel@gmail.com", AGENT_NAME: "Emmanuel's LOI Helper Agent", PHONE: "5206336437",
   LOI_URL: "https://pharaohm33.github.io/loi-generator/",
   REHAB_PSF: { light: 25, moderate: 40, heavy: 55, gut: 75 },   // quick estimate when no rehab number is entered
@@ -546,6 +546,12 @@ function scrLoiLink(d, p, extra) {
     // the DSCR and ignores a better short-term income (13792 E Langtry Ln: calculator NOI $23,940 / DSCR 1.78x against the underwritten $16,950 / 1.26x).
     const hp = p.holdPlan;
     if (hp && hp.rentKnown && hp.noi > 0) q.noi_direct = Math.round(hp.noi * 12);
+  }
+  // The buyer on the offer and the acquisition correspondent, when a buyer profile is chosen (the browser agent's Buyer setting; blank = the usual: Don Ava Capital LLC with Suede Buffalo LLC as the correspondent on a
+  // buy & hold, Suede Buffalo LLC as the direct buyer on a flip). A blank correspondent name means no correspondent.
+  const by = SCR.cfg.buyer;
+  if (by && typeof by === "object" && by.buyer_company) {
+    ["buyer_company", "ac_name", "ac_email1", "ac_email2", "ac_phone"].forEach(k => { q[k] = by[k] === undefined || by[k] === null ? "" : String(by[k]); });
   }
   // A principal-only note whose monthly payment would be under $100 is not worth the seller's bookkeeping: no payments, the whole balance comes due at the balloon (Deferred-To-Exit).
   if (!p.land && !p.noteRate && (p.monthlyPrincipal || 0) < 100) { q.mode = "deferred_exit"; q.monthly_principal = 0; }
