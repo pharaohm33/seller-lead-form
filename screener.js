@@ -34,9 +34,9 @@ const SCR = {
   // Buy & hold seller carryback, underwritten with a DSCR senior loan (see scrSolveHold). The offer starts at 50% cash to the seller and a 75% LTV loan on the as-is value; the solver
   // lowers the LTV (and, only when the loan cannot fund the cash at closing, the seller's cash) until the DSCR, the cash flow floor, the buyer's reserves and the buyer profit all work,
   // and takes the soonest balloon (5 to 15 years) that does. Single family: proforma rent, long-term or short-term, whichever cash flows more. Multifamily / commercial: the in-place NOI.
-  HOLD: { LTV_START: 0.75, LTV_MIN: 0.30, LTV_STEP: 0.01, DSCR_RATE: 8, DSCR_AMORT_YEARS: 30, DSCR_MIN: 1.25, DOWN_START: 0.50, DOWN_MIN: 0.10, DOWN_STEP: 0.025,
+  HOLD: { LTV_START: 0.75, LTV_MIN: 0.30, LTV_STEP: 0.005, DSCR_RATE: 8, DSCR_AMORT_YEARS: 30, DSCR_MIN: 1.25, DOWN_START: 0.50, DOWN_MIN: 0.10, DOWN_STEP: 0.005,
           BALLOON_MIN_YEARS: 1, BALLOON_MAX_YEARS: 15, SALE_EXIT_REQUIRED: true, DOWN_TARGET: 0.35, DOWN_TRADE_YEARS: 2, ACQ_SPLIT: 0.50, NOTE_RATE_IO: 0.03, MIN_NOTE_PMT: 250, PRICE_BUMP: 0.10, ALLOW_PRICE_CHANGES: false, NOI_GROWTH: 0.02,
-          RESERVE_MIN_MONTHS: 6, RESERVE_TARGET_MONTHS: 9, WHOLESALE_MIN: 25000, WHOLESALE_PCT: 0.03, MIN_PROFIT_PCT_OF_PRICE: 0.10, MIN_PROFIT_PCT_SHORT: 0.05, SHORT_BALLOON_UNDER_YEARS: 5, APPRAISAL_TOLERANCE: 0 },
+          RESERVE_MIN_MONTHS: 6, RESERVE_TARGET_MONTHS: 9, WHOLESALE_MIN: 25000, WHOLESALE_PCT: 0.03, MIN_PROFIT_PCT_OF_PRICE: 0.10, MIN_PROFIT_PCT_SHORT: 0.05, SHORT_BALLOON_UNDER_YEARS: 5, APPRAISAL_TOLERANCE: 0.10 },
   GEN: { esc1: 0.02, esc2: 0.015, pts: 0.02, agent: 0,   /* no realtor commission paid at closing */ acq: 0.50, taf: 0.025, sellerClosingShare: 0.5 },
   // Full rehab / gut: cash back to the buyer at closing = the full holding cost (24 months of hard money
   // interest) + the greater of $30,000 or 6% of ARV, so there is room for the assignment fee and extra cash
@@ -375,25 +375,51 @@ function scrPriceCore(d, f) {
           saleOk: !H.SALE_EXIT_REQUIRED || saleSurplus > 0, cfOk: !rentKnown || cf >= reqCf - 0.5, dscrOk: !rentKnown || dscr >= H.DSCR_MIN - 1e-9, cashOk: W >= F - 0.5 && B >= Rmin - 0.5, profitOk: profit >= minProfit, payOk };
       };
       const good = e => e.cfOk && e.dscrOk && e.cashOk && e.profitOk && e.saleOk && e.payOk;       // saleOk: selling off appreciation alone must clear both debts; the LTV comes down until it does
-      // The balloon is checked year by year, soonest first (1, 2, 3 ... 15): for each year the seller's cash starts at 50% and comes down only as far as it must, and the LTV comes down as little as possible.
-      // The seller's cash should ideally stay at 35% or more: the soonest balloon that works at 35%+ wins, unless a balloon more than DOWN_TRADE_YEARS shorter works with less down.
-      const soonest = (P, structure, dpHi, dpLo) => {
-        for (let T = H.BALLOON_MIN_YEARS; T <= H.BALLOON_MAX_YEARS; T++)
-          for (let dp = dpHi; dp >= dpLo - 1e-9; dp -= H.DOWN_STEP)
-            for (let lt = H.LTV_START; lt >= H.LTV_MIN - 1e-9; lt -= H.LTV_STEP) { const e = ev(P, structure, Math.round(dp * 1000) / 1000, Math.round(lt * 100) / 100, T); if (good(e)) return e; }
+      // The seller's cash is what we aim to keep high; the LTV (the loan), the balloon and then the seller's cash itself come down only as far as the rules force.
+      // For every balloon (1 to 15 years) and every LTV (75% down to 30%, in 0.5% steps) the HIGHEST seller cash that still passes every rule is found. More seller cash makes the seller note smaller (cash flow,
+      // DSCR, sale exit and buyer profit get easier) but leaves less cash at closing, so the most seller cash allowed is where the cash at closing runs out: a bisection over the 0.5% steps finds that point exactly
+      // and the other rules are checked there. Then: a down payment asked for (or the 50% start) wins at whatever balloon reaches the most of it (soonest of those); with no ask, the soonest balloon that works wins
+      // unless a balloon up to DOWN_TRADE_YEARS later gives the seller more cash (a balloon that reaches DOWN_TARGET is taken when it is within that window). The LTV is searched at every balloon, back and forth, not once.
+      const r3 = x => Math.round(x * 1000) / 1000;
+      const maxDown = (P, structure, T, lt, step = H.DOWN_STEP) => {
+        const n = Math.floor((dStart - H.DOWN_MIN) / step + 1e-9), at = i => ev(P, structure, r3(dStart - i * step), r3(lt), T);
+        const top = at(0); if (good(top)) return top;
+        if (top.cashOk) return null;                      // the most seller cash is the easiest for the note rules and the cash at closing is fine: something else rules this loan out
+        const bottom = at(n); if (!bottom.cashOk) return null;      // even the least seller cash leaves too little cash at closing
+        let lo = 0, hi = n, hiE = bottom;
+        while (hi - lo > 1) { const mid = (lo + hi) >> 1, m = at(mid); if (m.cashOk) { hi = mid; hiE = m; } else lo = mid; }
+        for (let j = Math.max(1, hi - 3); j <= Math.min(n, hi + 2); j++) { const m = j === hi ? hiE : at(j); if (good(m)) return m; }          // the dollar rounding of the cash can move the edge by a step: the highest seller cash near it that passes everything
         return null;
       };
+      const planAt = (P, structure, T) => {          // the best plan at one balloon: the most seller cash over all LTVs, the highest LTV among equals
+        let best = null;
+        for (let lt = H.LTV_START; lt >= H.LTV_MIN - 1e-9; lt -= H.LTV_STEP) { const e = maxDown(P, structure, T, lt); if (e && (!best || e.dpct > best.dpct + 1e-9)) best = e; }
+        return best;
+      };
+      const refine = (P, structure, e) => {            // fine tuning of the chosen plan: the LTV within half a point either way and the seller cash in 0.1% steps, keeping the same balloon
+        let best = e;
+        for (let lt = Math.max(H.LTV_MIN, e.ltv - 0.005); lt <= Math.min(H.LTV_START, e.ltv + 0.005) + 1e-9; lt += 0.001) { const m = maxDown(P, structure, e.T, lt, 0.001); if (m && m.dpct > best.dpct + 1e-9) best = m; }
+        return best;
+      };
       const search = (P, structure) => {
-        const any = soonest(P, structure, dStart, H.DOWN_MIN);
-        if (!any || any.dpct >= dTarget - 1e-9) return any;
-        const ideal = soonest(P, structure, dStart, dTarget);
-        return ideal && ideal.T <= any.T + dTrade ? ideal : any;
+        const pick = searchCoarse(P, structure);
+        return pick ? refine(P, structure, pick) : pick;
+      };
+      const searchCoarse = (P, structure) => {
+        const plans = []; for (let T = H.BALLOON_MIN_YEARS; T <= H.BALLOON_MAX_YEARS; T++) { const e = planAt(P, structure, T); if (e) plans.push(e); }
+        if (!plans.length) return null;
+        const mostDown = list => list.reduce((b, e) => (e.dpct > b.dpct + 1e-9 ? e : b), list[0]);          // the soonest balloon among the plans with the most seller cash
+        if (askedDown) return mostDown(plans);
+        const any = plans[0];
+        if (any.dpct >= dTarget - 1e-9) return any;
+        const within = plans.filter(e => e.T <= any.T + dTrade), ideal = plans.find(e => e.dpct >= dTarget - 1e-9);
+        return ideal && ideal.T <= any.T + dTrade ? mostDown(within.filter(e => e.dpct >= dTarget - 1e-9)) : mostDown(within);
       };
       // Why nothing works: which rule cannot be met anywhere on the grid.
       const diagnose = (P, structure) => {
         let anyCf = false, anyCash = false, anyProfit = false, anyCfCash = false, anySale = false, anyCfCashSale = false;
-        for (let dp = dStart; dp >= H.DOWN_MIN - 1e-9; dp -= H.DOWN_STEP)
-          for (let lt = H.LTV_START; lt >= H.LTV_MIN - 1e-9; lt -= H.LTV_STEP)
+        for (let dp = dStart; dp >= H.DOWN_MIN - 1e-9; dp -= 0.025)
+          for (let lt = H.LTV_START; lt >= H.LTV_MIN - 1e-9; lt -= 0.01)
             for (let T = H.BALLOON_MIN_YEARS; T <= H.BALLOON_MAX_YEARS; T += 5) { const e = ev(P, structure, dp, lt, T); anyCf = anyCf || (e.cfOk && e.dscrOk); anyCash = anyCash || e.cashOk; anyProfit = anyProfit || e.profitOk; anyCfCash = anyCfCash || (e.cfOk && e.dscrOk && e.cashOk); anySale = anySale || e.saleOk; anyCfCashSale = anyCfCashSale || (e.cfOk && e.dscrOk && e.cashOk && e.saleOk); }
         return { anyCf, anyCash, anyProfit, anyCfCash, anySale, anyCfCashSale };
       };
@@ -436,14 +462,14 @@ function scrPriceCore(d, f) {
       if (found) {
         if (e.dpct < dStart - 1e-9) levers.push(`seller cash at closing ${(dStart * 100).toFixed(1).replace(/\.0$/, "")}% -> ${(e.dpct * 100).toFixed(1)}% because the loan could not fund the cash at closing (appraisal contingency at the asking price)`);
         if (e.ltv < H.LTV_START - 1e-9) {
-          const up = Math.round((e.ltv + H.LTV_STEP) * 100) / 100, x = up <= H.LTV_START + 1e-9 ? ev(e.P, e.structure, e.dpct, up, e.T) : null, saleBinds = !!x && x.cfOk && x.dscrOk && x.cashOk && x.profitOk && !x.saleOk;
-          levers.push(`LTV ${H.LTV_START * 100}% -> ${(e.ltv * 100).toFixed(0)}% for cash flow, the ${H.DSCR_MIN} DSCR${saleBinds ? " and so that selling off appreciation clears the loan and the seller note (Sale Viable, no cash flow)" : ""}`);
+          const up = Math.round((e.ltv + H.LTV_STEP) * 1000) / 1000, x = up <= H.LTV_START + 1e-9 ? ev(e.P, e.structure, e.dpct, up, e.T) : null, saleBinds = !!x && x.cfOk && x.dscrOk && x.cashOk && x.profitOk && !x.saleOk;
+          levers.push(`LTV ${H.LTV_START * 100}% -> ${+(e.ltv * 100).toFixed(1)}% for cash flow, the ${H.DSCR_MIN} DSCR${saleBinds ? " and so that selling off appreciation clears the loan and the seller note (Sale Viable, no cash flow)" : ""}`);
         }
         levers.push(`balloon ${e.T} year${e.T === 1 ? "" : "s"} (soonest that works, checked year by year)`);
         if (askedDown) levers.push(e.dpct >= askedDown - 1e-9 ? `seller down payment ${(askedDown * 100).toFixed(1).replace(/\.0$/, "")}% as asked` : `seller down payment asked ${(askedDown * 100).toFixed(1).replace(/\.0$/, "")}%, best the other rules allow ${(e.dpct * 100).toFixed(1)}%`);
         else if (e.dpct < dTarget - 1e-9) levers.push(`seller cash is ${(e.dpct * 100).toFixed(1)}%, under the ${dTarget * 100}% target: no balloon within ${dTrade} years of this one works at ${dTarget * 100}%+`);
       }
-      holdLog.push({ s: structure, term: e.T * 12, carry: e.P, down: e.dn, downPct: +(e.dpct).toFixed(3), ltv: +e.ltv.toFixed(2), cash: scrRound(SCR.HOLD_CASH_PCT * e.P), cashCapped: false, hmInt: Math.round(e.pmt), pay: Math.round(e.notePmt), noi: Math.round(noi),
+      holdLog.push({ s: structure, term: e.T * 12, carry: e.P, down: e.dn, downPct: +(e.dpct).toFixed(3), ltv: +e.ltv.toFixed(3), cash: scrRound(SCR.HOLD_CASH_PCT * e.P), cashCapped: false, hmInt: Math.round(e.pmt), pay: Math.round(e.notePmt), noi: Math.round(noi),
         cf: rentKnown ? Math.round(e.cf) : null, need: rentKnown ? Math.round(e.reqCf) : null, cfOk: rentKnown ? e.cfOk : null, profit: Math.round(e.profit), minProfit: Math.round(e.minProfit), saleSurplus: Math.round(e.saleSurplus), saleOk: e.saleOk, ok: !!found, ceilOk: !!ceilFound,
         carryNote: tries > 0 ? `price stepped down ${tries} time(s)` : "", notes: levers.concat(holdWhy) });
       const cashRaw = scrRound(SCR.HOLD_CASH_PCT * e.P), cashCapped = mao > 0 && cashRaw > scrRound(mao), cashO = cashCapped ? scrRound(mao) : cashRaw;

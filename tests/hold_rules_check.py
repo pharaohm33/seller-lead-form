@@ -34,8 +34,10 @@ with sync_playwright() as p:
     check("the balloon is between 1 and 15 years (checked year by year); the buyer profit is at least 5% of the price under 5 years, 10% from 5 years", 1 <= ltr["years"] <= 15 and ltr["profit"] >= (0.05 if ltr["years"] < 5 else 0.10) * ltr["carry"] - 1, (ltr["years"], ltr["profit"]))
     thin = run(300000, 318000, 1900)
     check("a thin deal takes a longer balloon only when it needs one (soonest that works)", thin["q"] and thin["years"] <= 15 and thin["profit"] >= (0.05 if thin["years"] < 5 else 0.10) * thin["carry"] - 1 and ltr["years"] < thin["years"], (thin["years"], thin["ltv"], ltr["years"]))
-    gap = run(330000, 320000, 2500)
-    check("an appraisal under the asking price skips the deal", gap["q"] is False and any("appraisal" in w for w in gap["why"]) and gap["appraisalOk"] is False, gap["why"])
+    gap = run(330000, 280000, 2500)
+    check("an appraisal more than 10% under the asking price skips the deal", gap["q"] is False and any("appraisal" in w for w in gap["why"]) and gap["appraisalOk"] is False, gap["why"])
+    near = run(330000, 320000, 2500)
+    check("an appraisal within 10% under the asking price is NOT skipped for it (the appraisal contingency covers it); the loan is sized on the lower value", near["appraisalOk"] is True and not any("appraisal is likely" in w for w in near["why"]), near["why"])
     big = run(500000, 560000, 6000)
     check("single-family hold over $450,000 is skipped (needs a cash offer)", big["q"] is False and any("needs a cash offer" in w for w in big["why"]), big["why"])
     check("just under $450,000 is not skipped for the price", not any("needs a cash offer" in w for w in run(449000, 520000, 6000)["why"]))
@@ -135,5 +137,18 @@ with sync_playwright() as p:
     check("Sale Exit - CF pocketed (appreciation) is above 0 at the balloon: the sale off appreciation alone clears the DSCR loan and the seller note", on["q"] and on["surplus"] > 0 and on["log"]["saleOk"] is True, on["surplus"])
     check("to get there the LTV comes down and/or the balloon gets longer / the seller keeps more cash up front", on["ltv"] < off["ltv"] or on["years"] > off["years"] or on["down"] > off["down"], (on, off))
     check("every qualifying deal in a sweep has a sale exit above 0", all((lambda r: (not r["q"]) or r["surplus"] > 0)(pg.evaluate(SALE, [pr, ar, rent, True])) for pr, ar, rent in [(330000, 360000, 2500), (330000, 401500, 2308), (300000, 318000, 1800), (320000, 330000, 2600), (250000, 255000, 3000), (400000, 405000, 5000), (330000, 345000, 4000)]))
+    # ---- the seller's cash is the most the rules allow (balloon and LTV searched together, not the soonest balloon first)
+    AUDIT = """([deals]) => { const H = SCR.HOLD, keep = { s: H.DOWN_STEP, l: H.LTV_STEP }, out = [];
+      const one = (d, asked) => { SCR.cfg.minDom = 0; SCR.cfg.asset = 'sf'; SCR.cfg.strategy = 'hold'; SCR.cfg.downTargetHoldPct = asked;
+        const p = scrPrice({ address: '1 A St, Tucson, AZ 85701', street: '1 A St', price: d[0], sqft: 1500, dom: 300 }, { pwEquityPct: 100, arvLow: d[1], arvHigh: d[1], rentLtr: d[2], rentStr: d[3], rehabLow: 20000, rehabHigh: 30000, tier: 'moderate' });
+        return { q: p.qualifies, dp: p.carryDown / p.carryOffer, T: p.months / 12 }; };
+      for (const d of deals) { const sol = one(d, 50); H.DOWN_STEP = 0.002; H.LTV_STEP = 0.001; let best = null;
+        for (let x = 50; x >= 10; x -= 1) { const r = one(d, x); if (r.q && r.dp >= x / 100 - 0.001) { best = x; break; } }
+        H.DOWN_STEP = keep.s; H.LTV_STEP = keep.l; out.push({ d, sol, best }); }
+      SCR.cfg.downTargetHoldPct = undefined; return out; }"""
+    aud = pg.evaluate(AUDIT, [[[260000, 260000, 2300, 0], [330000, 330000, 2300, 3800], [200000, 240000, 2300, 0], [400000, 400000, 1800, 3800], [330000, 396000, 2800, 0], [260000, 312000, 2300, 3800]]])
+    check("the seller down payment is the most the rules allow: within 1 point of a much finer search on every deal (it used to be up to 9 points less)", all(r["sol"]["q"] and r["sol"]["dp"] * 100 >= r["best"] - 1.0 for r in aud), [(r["d"], round(r["sol"]["dp"] * 100, 1), r["best"]) for r in aud])
+    old = run(260000, 260000, 2300, 0)
+    check("a deal that used to get 17.5% down (soonest balloon first) now gets more: a slightly longer balloon with a lower loan LTV gives the seller more cash", old["q"] and old["down"] / old["carry"] > 0.24, (old["down"] / old["carry"], old["years"], old["ltv"]))
     check("no script errors", not errs, errs[:2]); b.close()
 sys.exit(1 if bad else 0)
