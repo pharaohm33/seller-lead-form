@@ -602,6 +602,8 @@ function scrLoiLink(d, p, extra) {
   const by = SCR.cfg.buyer;
   if (by && typeof by === "object" && by.buyer_company) {
     ["buyer_company", "ac_name", "ac_email1", "ac_email2", "ac_phone"].forEach(k => { q[k] = by[k] === undefined || by[k] === null ? "" : String(by[k]); });
+    // The LOI wording of the buyer: the Red Bridge letter style, its stay-on-deed wording and whether it states a max LTV (wording only: the underwriting is the same). Blank = the generator's own default.
+    ["loi_style", "loi_variant", "show_max_ltv", "max_ltv_shown"].forEach(k => { if (by[k] !== undefined && by[k] !== null && String(by[k]).trim() !== "") q[k] = String(by[k]).trim(); });
   }
   // A principal-only note whose monthly payment would be under $100 is not worth the seller's bookkeeping: no payments, the whole balance comes due at the balloon (Deferred-To-Exit).
   if (!p.land && !p.noteRate && (p.monthlyPrincipal || 0) < 100) { q.mode = "deferred_exit"; q.monthly_principal = 0; }

@@ -89,7 +89,7 @@ with sync_playwright() as p:
     # The buyer / acquisition correspondent chosen in the browser agent (SCR.cfg.buyer) go into the LOI link for flips and holds alike.
     BUY = """([strat, buyer]) => { SCR.cfg.buyer = buyer; SCR.cfg.minDom = 0; SCR.cfg.asset = 'sf'; SCR.cfg.strategy = strat;
       const d = { address: '1 A St, Tucson, AZ 85701', street: '1 A St', price: strat === 'flip' ? 600000 : 330000, sqft: 1500, dom: 300 }; const f = { pwEquityPct: 100, arvLow: strat === 'flip' ? 900000 : 360000, arvHigh: strat === 'flip' ? 900000 : 360000, rentLtr: strat === 'flip' ? 0 : 2500, rentStr: 0, rehabLow: 20000, rehabHigh: 30000, tier: 'moderate' };
-      const p = scrPrice(d, f), u = new URL(scrLoiLink(d, p)).searchParams; SCR.cfg.buyer = null; return { q: p.qualifies, buyer: u.get('buyer_company'), ac: u.get('ac_name'), e1: u.get('ac_email1'), e2: u.get('ac_email2'), ph: u.get('ac_phone') }; }"""
+      const p = scrPrice(d, f), u = new URL(scrLoiLink(d, p)).searchParams; SCR.cfg.buyer = null; return { q: p.qualifies, buyer: u.get('buyer_company'), ac: u.get('ac_name'), e1: u.get('ac_email1'), e2: u.get('ac_email2'), ph: u.get('ac_phone'), style: u.get('loi_style'), variant: u.get('loi_variant'), show: u.get('show_max_ltv'), ltv: u.get('max_ltv_shown'), srltv: u.get('sr_ltv') }; }"""
     don = {"buyer_company": "Don Ava Capital LLC", "ac_name": "Suede Buffalo LLC", "ac_email1": "suedebuffalofficial@gmail.com", "ac_email2": "montanoemmanuel@gmail.com", "ac_phone": "520 633 6437"}
     sb = {"buyer_company": "Suede Buffalo LLC", "ac_name": "", "ac_email1": "SuedeBuffaloOfficial@gmail.com", "ac_email2": "", "ac_phone": "520 633 6437"}
     for strat in ("hold", "flip"):
@@ -98,6 +98,12 @@ with sync_playwright() as p:
     r = pg.evaluate(BUY, ["hold", sb])
     check("Suede Buffalo LLC chosen as the buyer: no acquisition correspondent in the link", r["buyer"] == "Suede Buffalo LLC" and not r["ac"] and not r["e2"], r)
     check("no profile chosen: the usual defaults (hold: Don Ava with the correspondent; flip: Suede Buffalo as the buyer)", pg.evaluate(BUY, ["hold", None])["buyer"] == "Don Ava Capital LLC" and pg.evaluate(BUY, ["flip", None])["buyer"] == "Suede Buffalo LLC")
+    rb = {"buyer_company": "Red Bridge Living LLC", "ac_name": "", "ac_email1": "", "ac_email2": "", "ac_phone": "", "loi_style": "letter", "loi_variant": "plain", "show_max_ltv": "on", "max_ltv_shown": "45"}
+    r = pg.evaluate(BUY, ["hold", rb])
+    check("a Red Bridge profile puts the letter style, the plain wording and the max LTV choice in the LOI link (wording only: the underwritten sr_ltv is untouched)", r["buyer"] == "Red Bridge Living LLC" and r["style"] == "letter" and r["variant"] == "plain" and r["show"] == "on" and r["ltv"] == "45" and r["srltv"] and float(r["srltv"]) != 45, r)
+    r = pg.evaluate(BUY, ["hold", dict(rb, loi_style="", loi_variant="", show_max_ltv="", max_ltv_shown="")])
+    check("blank LOI options stay out of the link (the generator's own defaults apply)", r["style"] is None and r["variant"] is None and r["show"] is None and r["ltv"] is None, r)
+    check("the Don Ava profile adds no LOI options", pg.evaluate(BUY, ["hold", don])["style"] is None)
     # The seller's agent commission paid by the buyer (cfg.agentFeePct): a real closing cost, optional, dropped when the deal only fails because of it.
     AG = """([price, arv, ltr, str_, pct, strat]) => { SCR.cfg.agentFeePct = pct; SCR.cfg.minDom = 0; SCR.cfg.asset = 'sf'; SCR.cfg.strategy = strat;
       const d = { address: '1 A St, Tucson, AZ 85701', street: '1 A St', price, sqft: 1500, dom: 300 }; const f = { pwEquityPct: 100, arvLow: arv, arvHigh: arv, rentLtr: ltr, rentStr: str_, rehabLow: 20000, rehabHigh: 30000, tier: 'moderate' };
