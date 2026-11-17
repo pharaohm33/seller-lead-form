@@ -106,5 +106,19 @@ with sync_playwright() as p:
     check("all cash with a financing choice still lists lender approval", "lender approval" in cash_fin, cash_fin)
     other_cash, _ = loi(autogen="cash", no_sc=1, purchase_price=800000, cash_at_closing=800000, buyer_company="Don Ava Capital LLC")
     check("all cash for another buyer keeps the classic all-cash LOI", "ALL-CASH PURCHASE TERMS" in other_cash and "LETTER OF INTENT" not in other_cash, other_cash[:200])
+
+    # the section titles are blue like the sample LOI (title #1a365d, sections #2c5282) so each section is easy to find
+    def html(**ov):
+        q = dict(BASE); q.update(ov)
+        pg = b.new_page(); pg.goto(f"http://127.0.0.1:{srv.server_address[1]}/index.html?" + urllib.parse.urlencode(q)); pg.wait_for_timeout(900)
+        out = pg.evaluate("[...document.querySelectorAll('#loi-text strong')].map(e => [e.innerText.trim(), getComputedStyle(e).color])"); pg.close()
+        return dict(out)
+    rgb = lambda h: "rgb(%d, %d, %d)" % (int(h[1:3], 16), int(h[3:5], 16), int(h[5:7], 16))
+    cols = html()
+    check("the letter title is dark navy", cols.get("LETTER OF INTENT") == rgb("#1a365d"), cols.get("LETTER OF INTENT"))
+    for sec in ("Proposed Transaction", "Deed Structure", "Costs", "Other Terms", "No Commitment to Close", "Seller Acknowledgment"):
+        check("blue section title: " + sec, cols.get(sec) == rgb("#2c5282"), cols.get(sec))
+    check("the plain wording's Seller Security title is blue too", html(loi_variant="plain").get("Seller Security") == rgb("#2c5282"))
+    check("the header lines and the note bullets stay black bold or plain (only the section titles are blue)", cols.get("Seller: ______________________") not in (rgb("#2c5282"), rgb("#1a365d")))
     b.close()
 sys.exit(1 if bad else 0)

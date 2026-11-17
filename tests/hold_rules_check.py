@@ -15,7 +15,7 @@ RUN = """([price, arv, ltr, str_, noiA, units, strat]) => { SCR.cfg.minDom = 0; 
   const d = { address: '1 A St, Tucson, AZ 85701', street: '1 A St', price, sqft: 1500, dom: 300 }; if (units) d.units = units;
   const f = { pwEquityPct: 100, arvLow: arv, arvHigh: arv, rentLtr: ltr, rentStr: str_, rehabLow: 20000, rehabHigh: 30000, tier: 'moderate' }; if (noiA) f.noiAnnual = noiA;
   const p = scrPrice(d, f), h = p.holdPlan || {}, c = h.cashAtClose || {};
-  return { q: p.qualifies, why: p.why, carry: p.carryOffer, down: p.carryDown, ltv: p.ltv, years: p.months / 12, noteRate: p.noteRate, cf: h.cashflow, need: h.cfNeed, dscr: h.dscr, levers: h.levers || [], basis: h.basis,
+  return { q: p.qualifies, why: p.why, pay: (p.holdPlan || {}).sellerPay, payPct: (p.holdPlan || {}).payPct, carry: p.carryOffer, down: p.carryDown, ltv: p.ltv, years: p.months / 12, noteRate: p.noteRate, cf: h.cashflow, need: h.cfNeed, dscr: h.dscr, levers: h.levers || [], basis: h.basis,
            buyerMonths: c.buyerMonths, buyer: c.buyer, wholesaler: c.wholesaler, fee: c.fee, avail: c.avail, profit: p.profit && p.profit.sale, minProfit: p.profit && p.profit.min, ceilOk: p.ceiling && p.ceiling.ok, appraisalOk: h.appraisalOk } }"""
 with sync_playwright() as p:
     b = p.chromium.launch(channel="chrome", headless=True); pg = b.new_page(); errs = []
@@ -24,7 +24,7 @@ with sync_playwright() as p:
     pg.goto(f"http://127.0.0.1:{srv.server_address[1]}/index.html"); pg.wait_for_timeout(1200)
     run = lambda price, arv, ltr=0, str_=0, noiA=0, units=None, strat="hold": pg.evaluate(RUN, [price, arv, ltr, str_, noiA, units, strat])
     strong = run(330000, 360000, 2500, 5200)                       # short-term rental pays the most
-    check("starts at 50% cash to the seller and a loan up to 75% LTV when it all works, with a short balloon", strong["q"] and abs(strong["down"] / strong["carry"] - 0.5) < 0.01 and strong["ltv"] <= 0.75 and strong["years"] <= 5, (strong["down"], strong["carry"], strong["ltv"], strong["years"]))
+    check("a strong deal: the big down is kept (50% where it works), a loan up to 75% LTV, a short balloon, and the seller payment never over 3% of the price a year", strong["q"] and strong["down"] / strong["carry"] >= 0.35 - 0.01 and strong["ltv"] <= 0.75 and strong["years"] <= 5 and strong["payPct"] <= 0.03 + 0.002, (strong["down"], strong["carry"], strong["ltv"], strong["years"], strong["pay"], strong["payPct"]))
     check("single family takes the better of long-term and short-term rent (proforma)", "short-term" in strong["basis"] and "long-term" in run(330000, 360000, 2500, 1500)["basis"], strong["basis"])
     ltr = run(330000, 360000, 2500)
     check("when the loan cannot fund the seller's 50%, seller cash comes down and the LTV drops for cash flow / DSCR", ltr["q"] and ltr["down"] / ltr["carry"] < 0.5 and ltr["ltv"] < 0.75 and any("seller cash at closing" in l and "appraisal contingency" in l for l in ltr["levers"]) and any(l.startswith("LTV") for l in ltr["levers"]), ltr["levers"])
@@ -104,6 +104,27 @@ with sync_playwright() as p:
     r = pg.evaluate(BUY, ["hold", dict(rb, loi_style="", loi_variant="", show_max_ltv="", max_ltv_shown="")])
     check("blank LOI options stay out of the link (the generator's own defaults apply)", r["style"] is None and r["variant"] is None and r["show"] is None and r["ltv"] is None, r)
     check("the Don Ava profile adds no LOI options", pg.evaluate(BUY, ["hold", don])["style"] is None)
+    # Day-1 cash flow by deal size (the rule of thumb of 2026-11-17): $250 to $500k, 0.1% to $1M, then the schedule, linear between its points.
+    need = pg.evaluate("[400000, 800000, 1000000, 3750000, 5000000, 7500000, 10000000, 12500000, 15000000, 22500000, 30000000, 45000000, 60000000, 90000000, 120000000].map(p => Math.round(scrCfNeed(p)))")
+    check("cash flow need by deal size: $250 up to $500k, 0.1% to $1M, $2k at $5M, $5k at $10M and $15M, $10k at $30M, $20k at $60M, $30k at $90M, linear between", need == [250, 800, 1000, 1688, 2000, 3500, 5000, 5000, 5000, 7500, 10000, 15000, 20000, 30000, 40000], need)
+    big5 = pg.evaluate("""() => { SCR.cfg.minDom = 0; SCR.cfg.buyer = null; const c = { address: '1 A St, Denver, CO 80202', street: '1 A St', city: 'Denver', state: 'CO', zip: '80202', price: 5000000, units: 30, isMultifamily: true };
+      const x = scrCommercialPrice(c, { capLow: 6, capHigh: 6, noi: 300000 }); const h = x.p.holdPlan; return { q: x.p.qualifies, need: h.cfNeed, cf: h.cashflow }; }""")
+    check("a $5M multifamily deal is held to $2,000 a month of cash flow (not 0.1% = $5,000) and meets it", abs(big5["need"] - 2000) < 0.5 and big5["q"] and big5["cf"] >= 2000 - 0.5, big5)
+    # The seller's monthly payment: a decent payment (about 1% of the price a year, up to 3%) balanced against the down payment, which counts most, with every other rule held (The Britt, 844 N Ogden St: $3.75M, NOI $205,690, cap 6.05%).
+    BRITT = """(askedDown) => { SCR.cfg.minDom = 0; SCR.cfg.buyer = null; SCR.cfg.downTargetHoldPct = askedDown || 0; const c = { address: '844 N Ogden St, Denver, CO 80218', street: '844 N Ogden St', city: 'Denver', state: 'CO', zip: '80218', price: 3750000, units: 21, isMultifamily: true };
+      const x = scrCommercialPrice(c, { capLow: 5.3, capHigh: 6.8, noi: 205690 }); SCR.cfg.downTargetHoldPct = 0; const p = x.p, h = p.holdPlan, ca = h.cashAtClose;
+      return { q: p.qualifies, carry: p.carryOffer, down: p.carryDown, ltv: p.ltv, years: p.months / 12, pay: h.sellerPay, payPct: h.payPct, structure: h.structure, cf: h.cashflow, need: h.cfNeed, dscr: h.dscr, months: ca.buyerMonths, fee: ca.wholesaler, feeFormula: ca.fee, surplus: h.saleExit.surplus }; }"""
+    br = pg.evaluate(BRITT, 0)
+    most = pg.evaluate("""() => { const w = [SCR.HOLD.PAY_DECENT_WEIGHT, SCR.HOLD.PAY_EXTRA_WEIGHT]; SCR.HOLD.PAY_DECENT_WEIGHT = 0; SCR.HOLD.PAY_EXTRA_WEIGHT = 0; SCR.cfg.buyer = null; SCR.cfg.minDom = 0;
+      const c = { address: '844 N Ogden St, Denver, CO 80218', street: '844 N Ogden St', city: 'Denver', state: 'CO', zip: '80218', price: 3750000, units: 21, isMultifamily: true };
+      const x = scrCommercialPrice(c, { capLow: 5.3, capHigh: 6.8, noi: 205690 }); [SCR.HOLD.PAY_DECENT_WEIGHT, SCR.HOLD.PAY_EXTRA_WEIGHT] = w; return { down: x.p.carryDown / x.p.carryOffer, pay: x.p.holdPlan.sellerPay }; }""")
+    check("The Britt: a balance, not the largest down at any cost: the down is within 6 points of the largest down the rules allow, and the seller payment is higher than at the largest down", br["q"] and most["down"] - 0.06 <= br["down"] / br["carry"] < most["down"] and br["pay"] > most["pay"], (br["down"] / br["carry"], br["pay"], most))
+    check("The Britt: the larger down wins over payment: at least 30% down and a decent payment of about 1% of the price a year ($3,125 a month on $3.75M) while the rules hold", br["down"] / br["carry"] >= 0.30 and 3750000 * 0.008 / 12 <= br["pay"] <= 3750000 * 0.03 / 12 + 50, br)
+    check("The Britt: with that payment the cash flow floor, DSCR 1.25, 6 months of reserves, your fee and the sale exit all still hold, and the seller keeps at least the 10% floor", br["cf"] >= br["need"] - 0.5 and br["dscr"] >= 1.25 - 1e-9 and br["months"] >= 6 - 1e-9 and br["fee"] >= br["feeFormula"] - 1 and br["surplus"] > 0 and br["down"] / br["carry"] >= 0.10 - 1e-9, br)
+    ask = pg.evaluate(BRITT, 35)
+    check("a seller down payment asked for keeps its place over the payment goal (35% asked: the down is not traded for payment)", (not ask["q"]) or abs(ask["down"] / ask["carry"] - 0.35) < 0.011 or ask["down"] / ask["carry"] < 0.35, ask)
+    capped = [pg.evaluate(RUN, [pr, ar, rent, 0, 0, None, "hold"]) for pr, ar, rent in [(250000, 270000, 2200), (330000, 360000, 2800), (400000, 440000, 3200)]]
+    check("the monthly payment never goes over the 3% a year target (it stops there even when there is more cash flow room)", all((not r["q"]) or not r.get("pay") or r["pay"] <= r["carry"] * 0.03 / 12 + 50.01 for r in capped), [(r["carry"], r.get("pay")) for r in capped])
     # All-cash offers (offer_type on the buyer profile, or the page's Offer type): the buyer buys for cash and closes through its own double escrow (never in the LOI).
     CASH = """([price, arv, ltr, strat, buyer, mode]) => { SCR.cfg.buyer = buyer; SCR.cfg.offerMode = mode || 'carry'; SCR.cfg.minDom = 0; SCR.cfg.asset = 'sf'; SCR.cfg.strategy = strat;
       const d = { address: '1 A St, Tucson, AZ 85701', street: '1 A St', price, sqft: 1500, dom: 300 }; const f = { pwEquityPct: 100, arvLow: arv, arvHigh: arv, rentLtr: ltr, rentStr: 0, rehabLow: 20000, rehabHigh: 30000, tier: 'moderate' };
@@ -191,6 +212,6 @@ with sync_playwright() as p:
     aud = pg.evaluate(AUDIT, [[[260000, 260000, 2300, 0], [330000, 330000, 2300, 3800], [200000, 240000, 2300, 0], [400000, 400000, 1800, 3800], [330000, 396000, 2800, 0], [260000, 312000, 2300, 3800]]])
     check("the seller down payment is the most the rules allow: within 1 point of a much finer search on every deal (it used to be up to 9 points less)", all(r["sol"]["q"] and r["sol"]["dp"] * 100 >= r["best"] - 1.0 for r in aud), [(r["d"], round(r["sol"]["dp"] * 100, 1), r["best"]) for r in aud])
     old = run(260000, 260000, 2300, 0)
-    check("a deal that used to get 17.5% down (soonest balloon first) now gets more: a slightly longer balloon with a lower loan LTV gives the seller more cash", old["q"] and old["down"] / old["carry"] > 0.24, (old["down"] / old["carry"], old["years"], old["ltv"]))
+    check("a deal that used to get 17.5% down (soonest balloon first) now gets more: a slightly longer balloon with a lower loan LTV gives the seller more cash", old["q"] and old["down"] / old["carry"] > 0.24, (old["down"] / old["carry"], old["years"], old["ltv"], old["payPct"]))
     check("no script errors", not errs, errs[:2]); b.close()
 sys.exit(1 if bad else 0)
