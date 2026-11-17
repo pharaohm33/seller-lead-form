@@ -141,6 +141,21 @@ with sync_playwright() as p:
     check("single family keeps the 10% under asking rule (value 15% under asking is still skipped)", sf["q"] is False and any("appraisal" in w for w in sf["why"]), sf["why"])
     okv = pg.evaluate(APR, [4.8, 5.4])
     check("a middle value at or above asking is not an appraisal risk (no flag)", okv["q"] and okv["risk"] is None, okv["risk"])
+    # The Stack Method calculator inputs and the multifamily Auto Pre-LOI (every variable kept)
+    CALC = """(io) => { SCR.cfg.minDom = 0; SCR.cfg.buyer = null; SCR.cfg.agentFeePct = 2.5; const c = { address: '844 N Ogden St, Denver, CO 80218', street: '844 N Ogden St', city: 'Denver', state: 'CO', zip: '80218', price: 3750000, units: 21, type: 'Multifamily', subtype: 'Apartment Building', isMultifamily: true, brokerage: 'Panorama Commercial Group' };
+      const x = io ? scrCommercialPrice(Object.assign({}, c, { price: 2600000 }), { capLow: 6.2, capHigh: 7.0, noi: 190000 }) : scrCommercialPrice(c, { capLow: 5.3, capHigh: 6.8, noi: 205690 });
+      const inp = scrCalcInputs(x.d, x.p), b = scrCommercialPreLoi(c, x, { listingUrl: 'https://www.crexi.com/properties/1/x', brokerName: 'Mark Pyms', capLow: 5.3, capHigh: 6.8, capRuns: 3, calcLink: 'https://deal-craft-toolkit-98.lovable.app/?s=abc', noiSource: 'listing NOI' });
+      return { inp, st: x.p.holdPlan.structure, pay: x.p.holdPlan.sellerPay, loan: x.p.holdPlan.seniorLoan, carry: x.p.carryOffer, a: { assetType: b.a.assetType, sub: b.a.assetSubtype, units: b.a.units, json: JSON.parse(b.a.commercialJson), link: b.a.calcShareLink, notes: b.a.preLoiNotes, loiUrl: b.a.loiUrl }, single: scrCalcInputs({ address: 'x' }, { ready: true, hold: false }) }; }"""
+    cp = pg.evaluate(CALC, False)
+    check("calculator inputs, principal-only note: Flat Fee with the seller payment as the flat monthly payment, applied to principal, 0% carry rate, % of the contract price", cp["st"] == "principal" and cp["inp"]["paymentType"] == "Flat Fee" and cp["inp"]["flatPayment"] == round(cp["pay"]) and cp["inp"]["applyToPrincipal"] and cp["inp"]["carryRate"] == 0 and abs(cp["inp"]["dscrPct"] - round(cp["loan"] / cp["carry"] * 1000) / 10) < 0.06 and cp["inp"]["notePosition"] == "2nd Position", cp["inp"])
+    ci = pg.evaluate(CALC, True)
+    if ci["st"] == "io":
+        check("calculator inputs, interest-only note: Interest Only at the 3% note rate, no flat payment", ci["inp"]["paymentType"] == "Interest Only" and ci["inp"]["carryRate"] == 3 and ci["inp"]["flatPayment"] == 0 and not ci["inp"]["applyToPrincipal"], ci["inp"])
+    check("the calculator is for buy & hold only: a flip (no hold plan) gives no inputs", cp["single"] is None)
+    a = cp["a"]
+    check("multifamily Auto Pre-LOI: Commercial Property / Multifamily with the units, every variable kept as JSON, the calculator Share link and the LOI generator link in the notes", a["assetType"] == "Commercial Property" and a["sub"] == "Multifamily" and a["units"] == "21" and all(k in a["json"] for k in ("property", "broker", "income", "valuation", "offer", "links", "rules")) and a["link"].startswith("https://deal-craft-toolkit-98.lovable.app/") and "Stack Method calculator (Share)" in a["notes"] and a["loiUrl"].startswith("https://pharaohm33.github.io/loi-generator/"), a["notes"][-300:])
+    v = a["json"]
+    check("the saved variables include the researched cap-rate range, the value, the asking cap, the seller payment, the reserves and your fee", v["valuation"]["capLow"] == 5.3 and v["valuation"]["capHigh"] == 6.8 and v["valuation"]["valueMiddle"] > 0 and v["valuation"]["askingCapRate"] > 0 and v["offer"]["sellerMonthlyPayment"] > 0 and v["offer"]["buyerReserveMonths"] >= 6 and v["offer"]["yourFee"] > 0 and v["income"]["noiAnnual"] == 205690, v)
     # All-cash offers (offer_type on the buyer profile, or the page's Offer type): the buyer buys for cash and closes through its own double escrow (never in the LOI).
     CASH = """([price, arv, ltr, strat, buyer, mode]) => { SCR.cfg.buyer = buyer; SCR.cfg.offerMode = mode || 'carry'; SCR.cfg.minDom = 0; SCR.cfg.asset = 'sf'; SCR.cfg.strategy = strat;
       const d = { address: '1 A St, Tucson, AZ 85701', street: '1 A St', price, sqft: 1500, dom: 300 }; const f = { pwEquityPct: 100, arvLow: arv, arvHigh: arv, rentLtr: ltr, rentStr: 0, rehabLow: 20000, rehabHigh: 30000, tier: 'moderate' };

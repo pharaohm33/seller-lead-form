@@ -953,6 +953,53 @@ function scrCfNeed(P) {
   const [xl, yl] = sch[sch.length - 1]; return P * yl / xl;
 }
 
+// The inputs of the Don Ava Morby Stack Method Calculator (deal-craft-toolkit-98.lovable.app) for a buy & hold offer, so the deal can be double-checked there and its Share link saved in the CRM. Buy & hold only (null otherwise).
+// Principal-only note: Payment Type "Flat Fee" with the seller payment as the Flat Monthly Payment, applied to principal. Interest-only note: Payment Type "Interest Only" at the note rate. Percentages are of the contract price.
+function scrCalcInputs(d, p) {
+  const h = p && p.holdPlan; if (!p || !p.ready || !p.hold || !h || !p.carryOffer) return null;
+  const price = Math.round(p.carryOffer), down = Math.round(p.carryDown), annualNoi = Math.round(h.noi * 12), io = h.structure === "io", value = Math.round(p.arvMid || p.asIs || price);
+  const r1 = x => Math.round(x * 10) / 10;
+  return { address: d.address || "", units: d.units || 1, noi: annualNoi, capRate: value ? Math.round(annualNoi / value * 10000) / 100 : 0, price, appraisedValue: value,
+    carryPct: r1((price - down) / price * 100), dscrPct: r1(h.seniorLoan / price * 100), interestRate: SCR.HOLD.DSCR_RATE, amort: SCR.HOLD.DSCR_AMORT_YEARS, dscrReq: SCR.HOLD.DSCR_MIN,
+    carryRate: io ? SCR.HOLD.NOTE_RATE_IO * 100 : 0, balloonYears: p.months / 12, paymentType: io ? "Interest Only" : "Flat Fee", flatPayment: io ? 0 : Math.round(h.sellerPay || 0), applyToPrincipal: !io, notePosition: "2nd Position" };
+}
+
+// A multifamily / commercial offer as an Auto Pre-LOI (the same "Auto Pre-LOI Before Contact" tab the residential deals go to), with every variable of the offer kept: the listing, the NOI and where it came from, the researched cap-rate range and
+// what the asking price implies against it, the value, the appraisal flag, the solver's structure (carry, seller cash, LTV, balloon, seller payment, cash flow, DSCR, reserves, fee), the broker, and the links to the offer calculators
+// (the LOI generator, and the Stack Method calculator's Share link). `x` = the result of scrCommercialPrice; `extra` = { listingUrl, brokerName, brokerPhone, brokerEmail, brokerage, noiSource, capRuns, capRuns text, calcLink, calcResults, capRange: {low, high} }.
+function scrCommercialPreLoi(c, x, extra) {
+  extra = extra || {}; const p = x.p, d = x.d, f = x.f, h = p.holdPlan || {}, ca = h.cashAtClose || {}, ar = h.appraisalRisk || null;
+  const askCap = x.noi && c.price ? Math.round(x.noi / c.price * 10000) / 100 : 0, capLo = Number(extra.capLow) || null, capHi = Number(extra.capHigh) || null;
+  const vars = { property: { address: c.address, units: c.units || 0, type: c.type || "", subtype: c.subtype || "", yearBuilt: c.yearBuilt || "", sqft: c.sqft || 0, askingPrice: c.price || 0, listingUrl: extra.listingUrl || "", brokerage: extra.brokerage || c.brokerage || "" },
+    broker: { name: extra.brokerName || "", phone: extra.brokerPhone || "", email: extra.brokerEmail || "" },
+    income: { noiAnnual: x.noi, noiSource: extra.noiSource || "", listingCapRate: c.capRate || 0 },
+    valuation: { capLow: capLo, capHigh: capHi, capMid: x.capMid, capRuns: extra.capRuns || 1, capRunsDetail: extra.capRunsDetail || "", valueMiddle: x.value, valueHighSide: f.valueHigh || x.value, askingCapRate: askCap, capNeeded: ar ? Math.round(ar.capNeed * 100) / 100 : (capHi ? Math.round(capHi * (1 - SCR.HOLD.CAP_TOLERANCE) * 100) / 100 : null), appraisalLikelyLow: !!ar, appraisalUnderPct: ar ? Math.round(ar.underPct * 10) / 10 : 0 },
+    offer: { qualifies: p.qualifies, why: p.why || [], structure: h.structure || "", carryPrice: p.carryOffer, sellerCashAtClosing: p.carryDown, sellerCashPct: p.carryOffer ? Math.round(p.carryDown / p.carryOffer * 1000) / 10 : 0, balloonYears: p.months / 12, noteRatePct: (p.noteRate || 0) * 100,
+      sellerMonthlyPayment: Math.round(h.sellerPay || 0), sellerPaymentPctOfPriceYear: Math.round((h.payPct || 0) * 10000) / 100, dscrLoan: Math.round(h.seniorLoan || 0), ltvOnValue: Math.round((p.ltv || 0) * 1000) / 10, dscrLoanPayment: Math.round(h.seniorPmt || 0),
+      cashFlowMonthly: Math.round(h.cashflow || 0), cashFlowNeeded: Math.round(h.cfNeed || 0), dscr: h.dscr, buyerReserveMonths: Math.round((ca.buyerMonths || 0) * 10) / 10, buyerCashBack: Math.round(ca.buyer || 0), yourFee: Math.round(ca.wholesaler || 0), feeFormula: Math.round(ca.fee || 0),
+      agentCommission: p.agentFee || null, buyer: SCR.cfg.buyer ? SCR.cfg.buyer.buyer_company : "(the usual)" },
+    links: { loiGenerator: x.loi, stackCalculatorShare: extra.calcLink || "", stackCalculatorResults: extra.calcResults || null }, rules: { logicVersion: SCR.LOGIC_VERSION, capTolerance: SCR.HOLD.CAP_TOLERANCE, appraisalTolerance: SCR.HOLD.APPRAISAL_TOLERANCE, reserveMinMonths: SCR.HOLD.RESERVE_MIN_MONTHS, payDecentPct: SCR.HOLD.PAY_DECENT_PCT } };
+  const resumeBase = scrAnswers(d, f, p);
+  const a = Object.assign(resumeBase, { assetType: "Commercial Property", assetSubtype: "Multifamily", units: String(c.units || ""), sourceLink: extra.listingUrl || "", preLoiStrategy: "Buy & hold (multifamily / commercial, in-place NOI)",
+    askingPrice: String(c.price || ""), priceSought: String(c.price || ""), yearBuilt: String(c.yearBuilt || ""), sqft: String(c.sqft || ""), arv: String(x.value), rehabEstimate: "0",
+    priceReasoning: `Listed at ${scrMoney(c.price)}. Valued at ${scrMoney(x.value)} = NOI ${scrMoney(x.noi)} / the middle ${x.capMid}% cap rate (research range ${capLo}% to ${capHi}%, ${extra.capRuns || 1} run(s)); the asking price implies ${askCap}%.`,
+    sellerContactName: extra.brokerName || "", sellerContactPhone: extra.brokerPhone || "", sellerContactEmail: extra.brokerEmail || "", contactRole: "Realtor / listing agent", commercialJson: JSON.stringify(vars), calcShareLink: extra.calcLink || "" });
+  const lines = [`- Source: ${extra.listingUrl || "?"}   Broker: ${extra.brokerName || "?"} ${extra.brokerPhone || ""} ${extra.brokerEmail || ""} (${vars.property.brokerage})`,
+    `- NOI ${scrMoney(x.noi)}/yr (${extra.noiSource || "?"}); cap-rate research ${capLo}% to ${capHi}% (${extra.capRuns || 1} run(s)${extra.capRunsDetail ? ": " + extra.capRunsDetail : ""}), middle ${x.capMid}%, value ${scrMoney(x.value)}; the asking price implies ${askCap}%${ar ? ` and the appraisal is likely to come in low (${vars.valuation.appraisalUnderPct}% under asking): the LOI is subject to a satisfactory appraisal` : ""}`,
+    `- Offer calculators: LOI generator ${x.loi}${extra.calcLink ? `\n- Stack Method calculator (Share): ${extra.calcLink}` : ""}${extra.calcResults ? `\n- Stack calculator results: carry payment ${extra.calcResults.carryPayment || "?"}/mo, DSCR payment ${extra.calcResults.dscrPayment || "?"}/mo, net CF day 1 ${extra.calcResults.netCfDay1 || "?"}/mo, buyer reserves ${extra.calcResults.buyerReserves || "?"}` : ""}`,
+    `- ALL VARIABLES (JSON): ${JSON.stringify(vars)}`];
+  const notes = scrNotes(d, f, p, x.loi, scrResumeLink(a)) + "\n" + lines.join("\n");
+  a.preLoiNotes = notes; a.loiUrl = x.loi;
+  return { a, notes, vars };
+}
+
+async function scrSaveCommercialPreLoi(c, o, extra) {
+  const x = scrCommercialPrice(c, o); if (!x.ready) return { ok: false, error: x.why || "not priced" };
+  const b = scrCommercialPreLoi(c, x, Object.assign({ capLow: o.capLow, capHigh: o.capHigh }, extra || {}));
+  const r = await api("adminSavePreLoi", { token: sessionToken, email: SCR.AGENT_EMAIL, crmId: (extra && extra.crmId) || "", stepIndex: 19, answers: b.a });
+  return r && r.ok ? { ok: true, crmId: r.crmId, vars: b.vars } : { ok: false, error: (r && r.error) || "could not save" };
+}
+
 // Cap-rate valuation + the offer. The value is NOI / the middle of the cap-rate range Google AI gives for the same kind of property; it is both the ARV and the as-is value
 // (a rent-ready building has no rehab). Then the buy & hold solver prices the seller carryback with the listing NOI instead of rent x expenses.
 function scrCommercialPrice(c, o) {
