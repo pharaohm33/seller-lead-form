@@ -93,5 +93,18 @@ with sync_playwright() as p:
     check("senior equity security reads as senior equity", "• Security: Senior Equity Interest" in secs and "Senior Equity Interest, giving Seller" in secs and "presigned Deed in Lieu" not in secs, secs)
     allcash, _ = loi(no_sc=1, purchase_price=800000, cash_at_closing=800000)
     check("an all-cash purchase has no seller financing bullets", "Seller Financing: None" in allcash and "Balloon" not in allcash, allcash)
+
+    # all-cash offers (Red Bridge cash, closed with the buyer's own double escrow: the LOI never mentions it)
+    cash, _ = loi(autogen="cash", no_sc=1, purchase_price=800000, cash_at_closing=800000)
+    check("all cash: the Red Bridge letter, price and cash are the cash offer", cash.startswith("LETTER OF INTENT") and "Agreed Purchase Price / Seller Consideration: $800,000.00" in cash and "Cash to Seller at Closing: $800,000.00" in cash, cash)
+    check("all cash: acquiring the Property for cash, as-is, full price in cash at closing", "acquiring the Property for cash" in cash and "as-is, where-is" in cash and "full purchase price in cash at closing" in cash, cash)
+    for bad_text in ("lender", "LTV", "underwriting", "Deed in Lieu", "Seller Security", "financing transaction", "Balloon", "Interest Rate", "escrow", "assign", "resell", "end buyer"):
+        check("all cash letter does not say: " + bad_text, bad_text.lower() not in cash.lower(), cash)
+    check("all cash: subject to due diligence and definitive agreements, with the T-12 review on 5+ units", "subject to satisfactory appraisal, due diligence, satisfactory review of the Property's financials" in cash and "No Commitment to Close" in cash, cash)
+    check("all cash: costs are the buyer's customary closing costs and the agent commission, no lender costs", "Buyer will pay customary closing costs and a 2.5% agent commission." in cash, cash)
+    cash_fin, _ = loi(autogen="cash", no_sc=1, purchase_price=800000, cash_at_closing=800000, cash_financing="hard_money")
+    check("all cash with a financing choice still lists lender approval", "lender approval" in cash_fin, cash_fin)
+    other_cash, _ = loi(autogen="cash", no_sc=1, purchase_price=800000, cash_at_closing=800000, buyer_company="Don Ava Capital LLC")
+    check("all cash for another buyer keeps the classic all-cash LOI", "ALL-CASH PURCHASE TERMS" in other_cash and "LETTER OF INTENT" not in other_cash, other_cash[:200])
     b.close()
 sys.exit(1 if bad else 0)

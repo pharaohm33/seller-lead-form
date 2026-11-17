@@ -104,6 +104,42 @@ with sync_playwright() as p:
     r = pg.evaluate(BUY, ["hold", dict(rb, loi_style="", loi_variant="", show_max_ltv="", max_ltv_shown="")])
     check("blank LOI options stay out of the link (the generator's own defaults apply)", r["style"] is None and r["variant"] is None and r["show"] is None and r["ltv"] is None, r)
     check("the Don Ava profile adds no LOI options", pg.evaluate(BUY, ["hold", don])["style"] is None)
+    # All-cash offers (offer_type on the buyer profile, or the page's Offer type): the buyer buys for cash and closes through its own double escrow (never in the LOI).
+    CASH = """([price, arv, ltr, strat, buyer, mode]) => { SCR.cfg.buyer = buyer; SCR.cfg.offerMode = mode || 'carry'; SCR.cfg.minDom = 0; SCR.cfg.asset = 'sf'; SCR.cfg.strategy = strat;
+      const d = { address: '1 A St, Tucson, AZ 85701', street: '1 A St', price, sqft: 1500, dom: 300 }; const f = { pwEquityPct: 100, arvLow: arv, arvHigh: arv, rentLtr: ltr, rentStr: 0, rehabLow: 20000, rehabHigh: 30000, tier: 'moderate' };
+      const p = scrPrice(d, f), u = new URL(scrLoiLink(d, p)).searchParams, n = scrNotes(d, f, p, 'LOI', 'RESUME'); SCR.cfg.buyer = null; SCR.cfg.offerMode = 'carry';
+      return { q: p.qualifies, why: p.why, cashOnly: p.cashOnly, note: p.cashNote, cash: p.cashOffer, carry: p.carryOffer, spread: p.spread, plan: p.cashPlan, list: d.price, mao10: p.mao10, price: u.get('purchase_price'), cac: u.get('cash_at_closing'), nosc: u.get('no_sc'), auto: u.get('autogen'), fin: u.get('cash_financing'), dual: u.get('dual_offer_active'), style: u.get('loi_style'), notes: n }; }"""
+    rbc = dict(rb, loi_variant="plain", offer_type="cash"); rbo = dict(rb, loi_variant="plain", offer_type="carry_or_cash")
+    r = pg.evaluate(CASH, [330000, 360000, 2500, "hold", rb, ""])
+    check("no offer_type: the carryback offer as always (no all-cash flag, no cash-only link)", not r["cashOnly"] and r["nosc"] is None and r["price"] == str(r["carry"]), r)
+    r = pg.evaluate(CASH, [330000, 360000, 2500, "hold", rbc, ""])
+    check("offer_type cash: the offer is the cash offer, all of it at closing, with no seller note, no financing contingency and no dual offer", r["cashOnly"] and r["q"] and r["price"] == str(r["cash"]) and r["cac"] == str(r["cash"]) and r["nosc"] == "1" and r["fin"] == "none" and r["dual"] is None and r["auto"] == "1", r)
+    check("offer_type cash keeps the Red Bridge letter style in the link and the cash price is the existing cash rule (below the carry price)", r["style"] == "letter" and 0 < r["cash"] < r["carry"], r)
+    check("offer_type cash: the deal notes explain the double escrow (not in the LOI) and the spread to the Hard Money Buyer MAO", "Double escrow (not in the LOI)" in r["notes"] and "All-cash offer" in r["notes"] and abs(r["spread"] - (r["mao10"] - r["cash"])) <= 100 and "Buy & hold:" not in r["notes"] and "Room to go up" not in r["notes"], r["notes"][:600])
+    pl = r["plan"]
+    check("an all-cash offer keeps the same fee formula: your fee is at least the greater of $25,000 or 3% of value, and it is half of what is left after closing costs", pl["wholesaler"] >= max(25000, 0.03 * 360000) - 1 and abs(pl["wholesaler"] - pl["avail"] / 2) < 1, pl)
+    check("an all-cash offer keeps the same 6-month reserve: the buyer's cash back covers at least 6 months of the underwritten payments", pl["buyerMonths"] >= 6 - 1e-9 and pl["monthly"] > 0 and pl["ok"], pl)
+    check("when the usual cash price leaves too little for the fee and the reserve, the cash price comes down only as far as needed (and says so)", pl["loweredFrom"] and pl["loweredFrom"] > r["cash"] and pl["wholesaler"] - 25000 < 600 and "lowered from" in r["note"], (pl, r["note"]))
+    rich = pg.evaluate(CASH, [330000, 600000, 2500, "hold", rbc, ""])
+    check("a rich deal keeps the usual cash price (no lowering) and clears both floors by more", rich["plan"]["loweredFrom"] is None and rich["plan"]["wholesaler"] > 25000 and rich["plan"]["buyerMonths"] > 6, rich["plan"])
+    tight = pg.evaluate(CASH, [330000, 270000, 2500, "hold", rbc, ""])
+    check("the fee and the reserve would need the cash price cut by more than 15%: not qualified, and it says why", tight["q"] is False and any("more than 15% under the usual cash price" in w for w in tight["why"]), (tight["why"], tight["plan"]))
+    cflip = pg.evaluate(CASH, [600000, 900000, 0, "flip", rbc, ""])
+    check("fix & flip: the fee and the reserve (hard money interest) are held to the same floors", cflip["plan"]["wholesaler"] >= max(25000, 0.03 * (900000 - 25000)) - 1 and cflip["plan"]["buyerMonths"] >= 6 - 1e-9, cflip["plan"])
+    big = pg.evaluate(CASH, [520000, 600000, 6000, "hold", rbc, ""])
+    check("a single-family hold over $450,000 is no longer skipped for needing a cash offer when the offer is all cash", big["q"] and not any("needs a cash offer" in w for w in big["why"]) and big["cashOnly"], big)
+    check("...and is still skipped as a carryback-only offer", pg.evaluate(CASH, [520000, 600000, 6000, "hold", rb, ""])["q"] is False)
+    weak = pg.evaluate(CASH, [330000, 280000, 2500, "hold", rbc, ""])
+    check("all cash does not test the carryback structure: the appraisal gap and the cash flow rules do not skip it", not any(("appraisal" in w or "cash flow" in w or "DSCR" in w) for w in weak["why"]), weak["why"])
+    co_weak = pg.evaluate(CASH, [330000, 280000, 2500, "hold", rbo, ""]); co_fine = pg.evaluate(CASH, [330000, 360000, 2500, "hold", rbo, ""])
+    check("carry_or_cash: a carryback that works stays a carryback offer; one that does not becomes an all-cash offer", co_fine["cashOnly"] is False and co_fine["q"] and co_weak["cashOnly"] is True and co_weak["nosc"] == "1" and "does not work" in co_weak["note"], (co_fine["cashOnly"], co_weak))
+    low_eq = pg.evaluate("""() => { SCR.cfg.buyer = null; SCR.cfg.offerMode = 'cash'; SCR.cfg.minDom = 0; SCR.cfg.asset = 'sf'; SCR.cfg.strategy = 'hold'; const d = { address: '1 A St, Tucson, AZ 85701', street: '1 A St', price: 330000, sqft: 1500, dom: 300 };
+      const f = { pwEquityPct: 40, arvLow: 360000, arvHigh: 360000, rentLtr: 2500, rentStr: 0, rehabLow: 20000, rehabHigh: 30000, tier: 'moderate' }; const p = scrPrice(d, f); SCR.cfg.offerMode = 'carry'; return { q: p.qualifies, why: p.why, cashOnly: p.cashOnly }; }""")
+    check("the other rules still apply to an all-cash offer (owner equity under the minimum skips it)", low_eq["q"] is False and any("owner equity" in w for w in low_eq["why"]), low_eq)
+    page = pg.evaluate(CASH, [330000, 360000, 2500, "hold", None, "cash"])
+    check("the page's Offer type 'All cash only (double escrow)' does the same with no buyer profile option", page["cashOnly"] and page["nosc"] == "1" and page["price"] == str(page["cash"]), page)
+    flipc = pg.evaluate(CASH, [600000, 900000, 0, "flip", rbc, ""])
+    check("fix & flip: an all-cash offer at the cash price too", flipc["cashOnly"] and flipc["nosc"] == "1" and flipc["price"] == str(flipc["cash"]), flipc)
     # The seller's agent commission paid by the buyer (cfg.agentFeePct): a real closing cost, optional, dropped when the deal only fails because of it.
     AG = """([price, arv, ltr, str_, pct, strat]) => { SCR.cfg.agentFeePct = pct; SCR.cfg.minDom = 0; SCR.cfg.asset = 'sf'; SCR.cfg.strategy = strat;
       const d = { address: '1 A St, Tucson, AZ 85701', street: '1 A St', price, sqft: 1500, dom: 300 }; const f = { pwEquityPct: 100, arvLow: arv, arvHigh: arv, rentLtr: ltr, rentStr: str_, rehabLow: 20000, rehabHigh: 30000, tier: 'moderate' };
