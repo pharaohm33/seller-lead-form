@@ -6161,8 +6161,19 @@ function preLoiDetailHtml(e) {
   const changes = Object.keys(Object.assign({}, origMap, updMap)).filter(k => origMap[k] !== updMap[k]).map(k => [label(k), `${origMap[k] === undefined ? "(not set)" : origMap[k]}  →  ${updMap[k] === undefined ? "(removed)" : updMap[k]}`]);
   let hold = []; try { hold = a.holdLog ? JSON.parse(a.holdLog) : []; } catch (_) { hold = []; }
   const holdKeys = []; hold.forEach(h => Object.keys(h).forEach(k => { if (holdKeys.indexOf(k) < 0) holdKeys.push(k); }));
-  const skip = { preLoiNotes: 1, holdLog: 1, loiUrl: 1 };
+  const skip = { preLoiNotes: 1, holdLog: 1, loiUrl: 1, commercialJson: 1 };
   const answerPairs = Object.keys(a).filter(k => !skip[k] && k.charAt(0) !== "_" && a[k] !== "" && a[k] !== null && a[k] !== undefined).sort().map(k => [human(k), a[k]]);
+  // Multifamily / commercial offers made by the browser agent keep every variable of the offer (listing, broker, NOI, cap-rate research, Google AI value check, value used, structure, the tests, the calculator links).
+  // Shown when they were produced; a fix & flip or other deal without them simply has no such section.
+  let cj = null; try { cj = a.commercialJson ? JSON.parse(a.commercialJson) : null; } catch (_) { cj = null; }
+  const pairsOf = o => Object.keys(o || {}).filter(k => o[k] !== "" && o[k] !== null && o[k] !== undefined).map(k => [human(k), o[k]]);
+  const linkRow = (t, u) => u ? `<div style="margin:4px 0;overflow-wrap:anywhere;"><strong>${esc(t)}:</strong> <a href="${esc(u)}" target="_blank" rel="noopener">${esc(String(u).length > 90 ? String(u).slice(0, 90) + "\u2026" : u)}</a></div>` : "";
+  const calcLine = r => r ? `<div class="small-muted" style="margin:0 0 6px 12px;">${esc(["carry payment " + (r.carryPayment || "?") + "/mo", "DSCR payment " + (r.dscrPayment || "?") + "/mo", "net CF day 1 " + (r.netCfDay1 || "?") + "/mo", "buyer reserves " + (r.buyerReserves || "?"), "verdict " + (r.verdict || "?")].join(" | "))}</div>` : "";
+  const commercial = cj ? `<details open style="margin-top:10px;"><summary style="cursor:pointer;font-weight:600;">Multifamily offer details (every variable)</summary><div style="margin-top:8px;">
+      <strong style="font-size:13px;">Property</strong>${grid(pairsOf(cj.property))}<strong style="font-size:13px;">Broker</strong>${grid(pairsOf(cj.broker))}<strong style="font-size:13px;">Income</strong>${grid(pairsOf(cj.income))}
+      <strong style="font-size:13px;">Value (cap-rate research, Google AI value check, appraisal)</strong>${grid(pairsOf(cj.valuation))}<strong style="font-size:13px;">Offer and tests</strong>${grid(pairsOf(cj.offer))}
+      <strong style="font-size:13px;">Offer calculators</strong>${linkRow("Stack Method calculator, likely appraisal", cj.links && cj.links.stackCalculatorShare)}${calcLine(cj.links && cj.links.stackCalculatorResults)}${linkRow("Stack Method calculator, appraises at asking", cj.links && cj.links.stackCalculatorShareAtAsking)}${calcLine(cj.links && cj.links.stackCalculatorResultsAtAsking)}${linkRow("LOI generator", cj.links && cj.links.loiGenerator)}
+      <strong style="font-size:13px;">Rules in force when it was priced</strong>${grid(pairsOf(cj.rules))}</div></details>` : "";
   const sec = (title, body, open) => `<details ${open ? "open" : ""} style="margin-top:10px;"><summary style="cursor:pointer;font-weight:600;">${esc(title)}</summary><div style="margin-top:8px;">${body}</div></details>`;
   const facts = [["Status", e.status ? (PRELOI_BADGE[e.status] || [e.status])[0] : ""], ["Updated", e.updatedAt ? formatDate(e.updatedAt) : ""], ["Property", [e.street, e.city, e.state, e.zip].filter(Boolean).join(", ")], ["Asking", e.askingPrice],
     ["Offer strategy", a.preLoiStrategy], ["Rental income", a.rentalIncomeMethod], ["ARV", a.arv], ["Rehab", a.rehabEstimate], ["Seller / realtor", [e.sellerContactName, e.sellerContactPhone, e.sellerContactEmail].filter(Boolean).join(" · ")]].filter(([, v]) => v);
@@ -6174,6 +6185,7 @@ function preLoiDetailHtml(e) {
       <textarea data-pd-ul-input rows="2" style="width:100%;" placeholder="https://pharaohm33.github.io/loi-generator/?...">${esc(updUrl)}</textarea>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin:6px 0;align-items:center;"><button type="button" class="btn primary" data-pd-ul-save>Save updated LOI</button>${updUrl ? `<button type="button" class="btn secondary" data-pd-ul-clear>Clear</button>` : ""}<span class="small-muted" data-pd-ul-msg></span></div>
       ${updUrl ? `<strong style="font-size:13px;">What changed from the generated LOI (${changes.length})</strong>${changes.length ? grid(changes) : `<p class="small-muted">No variable differs from the generated link.</p>`}` : ""}`, true)}
+    ${commercial}
     ${sec("Underwriting notes (everything that led to the offer)", `<pre style="white-space:pre-wrap;user-select:text;margin:0;font-size:13px;">${esc(a.preLoiNotes || "No notes saved on this lead.")}</pre>`, true)}
     ${sec(`LOI generator variables (${params.length})`, grid(params), true)}
     ${hold.length ? sec(`Buy & hold solver attempts (${hold.length})`, `<div style="overflow-x:auto;"><table class="crm-table"><thead><tr>${holdKeys.map(k => `<th>${esc(k)}</th>`).join("")}</tr></thead><tbody>${hold.map(h =>
