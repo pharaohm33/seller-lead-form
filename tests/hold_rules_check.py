@@ -125,6 +125,22 @@ with sync_playwright() as p:
     check("a seller down payment asked for keeps its place over the payment goal (35% asked: the down is not traded for payment)", (not ask["q"]) or abs(ask["down"] / ask["carry"] - 0.35) < 0.011 or ask["down"] / ask["carry"] < 0.35, ask)
     capped = [pg.evaluate(RUN, [pr, ar, rent, 0, 0, None, "hold"]) for pr, ar, rent in [(250000, 270000, 2200), (330000, 360000, 2800), (400000, 440000, 3200)]]
     check("the monthly payment never goes over the 3% a year target (it stops there even when there is more cash flow room)", all((not r["q"]) or not r.get("pay") or r["pay"] <= r["carry"] * 0.03 / 12 + 50.01 for r in capped), [(r["carry"], r.get("pay")) for r in capped])
+    # Appraisal and the researched cap-rate RANGE: a commercial deal goes on as long as the cap rate the asking price implies (NOI / asking) is within 20% of the HIGHEST cap rate in the range (range 5% to 6%: at least 4.8%), knowing the appraisal is likely to come in low; the contingency stays in the LOI. Single family keeps the 10% under asking rule.
+    APR = """([capLow, capHigh]) => { SCR.cfg.minDom = 0; SCR.cfg.buyer = null; const c = { address: '844 N Ogden St, Denver, CO 80218', street: '844 N Ogden St', city: 'Denver', state: 'CO', zip: '80218', price: 3750000, units: 21, isMultifamily: true };
+      const x = scrCommercialPrice(c, { capLow, capHigh, noi: 205690 }); const p = x.p, h = p.holdPlan; const u = new URL(x.loi).searchParams;
+      return { q: p.qualifies, why: p.why, value: x.value, risk: h.appraisalRisk, apprContingency: u.get('appraisal_contingency'), note: scrHoldText(p), down: p.carryDown / p.carryOffer }; }"""
+    hi = pg.evaluate(APR, [5.3, 6.8])
+    check("range 5.3% to 6.8%: the asking price implies 5.49% (needs 5.44% = 80% of 6.8%), the middle value $3.4M is under asking: the deal goes on, flagged as likely to come in low, with the appraisal contingency on in the LOI", hi["q"] and hi["value"] < 3750000 and hi["risk"] and abs(hi["risk"]["capNeed"] - 5.44) < 0.005 and hi["apprContingency"] == "on" and "LIKELY TO COME IN LOW" in hi["note"], hi)
+    lo = pg.evaluate(APR, [7.0, 7.5])
+    check("range 7% to 7.5%: the asking price implies 5.49%, under the 6.00% needed (80% of 7.5%): skipped, and it says why", lo["q"] is False and any("under the 6.00% needed" in w for w in lo["why"]), lo["why"])
+    one = pg.evaluate(APR, [5.65, 6.86])
+    check("range 5.65% to 6.86%: needs 5.488% and the asking price implies 5.485%: the same at two decimals (5.49%), so it goes on (rounding is left open, a deal is not skipped by a hair)", one["q"] and one["risk"] is not None, one["why"])
+    far = pg.evaluate(APR, [6.0, 7.0])
+    check("range 6% to 7%: needs 5.60% and the asking price implies 5.49%: a real miss is still skipped", far["q"] is False and any("under the 5.60% needed" in w for w in far["why"]), far["why"])
+    sf = pg.evaluate(RUN, [330000, 280000, 2500, 0, 0, None, "hold"])
+    check("single family keeps the 10% under asking rule (value 15% under asking is still skipped)", sf["q"] is False and any("appraisal" in w for w in sf["why"]), sf["why"])
+    okv = pg.evaluate(APR, [4.8, 5.4])
+    check("a middle value at or above asking is not an appraisal risk (no flag)", okv["q"] and okv["risk"] is None, okv["risk"])
     # All-cash offers (offer_type on the buyer profile, or the page's Offer type): the buyer buys for cash and closes through its own double escrow (never in the LOI).
     CASH = """([price, arv, ltr, strat, buyer, mode]) => { SCR.cfg.buyer = buyer; SCR.cfg.offerMode = mode || 'carry'; SCR.cfg.minDom = 0; SCR.cfg.asset = 'sf'; SCR.cfg.strategy = strat;
       const d = { address: '1 A St, Tucson, AZ 85701', street: '1 A St', price, sqft: 1500, dom: 300 }; const f = { pwEquityPct: 100, arvLow: arv, arvHigh: arv, rentLtr: ltr, rentStr: 0, rehabLow: 20000, rehabHigh: 30000, tier: 'moderate' };
