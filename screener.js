@@ -36,7 +36,7 @@ const SCR = {
   // lowers the LTV (and, only when the loan cannot fund the cash at closing, the seller's cash) until the DSCR, the cash flow floor, the buyer's reserves and the buyer profit all work,
   // and takes the soonest balloon (5 to 15 years) that does. Single family: proforma rent, long-term or short-term, whichever cash flows more. Multifamily / commercial: the in-place NOI.
   HOLD: { LTV_START: 0.75, LTV_MIN: 0.30, LTV_STEP: 0.005, DSCR_RATE: 8, DSCR_AMORT_YEARS: 30, DSCR_MIN: 1.25, DOWN_START: 0.50, DOWN_MIN: 0.10, DOWN_STEP: 0.005,
-          BALLOON_MIN_YEARS: 1, BALLOON_MAX_YEARS: 15, SALE_EXIT_REQUIRED: true, DOWN_TARGET: 0.35, DOWN_TRADE_YEARS: 2, ACQ_SPLIT: 0.50, NOTE_RATE_IO: 0.03, MIN_NOTE_PMT: 250, PRICE_BUMP: 0.10, ALLOW_PRICE_CHANGES: false, NOI_GROWTH: 0.02,
+          BALLOON_MIN_YEARS: 3, BALLOON_MAX_YEARS: 15, SALE_EXIT_REQUIRED: true, DOWN_TARGET: 0.35, DOWN_TRADE_YEARS: 2, ACQ_SPLIT: 0.50, NOTE_RATE_IO: 0.03, MIN_NOTE_PMT: 250, PRICE_BUMP: 0.10, ALLOW_PRICE_CHANGES: false, NOI_GROWTH: 0.02,
           RESERVE_MIN_MONTHS: 6, RESERVE_TARGET_MONTHS: 9, CAP_TOLERANCE: 0.20, PAY_DECENT_PCT: 0.01, PAY_DECENT_WEIGHT: 16, PAY_EXTRA_WEIGHT: 4, PAY_TARGET_PCT: 0.03, WHOLESALE_MIN: 25000, WHOLESALE_PCT: 0.03, MIN_PROFIT_PCT_OF_PRICE: 0.10, MIN_PROFIT_PCT_SHORT: 0.05, SHORT_BALLOON_UNDER_YEARS: 5, APPRAISAL_TOLERANCE: 0.10 },
   GEN: { esc1: 0.02, esc2: 0.015, pts: 0.02, agent: 0,   /* no realtor commission paid at closing */ acq: 0.50, taf: 0.025, sellerClosingShare: 0.5 },
   // Full rehab / gut: cash back to the buyer at closing = the full holding cost (24 months of hard money
@@ -216,7 +216,8 @@ function scrPriceCore(d, f) {
   const mao10 = scrRound(suite.maoHardMoney10 || 0);                  // Hard Money Buyer MAO (10% down): the fix & flip seller carry price
   let cashOffer, carryOffer = 0, carryDown = 0, mao, ltv = 0, ltvNote = "";
   const asIs = arvMid - rehab;
-  let months = f.gut && !hold ? 24 : 12;
+  const longFlip = !hold && !land && (f.gut || tier === "heavy");               // fix & flip term: 1 year for a light or medium rehab / value-add, 2 years for a heavy one or a full gut
+  let months = longFlip ? 24 : 12;
   let hmLoan = 0, hmMonthly = 0, gutPlan = null, modelCarry = null, modelCash = null, profit = null, priceNote = "", ceiling = null;
   let holdPlan = null, holdLog = null, noteRate = 0, monthlyPrincipal = 0, devNote = "", holdWhy = [];
   if (land) {
@@ -241,7 +242,7 @@ function scrPriceCore(d, f) {
         const cashRaw = scrRound((hold ? SCR.HOLD_CASH_PCT : SCR.CASH_PCT_OF_CARRY) * carry), cashCapped = mao > 0 && cashRaw > scrRound(mao);
         const cash = cashCapped ? scrRound(mao) : cashRaw;
         const baseDown = scrRound((scrDownTarget(hold) || (hold ? SCR.HOLD_DOWN_PCT : SCR.CARRY_DOWN)) * carry), dMin = scrRound(SCR.MIN_SELLER_CASH_PCT * carry);
-        const targetFor = loan => Math.max(f.gut && !hold ? loan * SCR.HM_RATE / 100 / 12 * termMonths + buffer : SCR.CASHBACK_PCT * carry, hold ? 0 : loan * SCR.HM_RATE / 100 / 12 * SCR.FLIP_RESERVE_MONTHS);   // a flip: the buyer keeps at least 6 months of the hard money interest in reserve
+        const targetFor = loan => Math.max(longFlip ? loan * SCR.HM_RATE / 100 / 12 * termMonths + buffer : SCR.CASHBACK_PCT * carry, hold ? 0 : loan * SCR.HM_RATE / 100 / 12 * SCR.FLIP_RESERVE_MONTHS);   // a flip: the buyer keeps at least 6 months of the hard money interest in reserve
         const gap = (r, cac) => scrModel(carry, cac, asIs * r, asIs).cashBack - targetFor(asIs * r);
         const minProfit = Math.max(SCR.MIN_PROFIT_PER_YEAR * years, SCR.MIN_PROFIT_PCT_OF_PRICE * carry);
         // Smallest LTV at which buyer cash back reaches its target for a given seller cash at closing (null = even the max LTV can't).
@@ -513,7 +514,7 @@ function scrPriceCore(d, f) {
     modelCarry = hold ? { closing: c.closing, cashBack: c.B, wholesaler: c.W, sellerNet: c.down - c.closing * SCR.GEN.sellerClosingShare, acq: c.W } : scrModel(carryOffer, carryDown, hmLoan, asIs);
     modelCash = scrModel(cashOffer, cashOffer, hmLoan, asIs);
     profit = { sale: c.profit, min: c.minProfit, ok: hold ? c.profit >= c.minProfit : c.feasible, years, withCashBack: c.profit + modelCarry.cashBack };
-    if (f.gut && !hold) gutPlan = { holding: hmMonthly * months, buffer, target: modelCarry.cashBack, cashBack: modelCarry.cashBack, estClosing: modelCarry.closing, shortfall: 0 };
+    if (longFlip) gutPlan = { holding: hmMonthly * months, buffer, target: modelCarry.cashBack, cashBack: modelCarry.cashBack, estClosing: modelCarry.closing, shortfall: 0 };
   }
   const why = [], structWhy = [];                                     // structWhy: the reasons that are about the seller carryback structure (an all-cash offer does not need it)
   const sw = t => { why.push(t); structWhy.push(t); };

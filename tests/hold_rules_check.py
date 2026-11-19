@@ -256,5 +256,13 @@ with sync_playwright() as p:
     check("the seller down payment is the most the rules allow: within 1 point of a much finer search on every deal (it used to be up to 9 points less)", all(r["sol"]["q"] and r["sol"]["dp"] * 100 >= r["best"] - 1.0 for r in aud), [(r["d"], round(r["sol"]["dp"] * 100, 1), r["best"]) for r in aud])
     old = run(260000, 260000, 2300, 0)
     check("a deal that used to get 17.5% down (soonest balloon first) now gets more: a slightly longer balloon with a lower loan LTV gives the seller more cash", old["q"] and old["down"] / old["carry"] > 0.24, (old["down"] / old["carry"], old["years"], old["ltv"], old["payPct"]))
+    # 2026-11-18: buy & hold balloons are never shorter than 3 years (wiggle room); fix & flips: 1 year for light / moderate, 2 years for heavy rehab or a full gut
+    mf = run(2800000, 3300000, 0, 0, 225000, 20)
+    terms3 = [run(330000, 360000, 2500, 5200), run(330000, 360000, 2500), run(300000, 318000, 1900), run(260000, 260000, 2300, 0), mf]
+    check("a buy & hold balloon is never shorter than 3 years (single family, thin, old, multifamily)", all(r["years"] >= 3 for r in terms3 if r["q"]), [(r["years"]) for r in terms3])
+    FLIP = """([tier, gut]) => { SCR.cfg.minDom = 0; SCR.cfg.asset = 'sf'; SCR.cfg.strategy = 'flip'; const d = { address: '1 A St, Tucson, AZ 85701', street: '1 A St', price: 250000, sqft: 1500, dom: 300 };
+      const f = { pwEquityPct: 100, arvLow: 400000, arvHigh: 400000, rentLtr: 0, rentStr: 0, rehabLow: 60000, rehabHigh: 60000, tier: tier, gut: gut }; const p = scrPrice(d, f); return { months: p.months }; }"""
+    fl = {k: pg.evaluate(FLIP, [t, g])["months"] for k, (t, g) in {"light": ("light", False), "moderate": ("moderate", False), "heavy": ("heavy", False), "gut": ("moderate", True)}.items()}
+    check("fix & flip term: 12 months for light / moderate rehab, 24 months for heavy rehab or a full gut", fl == {"light": 12, "moderate": 12, "heavy": 24, "gut": 24}, fl)
     check("no script errors", not errs, errs[:2]); b.close()
 sys.exit(1 if bad else 0)
