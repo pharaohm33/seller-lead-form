@@ -120,5 +120,11 @@ with sync_playwright() as p:
         check("blue section title: " + sec, cols.get(sec) == rgb("#2c5282"), cols.get(sec))
     check("the plain wording's Seller Security title is blue too", html(loi_variant="plain").get("Seller Security") == rgb("#2c5282"))
     check("the header lines and the note bullets stay black bold or plain (only the section titles are blue)", cols.get("Seller: ______________________") not in (rgb("#2c5282"), rgb("#1a365d")))
+    # 2026-11-24: the appraisal floor (the lowest appraisal the offer works at) is the appraisal contingency in the letter
+    fl = loi(appraisal_floor=1783000)[0]
+    check("appraisal_floor: the letter's contingency is a satisfactory appraisal at or above that number", "The transaction remains subject to satisfactory appraisal at or above $1,783,000.00, underwriting, due diligence, lender approval" in fl, fl[-900:])
+    check("no appraisal_floor: the wording stays 'satisfactory appraisal'", "subject to satisfactory appraisal, underwriting" in sample and "at or above" not in sample)
+    off = loi(appraisal_floor=1783000, appraisal_contingency="off")[0]
+    check("appraisal contingency off: no appraisal wording even with a floor", "appraisal at or above" not in off and "satisfactory appraisal" not in off, off[-700:])
     b.close()
 sys.exit(1 if bad else 0)

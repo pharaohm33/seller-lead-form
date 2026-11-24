@@ -660,6 +660,7 @@ function scrLoiLink(d, p, extra) {
     if (hp && hp.rentKnown && hp.noi > 0) q.noi_direct = Math.round(hp.noi * 12);
   }
   if (p.agentFee && p.agentFee.pct > 0) { q.loi_agent_fee = p.agentFee.pct; q.loi_agent_fee_type = "pct"; }       // the agent commission is paid by the buyer, on top of the seller's cash
+  if (p.holdPlan && p.holdPlan.appraisalNeeded) q.appraisal_floor = Math.round(p.holdPlan.appraisalNeeded);       // the appraisal the deal needs (letter style): the LOI says "satisfactory appraisal at or above" that number
   // The buyer on the offer and the acquisition correspondent, when a buyer profile is chosen (the browser agent's Buyer setting; blank = the usual: Don Ava Capital LLC with Suede Buffalo LLC as the correspondent on a
   // buy & hold, Suede Buffalo LLC as the direct buyer on a flip). A blank correspondent name means no correspondent.
   const by = SCR.cfg.buyer;
